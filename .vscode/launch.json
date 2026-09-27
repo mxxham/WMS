@@ -6,7 +6,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["tsx", "src/cli.ts"],
+      "runtimeArgs": ["tsx", "lib/allocator/cli.ts"],
       "args": [
         "data/Warehouse_Management_System_15_September_2026_.xlsx",
         "--out", "out",
@@ -21,7 +21,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["tsx", "src/cli.ts"],
+      "runtimeArgs": ["tsx", "lib/allocator/cli.ts"],
       "args": ["${file}", "--out", "out"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",

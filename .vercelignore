@@ -1,0 +1,9 @@
+# Never upload secrets or local backups
+.env*
+!.env.example
+.vercel.bak-*
+
+# Local data and run output
+data/
+out/
+out-baseline/

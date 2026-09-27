@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-paper text-steel font-sans antialiased; }
+  :focus-visible { @apply outline outline-2 outline-offset-2 outline-ckb; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+}
+@layer components {
+  .tabular { font-variant-numeric: tabular-nums; }
+}

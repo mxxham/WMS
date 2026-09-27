@@ -3,8 +3,8 @@
   "tasks": [
     { "label": "Setup (npm install)", "type": "shell", "command": "npm install", "problemMatcher": [] },
     { "label": "Generate picklist", "type": "shell", "command": "npm run allocate", "group": { "kind": "build", "isDefault": true }, "problemMatcher": [] },
-    { "label": "Start web app", "type": "shell", "command": "npm run web", "isBackground": true, "problemMatcher": [] },
-    { "label": "Rebuild web bundle only", "type": "shell", "command": "npm run build:web", "problemMatcher": [] },
-    { "label": "Typecheck", "type": "shell", "command": "npm run typecheck && npx tsc -p tsconfig.web.json", "problemMatcher": ["$tsc"] }
+    { "label": "Start web app", "type": "shell", "command": "npm run dev", "isBackground": true, "problemMatcher": [] },
+    { "label": "Test", "type": "shell", "command": "npm test", "group": "test", "problemMatcher": [] },
+    { "label": "Typecheck", "type": "shell", "command": "npm run typecheck", "problemMatcher": ["$tsc"] }
   ]
 }

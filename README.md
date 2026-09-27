@@ -1,446 +1,237 @@
-# FEFO Allocator, Pickface Replenishment & Movement Report
+# CKB Warehouse — PT Cipta Krida Bahari, WSM SUB 2 Surabaya
 
-Takes the daily WMS workbook (stock on hand + `Schedule of the day`) and produces:
+Sistem label barcode lokasi bin, scan, visualisasi stok 3D, **alokasi FEFO, picklist, dan eksekusi wave** untuk gudang pelumas Shell — satu aplikasi, satu database, satu ledger stok.
+Next.js 15 (App Router) · TypeScript · Supabase (Postgres + Auth + RLS) · Tailwind + komponen gaya shadcn/ui · SheetJS · bwip-js · pdf-lib · jsPDF · React Three Fiber · html5-qrcode.
 
-1. **Outbound picklists** under strict FEFO, travel-sorted.
-2. **Bin-to-bin pickface replenishment** — tops up each SKU's dedicated pick
-   bin from reserve stock, using the *exact same* FEFO + tie-break rule as
-   outbound picking.
-3. **A movement report** — one ledger of everything that moved, from what item
-   to where: every pick (bin → shipment) and every replenishment (reserve bin
-   → pickface bin).
-
-Shortages and data exceptions are reported, never silently swallowed.
-
-TypeScript / Node 20+. No framework, no PHP — the allocation engine is a pure
-function, so it drops straight into `k-one-v2` (NestJS) later without a
-rewrite. Stock can live either in the daily WMS workbook (default) or in a
-**Supabase / PostgreSQL database** (see [Database mode](#database-mode-supabase--postgresql)).
-There are two ways to run it:
-
-**CLI** (writes files to disk):
-```bash
-npm install
-npm run allocate
-```
-
-**Web app** (runs the identical engine in the browser — drag in a workbook, get
-tables and downloads, nothing leaves the tab):
-```bash
-npm run web
-```
-Then open the printed `http://localhost:5173` link. See `QUICKSTART.md`.
-
-Output: `picklist_<date>.xlsx` (Picklist / Summary / Shortage / Exceptions /
-**Replenishment** / **Replenishment Shortage** / **Movement Report**) and
-`picklist_<date>.html` (A4 print sheet, one page per outbound task).
+Proyek ini gabungan dua proyek: **Bin Locator** (fase 1–6) dan **FEFO allocator** (dulu repo `fefo-allocator`, sekarang fase 7 di `lib/allocator/`). Aturan alokasi lengkap: **`docs/ALLOCATOR.md`**. Status verifikasi ada di bagian **Yang sudah diuji**.
 
 ---
 
-## The rules, in the order they are applied
+## 1. Konfirmasi dulu sebelum go-live
 
-Per demand line (one shipment + one material; multiple SAP orders for the same
-shipment/material are merged and their order numbers kept for traceability):
+Nilai berikut **asumsi**. Ubah di file/menu yang disebut, jangan di banyak tempat.
 
-1. **Eligibility.** A bin is pickable only if it is a rack location
-   (`C[A-G]dd[A-E]dd`), status `Aktif`, qty > 0, not blocked, and has at least
-   `minRemainingShelfLifeDays` of life left at the run date. `STAGING`,
-   `STAGING_INB` and `Quarantine` are never picked from.
-2. **FEFO.** The earliest expiry date still on hand is served first. No bin with
-   a later expiry is touched while stock of an earlier one remains. This is
-   absolute — every other rule only operates *inside* one expiry date.
-3. **Tie-break inside the expiry date** (this is where handling cost lives):
-   - need ≥ 1 pallet → take a **sealed full pallet**, nearest along the pick path
-     (forklift move, no touching of cartons);
-   - need < 1 pallet → take from an **already-open pallet**, *best fit*: the
-     smallest open bin that still covers the need, so fragments get cleared out
-     of the rack instead of accumulating;
-   - only if no open pallet of that batch exists is a sealed pallet broken, and
-     the line is flagged `breaksPallet` / `CASE*` on the sheet.
-   - Equal otherwise → the bin closest along the route.
-4. **Repeat** until the line is filled; any balance becomes a shortage with a
-   reason: `ALREADY_STAGED` (stock is already in the staging lane — that
-   shipment was picked earlier), `BLOCKED_SHELF_LIFE`, or `NO_STOCK`.
-
-Quantities are in **cartons (CAR)** throughout, matching SAP `Delivery quantity`
-and WMS `Qty`. `UPP` is cartons per pallet, read from the WMS row and falling
-back to `MASTER DATA`.
-
-### Pickface replenishment — the bin-to-bin part
-
-Run **after** outbound allocation, against whatever stock is left once today's
-orders are reserved, so replenishment never takes a carton an order needs.
-
-- **Pickface bin.** One dedicated pick-from bin per SKU. Without an admin
-  assignment (`config.pickfaceOverrides`), it's derived automatically as
-  whichever bin currently holding that SKU sits earliest on the pick path —
-  everything else of that SKU is reserve stock. This mirrors your own design
-  (a permanent per-SKU CRUD assignment later); the auto-derivation is just a
-  sensible starting point until that exists.
-- **Trigger.** A pickface is topped up when its on-hand falls below its
-  target level (default: one full pallet, `UPP` cartons — configurable to a
-  flat number). If `replenishCoverPendingDemand` is on (default), the target
-  also rises to cover today's outbound demand for that SKU, so a big order
-  doesn't strand the picker mid-pick.
-- **Source selection — identical rule to outbound picking.** Earliest expiry
-  first; a whole-pallet need takes a sealed pallet nearest on the route; a
-  loose remainder takes from an already-open pallet, best fit, before a sealed
-  one is ever broken. This is literally the same function
-  (`binselect.ts: selectNextBin`), not a re-implementation — a pickface never
-  gets stock out of FEFO order.
-- **A pickface bin is never a replenishment source.** It's topped up, not
-  drawn from, even if it happens to be sitting on stock of another SKU.
-
-### Movement report — what moved, from what item to where
-
-One combined, chronological ledger:
-
-| Seq | Type | Material | From | To | Qty | Shipment |
-|---|---|---|---|---|---|---|
-| 1 | REPLEN | 550044709 | CB02E02 | CB20D01 (pickface) | 48 | — |
-| 2 | PICK | 550044709 | CB20D01 | STAGING → 109661414 | 44 | 109661414 |
-
-Replenishment rows come first (stock lands on the pickface before the pick
-that needs it), then picks, in pick-sequence order. This is the audit trail
-for "what did the picklist do to the WMS sheet" — every row is a real bin
-quantity change, traceable to a SKU, a batch, and an expiry date.
-
-### Pick path
-
-Picklists are sorted by travel order, not by SKU: aisles in configured sequence,
-**serpentine** (every second aisle walked back-to-front, no empty return leg),
-then ground level first, then position. Each line carries a 2-digit check digit
-derived from the location code for scan verification.
-
-Forklift work (full pallets) and handpick work (loose cartons) are emitted as
-**separate picklists per shipment** (`-FL` / `-HP`), so one operator isn't
-switching equipment mid-run. Set `splitPalletAndCaseTasks: false` for one
-combined sheet.
-
----
-
-## Result on the 15 September workbook
-
-| Outbound picking | |
-|---|---|
-| Eligible rack bins | 1,751 |
-| Demand | 73 lines / 17 shipments / 4,800 cartons |
-| Allocated | 4,730 cartons — **98.54 %** fill |
-| Pick instructions | 206 (100 full-pallet, 106 case) |
-| Sealed pallets opened | 26 |
-| Picklists | 32 |
-| Shortages | 4 lines / 70 cartons — all `ALREADY_STAGED` |
-| FEFO violations (audited) | **0** |
-
-| Pickface replenishment | |
-|---|---|
-| Pickfaces evaluated | 92 |
-| Pickfaces replenished | 35 |
-| Cartons moved | 3,564 (87 pallet moves, 40 case moves) |
-| Sealed pallets opened | 18 |
-| Replenishment shortages | 31 SKUs with no reserve stock left to top up from |
-| FEFO violations (audited) | **0** — and **0** moves ever draw from a pickface bin |
-
-The four outbound shortages are materials already sitting in `STAGING`
-(550049044, 550074326, 550024986, 550025055) — those shipments were picked
-before the snapshot was taken. The allocator says so explicitly rather than
-reporting a false stock-out.
-
-One bin was rejected as expired, and 8 lines legitimately span more than one
-expiry date because FEFO drained the oldest batch first.
-
----
-
-## Layout
-
-```
-src/
-  types.ts                    domain model
-  config.ts                   every business rule, one place
-  binselect.ts                the FEFO bin-choice rule — shared by picking AND replenishment
-  allocator.ts                outbound allocation, built on binselect.ts
-  pickface.ts                 derives each SKU's dedicated pickface bin
-  replenishment.ts            bin-to-bin pickface top-up, built on binselect.ts
-  movement.ts                 combines picks + replenishment into one audit ledger
-  picklist.ts                 task grouping, splitting, sequencing
-  pickpath.ts                 location parsing, serpentine ordering, check digit
-  ledger.ts                   physical-identity Sisa ledger (location+sku+batch+expiry)
-  adapters/excel-input.ts     workbook → domain (Node/ExcelJS; column names declared here only)
-  adapters/excel-output.ts    → picklist workbook (Node/ExcelJS)
-  adapters/html-output.ts     → A4 print sheet (framework-agnostic, used by both CLI and web)
-  adapters/database-stock.ts  DB stock rows → StockBin[] (the allocator's third input adapter)
-  adapters/wms-importer.ts    workbook → import preview → initial_import RPC
-  lib/supabase.ts             server (service key) + browser (publishable key) clients
-  lib/errors.ts               pipe-delimited SQL codes → readable WmsError
-  repository/                 typed repositories — reads are selects, mutations go through RPCs
-  services/                   planning / execution / daily / reconciliation / adjustment / export
-  cli.ts                      Node command-line entry point (--db switches stock source)
-  cli-import.ts               `npm run import:wms` — preview + confirm import
-  web/
-    browser-input.ts          workbook → domain (browser/SheetJS, same column mapping)
-    browser-output.ts         → picklist workbook (browser/SheetJS)
-    main.ts                   web app: upload, run, render, download
-    ops.ts                    Ops area: inventory / inbound / outbound / execution / database
-supabase/migrations/          SQL schema, posting RPCs, RLS + reconciliation views
-tests/                        db-integration + parity suites (real PostgreSQL, loud skip)
-web/
-  index.html                  the page
-  bundle.js, ops-bundle.js    built by `npm run build:web` — do not hand-edit
-```
-
-`allocate()`, `replenish()`, and `buildPicklists()` touch no I/O and share no
-DOM or Node dependency — `binselect.ts` is the one place the actual bin-choice
-rule lives, imported by both. Excel is just an adapter, in two flavours (Node
-ExcelJS for the CLI, browser SheetJS for the web app) so the same engine runs
-identically in both places — confirmed by running both against the same
-workbook and diffing the stats. The same engine runs against Postgres later by
-writing a third adapter that returns `StockBin[]` and `DemandLine[]`.
-
----
-
-## Database mode (Supabase / PostgreSQL)
-
-An optional persistence layer makes PostgreSQL the **source of truth for
-stock**, while the allocator above stays byte-for-byte the same. The daily flow
-becomes:
-
-```
-WMS workbook ──import──▶ stock (DB) ──allocate──▶ waves + movements + outbound
-      (one-off)              ▲                        (all PLANNED — no stock moved)
-                             │                                │
-                    stock_transactions ◀──post_movement── warehouse executes
-                     (immutable ledger)      / complete_wave        (truck ships)
-                             │
-                       current stock ──▶ next day's allocation
-```
-
-**The five rules the whole layer is built on**
-
-- **PLANNED ≠ EXECUTED.** Planning writes `waves` (PENDING), `movements`
-  (PLANNED) and `outbound` (PLANNED). *Nothing* touches `stock`. Stock changes
-  **only** when a movement is posted or its wave completed.
-- **Physical identity = location + SKU + batch + expiry.** Two expiry dates in
-  one bin are two rows, never merged. Enforced by a trigger-maintained
-  `identity_key` (`loc|sku|batch|YYYY-MM-DD`) with a UNIQUE constraint — the
-  exact mirror of `stockIdentityKey()` in `src/ledger.ts`.
-- **Every stock change writes an immutable `stock_transactions` row**
-  (INITIAL_IMPORT / INBOUND / OUTBOUND / PICK / RELOC_IN / RELOC_OUT /
-  ADJUSTMENT). The ledger is append-only — RLS forbids UPDATE and DELETE — so
-  `stock.quantity = SUM(quantity_delta)` always holds (`stock_vs_ledger` view
-  proves it).
-- **Idempotent, atomic, never negative.** Posting is a compare-and-set on
-  status: doing it twice changes stock exactly once (`ALREADY_POSTED`). A
-  replenishment (source −N *and* destination +N) is one transaction — it either
-  fully happens or fully rolls back. Decrements are guarded, so stock can never
-  go negative.
-- **Excel is input, not truth.** The original workbook is never modified; the
-  DB→Excel export writes a new `WMS_updated_<timestamp>.xlsx`.
-
-**Tables** — `stock`, `stock_transactions`, `inbound`, `outbound`, `waves`,
-`movements`, `execution_events` (status-transition audit). All stock mutations
-run through `SECURITY DEFINER` RPCs (`post_movement`, `complete_wave`,
-`post_inbound`, `post_outbound`, `adjust_stock`, `initial_import`, …); clients
-holding the publishable key can read everything and insert/plan, but can never
-flip a row to COMPLETED or edit a quantity directly (RLS + CHECK).
-
-### Migrations
-
-Four version-controlled files under `supabase/migrations/`:
-`0001_initial_schema.sql`, `0002_posting_functions.sql`, `0003_rls_and_views.sql`,
-`0004_security_hardening.sql` (search_path hardening, EXECUTE restrictions,
-view security).
-
-```bash
-supabase db push          # to a linked Supabase project, or
-supabase migration up     # apply pending migrations locally
-```
-
-### Setup (manual, once)
-
-1. Create a Supabase project (or any PostgreSQL 16).
-2. Apply the four migrations (`supabase db push`).
-3. Copy `.env.example` → `.env.local` and fill in `VITE_SUPABASE_URL`,
-   `VITE_SUPABASE_PUBLISHABLE_KEY` (browser-safe) and `SUPABASE_SECRET_KEY`
-   (server only — never `VITE_`-prefixed, never committed). Legacy
-   `SUPABASE_SERVICE_ROLE_KEY` is also accepted but will be removed once all
-   deployments migrate.
-4. Rebuild the web bundle (`npm run build:web`) — the publishable key is
-   injected at build time; the secret key is never bundled.
-5. Import the opening snapshot, then run allocations from the DB:
-
-```bash
-npm run import:wms -- "data/Warehouse_Management_System_18_September_2026_.xlsx"
-npm start -- "data/….xlsx" --db --out out      # --db (or DATABASE_MODE=true) reads stock from the DB
-```
-
-The web app has an **Ops** area (Inventory / Inbound / Outbound / Execution /
-Database) that appears once the browser config is present; without it the tab
-shows a "database not configured" notice and the existing allocator flow is
-untouched.
-
-### Tests
-
-```bash
-npm test         # 40 sisa/FEFO regressions — no database needed
-npm run test:db  # 32 integration checks — requires TEST_DATABASE_URL (local postgres:16)
-npm run test:parity   # Excel-fed vs DB-fed allocation identical + 550076636 DB replay
-```
-
-`test:db` and `test:parity` create a throwaway database, apply the migrations
-from scratch, and **skip loudly** (never a false pass) when `TEST_DATABASE_URL`
-is unset. Quick local server:
-
-```bash
-docker run -d --name fefo-test -e POSTGRES_PASSWORD=test -p 54329:5432 postgres:16
-TEST_DATABASE_URL=postgres://postgres:test@localhost:54329/postgres npm run test:db
-```
-
-### Live Supabase wire testing (Phase 11B)
-
-The local integration tests (`test:db`, `test:parity`) validate SQL correctness
-via direct `pg` connections — they prove the functions, RLS policies and views
-work. They do **not** prove the supabase-js client talks correctly through
-PostgREST over HTTPS. That requires a live test.
-
-#### Prerequisites
-
-1. A test Supabase project (not production).
-2. All four migrations applied (`supabase db push` or via the Dashboard SQL editor).
-3. The three required roles exist: `anon`, `authenticated`, `service_role`
-   (Supabase creates these automatically).
-4. Three API keys from **Project Settings → API**:
-   - `SUPABASE_URL` — e.g. `https://xyz.supabase.co`
-   - `VITE_SUPABASE_PUBLISHABLE_KEY` — the anon/publishable key (browser-safe)
-   - `SUPABASE_SECRET_KEY` — the secret/service-role key (server only)
-
-#### Setup
-
-```bash
-# 1. Create .env.local with live project credentials
-cp .env.example .env.local
-# Fill in: VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY
-
-# 2. Rebuild the web bundle so the publishable key is injected
-npm run build:web
-
-# 3. Import the Sep 18 workbook snapshot into the live project
-npm run import:wms -- "data/Warehouse Management System_18 September 2026_.xlsx"
-```
-
-#### Wire-test checklist
-
-These checks prove the supabase-js → PostgREST → PostgreSQL path works end to
-end through the Supabase platform. Run each and record the result:
-
-| # | What to test | How to verify | Expected |
-|---|---|---|---|
-| 1 | **Publishable key reads** | Load the web app, open Ops → Inventory tab | SKU/stock data visible, no errors |
-| 2 | **Secret key writes (CLI)** | `npm run import:wms -- "data/..."` succeeds | Import completes, stock rows inserted |
-| 3 | **RPC via supabase-js (mutating)** | `npm start -- --db --out out` with live DB | Allocation completes, waves/movements/outbound rows created |
-| 4 | **search_path hardening** | `SELECT apply_stock_delta('CB21A02','550076636','05I26JJ','2030-08-24',-1)` as `anon` | **Permission denied** — function is service_role only |
-| 5 | **EXECUTE restriction (post_movement)** | `SELECT post_movement(...)` as `anon` | **Permission denied** |
-| 6 | **EXECUTE restriction (complete_wave)** | `SELECT complete_wave(...)` as `anon` | **Permission denied** |
-| 7 | **Non-mutating RPC (set_*_status)** | Call `set_movement_status(...)` as `anon` via Supabase client | Works (allowed) |
-| 8 | **View security_invoker** | `SELECT * FROM stock_vs_ledger` as `anon` via Supabase client | Returns only RLS-visible rows (not all rows) |
-| 9 | **550076636 end-to-end** | Import → allocate → post movements → complete waves 6 + 13 | Sisa flow: 8 → 0 → 37 → 51 → 43 at pickface CC21A02, SKU 550076636, Batch 05I26JJ |
-| 10 | **Browser bundle clean** | `grep -E "sb_secret_|service_role_|SUPABASE_SECRET" web/*.js` | Only the supabase-js key-format validation string, no real keys |
-
-#### Running checks 4–6 manually via SQL
-
-In the Supabase Dashboard → SQL Editor, run as each role:
-
-```sql
--- As anon (Dashboard SQL editor, no auth header):
-SET role anon;
-SELECT apply_stock_delta('CB21A02','550076636','05I26JJ','2030-08-24',-1);
--- → ERROR: permission denied for function apply_stock_delta
-
-RESET role;
-SELECT post_movement('00000000-0000-0000-0000-000000000000'::uuid);
--- → ERROR: permission denied for function post_movement
-
-RESET role;
-SELECT complete_wave('00000000-0000-0000-0000-000000000000'::uuid);
--- → ERROR: permission denied for function complete_wave
-```
-
-Non-mutating functions (e.g. `set_movement_status`, `daily_summary`) must still
-work:
-
-```sql
-SET role anon;
-SELECT set_movement_status('00000000-0000-0000-0000-000000000000'::uuid, 'completed');
--- → returns status or error about row not found (NOT a permission error)
-
-SELECT daily_summary('2026-09-18');
--- → returns JSON summary (NOT a permission error)
-```
-
-#### Running checks 9–10 via CLI
-
-```bash
-# 9. Full 550076636 regression against live Supabase
-npm start -- "data/Warehouse Management System_18 September 2026_.xlsx" --db --out out
-
-# 10. Bundle audit
-grep -iE "sb_secret_|service_role_|SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY" web/*.js
-# Should only match supabase-js internal key-format validation, not actual keys
-```
-
-> **Note**: Checks 4–8 require executing SQL as specific roles. When the
-> Dashboard SQL Editor runs as the authenticated user (not `anon` or
-> `service_role`), use the **Supabase CLI** or a direct Postgres connection
-> with `SET ROLE` to simulate each role's permissions.
-
-
-### Configuration worth tuning
-
-| Key | Default | Effect |
+| # | Asumsi | Ubah di |
 |---|---|---|
-| `minRemainingShelfLifeDays` | 180 | stock below this is refused |
-| `nearExpiryWarningDays` | 365 | flagged, still picked |
-| `preferOpenPalletForRemainder` | true | don't break a sealed pallet for a remainder |
-| `bestFitOpenPallets` | true | clear the smallest usable fragment first |
-| `serpentine` | true | alternate aisle direction |
-| `splitPalletAndCaseTasks` | true | separate forklift and handpick sheets |
-| `maxLinesPerPicklist` | 0 | split long sheets (0 = never) |
-| `blockedBins` | `[]` | bins on cycle count / damage hold |
+| 1 | Urutan sel label strip: **A (atas) → E (bawah)**, warna A merah, B oranye, C kuning, D hijau, E biru | `config/warehouse.ts` → `STRIP_LEVEL_ORDER`, `LEVEL_COLORS` |
+| 2 | Arah panah: posisi **01 = kiri**, **02 = kanan** (menghadap rak) | `config/warehouse.ts` → `POSITION_ARROW` |
+| 3 | 1 bin rak = 1 palet (kapasitas 1) | `bins.capacity` |
+| 4 | Dimensi rak untuk 3D (bay 2,7 m, level 1,6 m, kedalaman 1,2 m, lorong 3,2 m) adalah **placeholder**. Bentuk rak sudah dikonfirmasi: blok back-to-back, rak 01–20 sisi kiri, 21–40 sisi kanan (21 di belakang 01), lorong di antara sisi kanan satu aisle dan sisi kiri aisle berikutnya | Admin → Pengaturan (`Rak per sisi` = 20); rute pick: `lib/allocator/config.ts` → `baysPerSide` |
+| 5 | Kelas ABC dari 91 baris picking K_ONE: **sementara** | Admin → Pengaturan → Hitung ulang ABC (setelah ≥ 1 bulan data picking) |
+| 6 | Aisle **CG** tidak ada di tabel status `warehouse mapping`, diimpor sebagai aktif | Admin → Pengaturan → Status bin |
+| 7 | Rak CC19, CC20, CE33 tidak ada di data (tiang/pilar?) | cek lapangan |
+| 8 | Batas "segera expired" = 90 hari | `config/warehouse.ts` → `NEAR_EXPIRY_DAYS` |
+| 9 | Umur simpan pelumas Shell = **48 bulan** dari tanggal produksi di kode batch (cocok untuk 97% batch 24 Sep); SKU dengan umur lain diisi sendiri | Admin → Pengaturan → Aturan inventory; per SKU di Master item |
+| 10 | Sisa umur minimum untuk dikirim = **0 hari** (belum ada aturan dari Shell / pelanggan) | idem |
+| 11 | Adjustment > **20 unit** butuh persetujuan orang lain; toleransi hitung A/B/C = **0** karton | idem |
+| 12 | Scan barcode karton saat posting pick **tidak wajib** (master belum punya EAN) | idem, setelah barcode diisi di Master item |
+
+**Warna vs printer thermal.** Printer thermal 4 inci (direct thermal) hanya mencetak hitam. Pita warna per level butuh salah satu dari: label pra-cetak berwarna, printer warna, atau mode **Hitam-putih** di menu Label (pita hitam, teks putih). Mode warna tetap disediakan karena mengikuti contoh foto.
+
+Masalah data dari file WMS 24 Sep 2026: lihat **`docs/DATA_ISSUES.md`** (bin CC01C01 `#VALUE!`, CE08A01 expired tahun 1930, batch CD39C01/C02 terbaca tanggal oleh Excel, 129 bin ber-SKU dengan qty 0, dll.). Pemetaan kolom: **`docs/DATA_MAPPING.md`**.
 
 ---
 
-## Moving it into k-one-v2
+## 2. Setup
 
-The engine is the part worth keeping; the Excel adapter is scaffolding for
-running it today.
+### 2.1 Supabase
+1. Buat project di supabase.com (region Singapore).
+2. **SQL Editor** → jalankan berurutan: `supabase/migrations/0001_schema.sql`, `0002_functions.sql`, `0003_rls.sql`, `0004_allocation.sql`, `0005_explicit_grants.sql`, `0006_back_to_back_racks.sql`, `0007_rolling_execution.sql`, `0008_putaway_import.sql`, `0009_fixed_pickfaces.sql`, `0010_cycle_counts.sql`, `0011_stock_corrections.sql`, `0012_audits.sql`, `0013_stock_fixes.sql`, `0014_cycle_count.sql`, `0015_realtime.sql`. Atau dengan CLI: `supabase link --project-ref <ref>` lalu `supabase db push`.
+   **Project yang sudah jalan** (0001–0003 sudah diterapkan): cukup jalankan `0004` sampai `0015`. `0015` menyalakan Realtime (halaman diperbarui otomatis, titik *Live* di judul); tanpa itu halaman tetap jalan tetapi titiknya tidak pernah menerima perubahan. `0004` mengubah identitas stok menjadi bin + SKU + batch + **expired**; data lama tetap valid.
+3. Jalankan `supabase/seed.sql` (2.570 bin, 106 SKU, 1.790 baris stok dari file WMS). File ini ±230 KB; jika editor menolak, pakai CLI: `psql "<connection string>" -f supabase/seed.sql`.
+4. **Akun situs**: buat satu akun di **Authentication → Users → Add user** (mis. nama *Gudang*), lalu di SQL Editor:
+   ```sql
+   update public.profiles set role = 'admin', name = 'Gudang' where id = (select id from auth.users where email = '<email akun situs>');
+   ```
+   Isi `SITE_ACCOUNT_EMAIL` dan `SITE_ACCOUNT_PASSWORD` di environment hosting (Vercel) dan di `.env.local`. Semua pengunjung memakai sesi akun ini; aplikasi langsung terbuka.
+5. **Authentication → Providers → Email**: matikan "Allow new users to sign up".
 
-1. **Adapter swap.** Replace `loadWorkbook()` with a repository that reads
-   `stock_bins` and open delivery lines from Postgres. Everything downstream is
-   unchanged.
-2. **NestJS service.** Wrap `allocate()` in an `AllocationService`; expose
-   `POST /allocations/run` returning the same result shape.
-3. **Concurrency.** Two allocation runs must not hand out the same carton. Take
-   the existing `redis-lock` per warehouse for the run, or select candidate bins
-   `FOR UPDATE SKIP LOCKED` and persist the allocations as reservations
-   (`qty_reserved` on the bin) in one transaction. The engine is deterministic,
-   so a replay after rollback yields an identical picklist.
-4. **Async.** For large waves, push the run onto the existing BullMQ queue in
-   `apps/worker` and stream progress; the engine itself is fast enough
-   (1,751 bins × 73 lines runs in well under a second) that this is only needed
-   for multi-wave batching.
-5. **Replenishment hook.** When a pick empties or nearly empties a bin, the
-   result already carries `qtyRemainingInBin`; feed those lines into the
-   pickface top-up logic instead of recomputing on-hand afterwards.
-6. **Web app → apps/web.** `src/web/main.ts` is the shape of the eventual
-   NestJS-backed page: swap `browser-input.ts`/`browser-output.ts` for calls to
-   the new API, keep the same tab layout and table rendering. The engine calls
-   (`allocate`, `derivePickfaces`, `replenish`, `buildMovementReport`) don't
-   change at all — only where the data comes from does.
+Membuat ulang seed dari file WMS baru:
+```bash
+pip install openpyxl
+python3 scripts/generate_seed.py path/ke/Warehouse_Management_System.xlsx
+```
+Untuk update rutin, pakai menu **Import** di aplikasi (tercatat sebagai mutasi), bukan seed.
 
-### Data quality flagged by this run
+### 2.2 Uji SQL lokal (tanpa Supabase)
+```bash
+psql -f supabase/tests/00_local_auth_stub.sql   # stub skema auth + role
+for f in supabase/migrations/*.sql; do psql -f "$f"; done
+psql -f supabase/seed.sql
+psql -f supabase/tests/01_rls_and_stock_rules.sql
+psql -f supabase/tests/02_allocation_flow.sql   # semua baris harus PASS
+psql -f supabase/tests/03_rolling_execution.sql # semua baris harus PASS (stub auth, bukan Supabase asli)
+psql -f supabase/tests/04_putaway_import.sql    # semua PASS; rollback, aman di Supabase lokal
+psql -f supabase/tests/05_pickfaces_counts_corrections.sql  # idem
+psql -f supabase/tests/06_audits.sql            # idem
+psql -f supabase/tests/07_stock_fixes.sql       # idem
+psql -f supabase/tests/08_cycle_count.sql       # idem
+psql -f supabase/tests/09_inventory_control.sql # kontrol inventory (0016–0023), idem
+```
 
-- 57 duplicate `Lokasi` rows in the stock sheet (mostly staging/quarantine
-  lines). Duplicates inside the rack range are reported as `DUPLICATE_BIN` —
-  worth resolving before the Postgres migration, since a bin must be unique.
-- Bay numbers run to 40 on CB/CD/CF/CG in this workbook. If the physical racks
-  are shorter, set `bayLimits` validation when migrating so bogus locations are
-  rejected at import rather than at pick time.
+### 2.3 Aplikasi
+```bash
+cp .env.example .env.local   # isi URL, anon key, service role key (Project Settings → API)
+npm install
+npm run dev                  # http://localhost:3000
+```
+Kamera ponsel butuh **HTTPS** (atau localhost). Untuk uji di ponsel saat dev: `npx next dev --experimental-https` atau deploy ke Vercel.
+
+### 2.4 Deploy ke Vercel
+Import repo di Vercel → isi 3 environment variable yang sama → Deploy. Vercel mendeteksi Next.js otomatis (`vercel.json` lama untuk web statis sudah dihapus).
+
+---
+
+## 3. Per fase: file, perintah, cara uji
+
+### Fase 1 — Skema, migrasi, RLS, seed
+File: `supabase/migrations/*`, `supabase/seed.sql`, `scripts/generate_seed.py`, `supabase/tests/*`.
+Uji:
+```sql
+select count(*) from bins;                          -- 2570
+select count(*), sum(quantity) from inventory;       -- 1790 | 52078
+select * from bin_summary where bin_code = 'CA01C01';
+```
+Uji aturan stok & RLS di Postgres lokal (bukan Supabase): `psql -f supabase/tests/00_local_auth_stub.sql`, migrasi, seed, lalu `01_rls_and_stock_rules.sql`.
+
+### Fase 2 — Import
+File: `app/(app)/admin/import/*`, `lib/import-validate.ts`, `lib/read-sheet.ts`, fungsi SQL `import_snapshot`.
+Uji: Import → pilih file WMS → sheet `WMS` & baris judul 4 terdeteksi otomatis → Validasi. Hasil yang diharapkan untuk file 24 Sep: **2.468 ok, 146 peringatan, 1 error** (CC01C01 berisi `#VALUE!`). Impor ulang file yang sama setelah seed → **0 mutasi**.
+
+### Fase 3 — Label
+File: `lib/labels.ts`, `app/api/labels/route.ts`, `app/(app)/labels/*`.
+Uji: Label → Satu rak → CA / 01 → Strip → Buat PDF. Satu halaman = satu tiang (posisi 01 atau 02), lebar 80 mm, 5 sel × 85 mm + panah 22 mm atas/bawah = 469 mm. Mode **Per sel** = halaman 80 × 85 mm. Cetak di skala **100%**. Contoh hasil: `docs/label-samples/`.
+
+### Fase 4 — Scan & detail bin
+File: `app/(app)/scan/*`, `app/(app)/bin/[code]/*`, `components/bin/*`, `components/scan/*`.
+Uji: buka `/scan` di ponsel → Scan pakai kamera → arahkan ke label → halaman bin terbuka. Coba ketik `XX99` → pesan "bukan format bin". Pick melebihi stok → ditolak database.
+
+### Fase 5 — 3D
+File: `components/warehouse/*`, `app/(app)/warehouse/*`, `app/api/warehouse/route.ts`.
+Uji: `/warehouse` → ganti mode warna → klik kotak → panel detail. Cari `CB12` (semua bin rak CB12) atau SKU `550070612`.
+
+### Fase 6 — Dashboard & laporan
+File: `app/(app)/dashboard/page.tsx`, `app/(app)/movements/page.tsx`, `app/api/movements/export/route.ts`, `lib/movement-query.ts`.
+Uji: Dashboard → angka total bin 2.570. Mutasi → filter jenis `adjustment` → Export .xlsx.
+
+---
+
+### Fase 7 — Alokasi & wave (dari FEFO allocator)
+File: `lib/allocator/*` (mesin FEFO, murni tanpa I/O), `app/(app)/allocate/*`, `app/(app)/waves/*`, `supabase/migrations/0004_allocation.sql`, `docs/ALLOCATOR.md`.
+
+Alur harian:
+```
+File WMS (sheet "Schedule of the day") ─┐
+                                         ├─▶ Alokasi FEFO (browser) ─▶ Simpan rencana ─▶ waves + pick_tasks + outbound
+Stok database (inventory_detail) ───────┘        (supervisor)            (stok belum berubah)
+                                                                                   │
+            inventory ◀── trigger ◀── movements (picking / transfer) ◀── Posting tugas / Selesaikan wave (operator)
+```
+- **Alokasi** (supervisor/admin): unggah file WMS harian → tanggal & opsi → *Jalankan alokasi* → cek picklist, kekurangan, rencana mutasi, pickface, double pick → unduh PDF/Excel → *Simpan rencana*. Sumber stok *Sheet WMS di file* = simulasi, tidak bisa disimpan.
+- **Stok untuk perencanaan = stok fisik − yang sudah dipesan tugas terbuka + yang akan masuk** (`planning_stock`). Rencana tanggal lain atau wave lain tidak bisa memakai karton yang sama.
+- **Wave** (semua role): konfirmasi satu tugas atau satu wave. Stok di database berubah saat itu juga, lewat ledger `movements`.
+  - *Posting → Sesuai rencana*: persis seperti rencana.
+  - *Posting → Berbeda*: isi jumlah yang benar-benar diambil (boleh 0), bin/batch asal yang sebenarnya, dan alasan (wajib). Stok dipotong dari bin yang benar-benar dipakai; order mencatat *Terambil*.
+  - *Selesaikan wave*: semua tugas tersisa sesuai rencana, dalam satu transaksi.
+- **Hitung ulang wave tersisa** (supervisor): wave yang belum dikerjakan (masih *Menunggu*, belum ada tugas yang diposting/dibatalkan) dihitung ulang dari stok saat ini, tanpa file. Wave yang sudah berjalan, ditunda, atau dibatalkan tidak diubah. Menjalankan *Alokasi* lagi untuk tanggal yang sama juga hanya mengganti wave yang belum dikerjakan; shipment milik wave yang sudah berjalan dilewati.
+- **Putaway** (supervisor/admin): unggah file WMS → sheet *data putaway* dipilih otomatis → setiap baris dibandingkan dengan isi bin sekarang. *Baru* (bin kosong) diposting sebagai mutasi putaway; *Sudah tercatat* (isi bin sudah sama) dilewati, jadi file yang sama aman diunggah ulang. *Konflik* ditampilkan dengan isi bin di sistem dan tidak diposting kecuali dipilih keputusannya: qty lain → *tambahkan* atau *samakan*; bin berisi stok lain → *taruh di samping*. Bin/SKU tidak dikenal, bin diblokir, dan baris duplikat hanya dilaporkan. Laporan konflik bisa diunduh (.xlsx).
+- **Pickface** (supervisor/admin): satu bin pickface tetap per SKU (satu SKU per bin). Alokasi dan *Hitung ulang wave tersisa* memakai bin ini untuk replenishment. SKU tanpa pickface tetap memakai saran otomatis (bin level A paling awal di rute), yang tidak pernah memakai bin tetap SKU lain. *Isi saran untuk semua yang belum tetap* lalu *Simpan* mengunci pilihan hari ini.
+- **Hitung stok** (semua peran): tugas hitung per bin. Dibuat manual oleh supervisor, dari halaman Kualitas data, atau otomatis saat posting putaway untuk konflik qty/isi bin yang tidak diputuskan (satu tugas terbuka per bin). Operator menghitung seluruh isi bin tanpa melihat qty sistem; supervisor melihat selisih lalu *Terapkan* (penyesuaian tercatat `HITUNG <bin>`) atau *Tutup tanpa perubahan* dengan alasan.
+- **Kualitas data** (supervisor/admin): pemeriksaan langsung atas stok: stok rak tanpa batch, batch berupa tanggal (disarankan nomor asli dari angka seri Excel), tanpa expired, sudah expired di rak, bin rak berisi lebih dari 1 palet. Batch/expired dikoreksi dengan dua penyesuaian (`KOREKSI <bin>`, qty tetap); ditolak bila stok itu masih dipakai tugas wave terbuka. Expired dan kelebihan palet dikirim ke Hitung stok.
+- **Stok yang dipesan terlindungi**: operator tidak bisa memindah/pick manual (halaman bin) stok yang dipesan tugas terbuka. Supervisor bisa; tugas yang jadi tidak cocok ditandai merah (*stok kurang*) di halaman Wave dengan tombol hitung ulang.
+- **Scan bin**: halaman bin menampilkan tugas terencana yang mengambil dari / mengisi bin tersebut.
+- **Ledger stok**: *Riwayat mutasi* = semua perubahan stok (jenis, SKU, batch, expired, qty, dari/ke bin, siapa, kapan, catatan; baris dari tugas wave mencatat penyimpangannya). Tidak bisa diedit/dihapus.
+- CLI (tanpa browser): `npm run allocate:file -- data/file.xlsx --out out --as-of 2026-09-24 [--db] [--pdf]`.
+
+Uji: `npm test` (mesin FEFO + paritas stok database vs workbook). SQL: lihat bagian 5.
+
+### Fase 8 — Kontrol inventory
+Cara kerja, aturan, dan rutinitas harian: **`docs/INVENTORY_CONTROL.md`**. Migrasi `0016`–`0023`:
+aturan inventory + master item (barcode, umur simpan, sisa umur minimum per SKU) + dekode kode batch Shell;
+hold / karantina; kode alasan + persetujuan orang lain untuk adjustment besar; cycle count buta dengan hitung
+ulang oleh orang lain; penerimaan vs DO; rekonsiliasi stok SAP; laporan kepatuhan FEFO pada pick nyata;
+nama picker + scan barcode saat posting pick. Halaman: **Inventory** (Stok, Expired & FEFO, Hold & karantina,
+Akurasi & adjustment, Rekonsiliasi SAP, Persetujuan), **Penerimaan**, **Master item**.
+Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tests/sap-stock.test.ts`,
+`tests/min-shelf-life.test.ts`.
+
+## 4. Keputusan desain (untuk laporan magang)
+
+**Data & integritas**
+- **Stok hanya berubah lewat tabel `movements`.** Trigger `apply_movement` di database memvalidasi dan mengubah `inventory`; tabel `inventory` tidak punya policy tulis sama sekali, jadi aplikasi, API, maupun user tidak bisa mengubah stok tanpa jejak.
+- **Validasi stok di database, bukan di UI.** Dua operator yang pick bersamaan tetap aman karena baris stok dikunci (`FOR UPDATE`) sebelum dikurangi.
+- **Ledger tidak bisa diedit/dihapus.** Koreksi dilakukan dengan mutasi baru (adjustment), sesuai praktik audit gudang.
+- **Penulis mutasi dipaksa = akun sesi.** Trigger mengisi `user_id` dari sesi, sehingga user_id palsu dari klien diabaikan.
+- **Saldo awal dan import dicatat sebagai `adjustment`.** Angka stok awal bisa ditelusuri ke file sumbernya.
+- **Batch kosong disimpan sebagai `''`, bukan NULL.** Unique key (bin, SKU, batch) di Postgres tidak menganggap dua NULL sama; `''` mencegah duplikat.
+- **Import mode snapshot tidak menyentuh bin yang barisnya error.** Tanpa ini, satu baris salah ketik akan menolkan stok fisik yang sebenarnya ada.
+- **Tanggal expired tahun tidak masuk akal (mis. 1930) diimpor sebagai peringatan, bukan ditolak.** Barangnya ada secara fisik; menolak baris akan menghilangkan stok dari sistem.
+- **Remain Qty dipakai, bukan Qty.** Remain Qty sudah memperhitungkan pick, putaway, dan transfer hari itu.
+
+**Keamanan (RLS)**
+- **Role disimpan di `profiles`, dicek lewat fungsi `has_role()` SECURITY DEFINER.** Policy tidak bisa rekursif membaca tabel yang sedang dilindungi.
+- **Pengecekan ganda: RLS + cek role di fungsi/route.** Jika satu lapis salah konfigurasi, lapis lain tetap menolak.
+- **Service role key hanya dipakai di server.** Key ini melewati RLS, jadi tidak pernah dikirim ke browser.
+- **Pendaftaran publik dimatikan.** Hanya akun situs yang dipakai.
+
+**Label**
+- **Strip tiang rak A–E, satu sel 80 × 85 mm per level**, mengikuti contoh foto. Operator menemukan semua level dari lantai tanpa naik.
+- **QR + pita warna level, Code 128 opsional.** QR tetap terbaca meski label tertekuk di tiang; Code 128 untuk scanner laser lama.
+- **Barcode dirender sebagai vektor**, bukan gambar PNG. Tepi modul tetap tajam di printer 203 dpi (diuji: semua kode terbaca zbar).
+- **Quiet zone 3 mm dijaga di sekitar QR dan Code 128.** Scanner butuh ruang putih untuk mengenali awal/akhir kode.
+- **Mode hitam-putih.** Printer direct thermal tidak bisa mencetak warna.
+- **PDF dibuat di server.** Satu tempat untuk mencatat `print_logs` dan tidak bergantung kemampuan ponsel.
+
+**Scan & UI**
+- **Input scan selalu fokus dan submit saat Enter.** Scanner USB/Bluetooth bekerja sebagai keyboard, tanpa driver.
+- **Scan dicatat hanya jika datang dari layar scan (`?scan=1`).** Refresh halaman tidak menggelembungkan jumlah scan.
+- **Semua aksi punya langkah konfirmasi dengan kalimat ringkasan.** Salah tap di lantai gudang lebih mahal daripada satu tap ekstra.
+- **Peringatan FEFO saat memilih batch yang bukan paling awal expired**, tanpa memblokir (kadang ada alasan operasional).
+- **Tampilan kartu di ponsel, tabel di desktop.** Tabel 9 kolom tidak terbaca di layar 6 inci.
+- **Kode bin ditampilkan seperti plat lokasi kuning.** Tampilan di layar sama dengan yang dilihat operator di rak.
+
+**3D**
+- **Satu instanced mesh untuk 2.570 bin** (satu draw call), sehingga ringan di laptop kantor.
+- **Render on-demand (`frameloop="demand"`).** GPU hanya bekerja saat kamera bergerak atau data berubah, jadi baterai tablet lebih awet.
+- **Koordinat dihitung di database dari konfigurasi layout.** Ubah ukuran rak sekali, semua bin ikut pindah.
+
+**Alokasi & wave (gabungan)**
+- **Satu sumber kebenaran stok.** Tabel `stock`/`stock_transactions` milik allocator lama dihapus; allocator membaca `inventory` dan menulis lewat ledger `movements` yang sama. Tugas pick yang diposting muncul di riwayat mutasi, ABC, dan 3D seperti mutasi manual.
+- **Rencana ≠ eksekusi.** Menyimpan rencana hanya menulis `waves`, `pick_tasks`, `outbound`. Stok berubah saat tugas diposting (`post_task` → satu baris `movements`).
+- **Identitas stok = bin + SKU + batch + expired.** Aturan dari allocator: dua tanggal expired dalam satu batch di satu bin adalah dua baris stok, supaya FEFO tidak tertukar. Mutasi tanpa tanggal expired tetap berjalan jika batch itu hanya punya satu baris di bin.
+- **Posting idempoten dan atomik.** Unique index `movements(task_id)` membuat posting ganda mustahil; *Selesaikan wave* berjalan dalam satu transaksi.
+- **Rencana bergulir.** `save_plan` hanya mengganti wave yang belum dikerjakan; wave yang sudah berjalan tetap, sehingga tidak ada pick yang kehilangan rencananya.
+- **Reservasi, bukan kunci.** Stok fisik tetap satu angka; tugas terbuka mengurangi stok *untuk perencanaan* saja. Pindahan manual atas stok yang dipesan ditolak untuk operator.
+- **Aktual dicatat, bukan ditebak.** Konfirmasi yang berbeda dari rencana wajib beralasan dan memotong stok dari bin yang benar-benar dipakai.
+- **Tabel rencana tanpa policy tulis.** Semua perubahan lewat RPC `SECURITY DEFINER` yang mengecek role; klien juga tidak bisa memalsukan `task_id` di ledger (RLS).
+- **Mesin alokasi berjalan di browser**, sama persis dengan CLI (fungsi murni). Server hanya menyimpan hasilnya.
+
+**Lainnya**
+- **Query list dipaginasi 1.000 baris.** Batas default Supabase 1.000 baris akan memotong 2.570 bin tanpa error.
+- **Pembaca Excel hanya membaca sampai sel terakhir yang berisi.** Sheet WMS menyatakan range sampai baris 1.048.563; membaca manual memangkas waktu dari ±21 detik ke ±2 detik.
+
+---
+
+## 5. Yang sudah diuji / belum
+
+Sudah (di sandbox pengembangan):
+- Migrasi + seed di PostgreSQL 16 (dengan stub skema `auth` Supabase): 2.570 bin, 1.790 baris stok, total 52.078.
+- Aturan: pick melebihi stok ditolak; transfer mempertahankan tanggal expired; transfer ke bin diblokir ditolak; operator tidak bisa adjustment/import/ubah inventory/hapus mutasi; `user_id` palsu diabaikan; adjustment supervisor tercatat.
+- Import file WMS asli: 2.614 baris masuk, re-import setelah seed = 0 mutasi.
+- Label: ukuran halaman tepat (80 × 85 mm & 80 × 469 mm); QR dan Code 128 terbaca zbar pada render 203 dpi.
+- `tsc`, ESLint, dan `next build` lolos.
+- Mesin FEFO: `npm test` → 107 uji (termasuk rute pick back-to-back) (regresi sisa/FEFO, workflow harian, pickface, paritas stok database = workbook pada file 15 & 18 Sep).
+- SQL: `supabase/tests/05_pickfaces_counts_corrections.sql` (20 cek: pickface unik & tukar, alur hitung buta → terapkan/tutup, konflik putaway jadi tugas hitung, koreksi identitas). `supabase/tests/04_putaway_import.sql` (14 cek: klasifikasi baris, keputusan konflik, preview = posting, unggah ulang aman). `supabase/tests/03_rolling_execution.sql` (21 cek: reservasi, hitung ulang, aktual, guard). `supabase/tests/02_allocation_flow.sql` (17 cek: rencana tidak mengubah stok, posting idempoten, re-plan ditolak setelah eksekusi, wave kurang stok di-rollback, dua expired dalam satu batch).
+- End-to-end di Supabase lokal (Auth + PostgREST, akun supervisor & operator): file 24 Sep → 1.790 baris stok → alokasi 1.293 karton → 8 wave / 51 tugas → semua wave selesai oleh operator → stok 52.078 → 50.785, semua baris ledger atas nama operator.
+
+Belum:
+- Uji di project Supabase produksi (sudah diuji di Supabase lokal) dan UI di browser sungguhan.
+- Tampilan 3D di browser (WebGL tidak tersedia di sandbox).
+- Cetak fisik di printer gudang dan scan dengan ponsel operator.
+
+## 6. Catatan teknis
+- **SheetJS**: npm `xlsx@0.18.5` punya advisori keamanan (prototype pollution/ReDoS) yang diperbaiki di versi CDN resmi. Sebelum produksi: `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
+- Label zona di lantai 3D (`<Text>` drei) memuat font dari CDN saat pertama dibuka.
+- Tanggal filter mutasi memakai WIB (UTC+7).
+- **Grant eksplisit (0005).** Project Supabase baru tidak lagi memberi hak SELECT/INSERT/EXECUTE ke `authenticated` secara default; tanpa 0005 semua query gagal "permission denied". Aman dijalankan di project lama.
+- Dokumen audit allocator lama ada di `docs/archive/allocator/` (merujuk ke kode lama yang sudah diganti).

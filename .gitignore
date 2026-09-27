@@ -8,6 +8,10 @@ dist/
 .env*
 !.env.example
 
+# Supabase CLI-generated link state (project-ref, versions)
+supabase/.temp/
+supabase/.branches/
+
 # Kiro session files
 .omo/
 .qoder/
@@ -30,3 +34,8 @@ audit-forensic.ts
 # Generated picklists (examples)
 picklist_*.html
 picklist_*.xlsx
+
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo
