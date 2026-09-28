@@ -303,6 +303,67 @@ join public.pick_audit_line l on l.task_id = a.task_id
 where a.attempt_no = 1 and not a.legacy;
 
 -- ---------------------------------------------------------------------
+-- 6. Recording an attempt
+-- ---------------------------------------------------------------------
+create or replace function public.record_pick_audit(
+  p_task_id uuid, p_checker_name text, p_found text, p_counted numeric,
+  p_batch text, p_expiry date, p_damaged boolean, p_note text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_checker text := public.person_name(p_checker_name, 'Nama checker');
+  t record; v_prev public.pick_audits%rowtype; v_found_sku text; v_code text;
+  v_errors text[]; v_result text; v_attempt int;
+begin
+  if not public.has_role(array['operator','supervisor','admin']::public.user_role[]) then
+    raise exception 'Sesi situs tidak tersedia';
+  end if;
+  select pt.id, pt.wave_id, pt.shipment_number, pt.task_type, pt.status, pt.picked_by_name, it.sku,
+         coalesce(pt.actual_quantity, pt.quantity) as qty, coalesce(pt.actual_batch_lot, pt.batch_lot) as batch,
+         coalesce(pt.actual_expiry_date, pt.expiry_date) as expiry, w.status as wave_status
+    into t
+  from public.pick_tasks pt join public.items it on it.id = pt.item_id join public.waves w on w.id = pt.wave_id
+  where pt.id = p_task_id
+  for update of pt;
+  if not found or t.task_type <> 'PICK' or t.status <> 'COMPLETED' then
+    raise exception 'Tugas pick belum selesai atau tidak ditemukan';
+  end if;
+  if t.wave_status = 'CANCELLED' then raise exception 'Wave dibatalkan: baris ini tidak diaudit'; end if;
+  if exists (select 1 from public.shipment_loads where wave_id = t.wave_id and shipment_number = t.shipment_number) then
+    raise exception 'Shipment % sudah dimuat', t.shipment_number;
+  end if;
+  if t.qty = 0 then raise exception 'Baris ini tidak dipick (0): tidak perlu diaudit'; end if;
+  if public.same_person(v_checker, t.picked_by_name) then
+    raise exception 'Checker tidak boleh picker baris ini (%)', t.picked_by_name;
+  end if;
+  select * into v_prev from public.pick_audits where task_id = p_task_id order by attempt_no desc limit 1;
+  if v_prev.id is not null and (v_prev.result = 'OK' or v_prev.resolution is not null) then
+    raise exception 'Baris ini sudah lolos audit';
+  end if;
+  if p_counted is null or p_counted < 0 then raise exception 'Jumlah hitung tidak valid'; end if;
+  if nullif(trim(p_found), '') is null then raise exception 'Scan karton atau ketik SKU yang ada di palet'; end if;
+  select sku into v_found_sku from public.item_by_barcode(p_found) limit 1;
+  if v_found_sku is null then raise exception 'Barcode / SKU % tidak dikenal di master item', trim(p_found); end if;
+  v_code := regexp_replace(p_found, '\s', '', 'g');
+  if v_code = v_found_sku then v_code := null; end if;
+
+  v_errors := public.pick_audit_errors(t.sku, t.batch, t.expiry, t.qty,
+                                       v_found_sku, p_batch, p_expiry, p_counted, coalesce(p_damaged, false));
+  v_result := case when v_errors = '{}' then 'OK' else 'MISMATCH' end;
+  v_attempt := coalesce(v_prev.attempt_no, 0) + 1;
+
+  insert into public.pick_audits (task_id, attempt_no, checker_name, found_sku, found_scanned_code, found_batch, found_expiry,
+    counted_qty, damaged, expected_sku, expected_batch, expected_expiry, expected_qty, errors, result, note, created_by)
+  values (p_task_id, v_attempt, v_checker, v_found_sku, v_code, public.norm_batch(p_batch), p_expiry,
+    p_counted, coalesce(p_damaged, false), t.sku, t.batch, t.expiry, t.qty, v_errors, v_result, nullif(trim(p_note), ''), auth.uid());
+
+  -- The expected values leave the database only here, after the count is saved.
+  return jsonb_build_object('result', v_result, 'errors', to_jsonb(v_errors), 'attempt', v_attempt,
+    'expected', jsonb_build_object('sku', t.sku, 'batch', t.batch, 'expiry', t.expiry, 'qty', t.qty),
+    'found', jsonb_build_object('sku', v_found_sku, 'code', v_code, 'batch', public.norm_batch(p_batch),
+                                'expiry', p_expiry, 'qty', p_counted, 'damaged', coalesce(p_damaged, false)));
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Privileges (see 0005: nothing is granted by default)
 -- ---------------------------------------------------------------------
 grant select on public.pick_audits, public.shipment_loads,
@@ -312,3 +373,5 @@ revoke execute on function public.norm_batch(text),
   public.pick_audit_errors(text, text, date, numeric, text, text, date, numeric, boolean) from public, anon;
 grant execute on function public.norm_batch(text),
   public.pick_audit_errors(text, text, date, numeric, text, text, date, numeric, boolean) to authenticated;
+revoke execute on function public.record_pick_audit(uuid, text, text, numeric, text, date, boolean, text) from public, anon;
+grant execute on function public.record_pick_audit(uuid, text, text, numeric, text, date, boolean, text) to authenticated;

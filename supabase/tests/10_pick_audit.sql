@@ -93,4 +93,50 @@ select pg_temp.check('no direct writes to pick_audits',
   pg_temp.fails(format($q$insert into pick_audits (task_id, attempt_no, checker_name, found_sku, counted_qty, expected_sku, expected_qty, result)
     values (%L, 1, 'X', '550044709', 10, '550044709', 10, 'OK')$q$, pg_temp.task('PA1', 1)), '%row-level security%'));
 
+-- ---- B. record_pick_audit -------------------------------------------------
+-- (session: operator; any staff may audit)
+select pg_temp.check('a pick that is not completed cannot be audited',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550024919', 2, 'C1', null, false, null)$q$, pg_temp.task('PA4', 4)),
+    'Tugas pick belum selesai%'));
+select pg_temp.check('a line picked as 0 is not audited',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550024919', 0, 'C1', null, false, null)$q$, pg_temp.task('PA1', 5)),
+    'Baris ini tidak dipick%'));
+select pg_temp.check('the picker cannot audit own line (name compared ignoring case and spaces)',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'budi  santoso', '550044709', 10, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    'Checker tidak boleh picker%'));
+select pg_temp.check('a checker name is required',
+  pg_temp.fails(format($q$select record_pick_audit(%L, ' ', '550044709', 10, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    'Nama checker wajib%'));
+select pg_temp.check('an unknown carton code is refused',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '0000000000000', 10, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    '%tidak dikenal%'));
+select pg_temp.check('a negative count is refused',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', -1, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    'Jumlah hitung tidak valid%'));
+
+select pg_temp.check('carton EAN + batch typed " a7 " + full count -> OK',
+  record_pick_audit(pg_temp.task('PA1', 1), 'Sari', '8994123456789', 10, ' a7 ', null, false, null)->>'result' = 'OK');
+select pg_temp.check('the attempt keeps the scanned code and the SKU it resolved to',
+  (select found_sku = '550044709' and found_scanned_code = '8994123456789' and found_batch = 'A7' and attempt_no = 1
+     and checker_name = 'Sari' and expected_qty = 10 from pick_audits where task_id = pg_temp.task('PA1', 1)));
+select pg_temp.check('a passed line cannot be audited again',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 9, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    'Baris ini sudah lolos audit%'));
+select pg_temp.check('expected = what the picker reported (4), not the plan (5)',
+  record_pick_audit(pg_temp.task('PA1', 2), 'Sari', '550024919', 4, 'C1', '2031-07-07', false, null)->>'result' = 'OK');
+
+select pg_temp.check('count 5 of 6 -> MISMATCH SHORT; no note needed (blind)',
+  (select r->>'result' = 'MISMATCH' and r->'errors' = '["SHORT"]'::jsonb and (r->'expected'->>'qty')::numeric = 6
+   from (select record_pick_audit(pg_temp.task('PA2', 3), 'Sari', '550044709', 5, 'A7', null, false, null) r) x));
+select pg_temp.check('re-audit after the floor fix: other batch -> attempt 2, WRONG_BATCH',
+  (select r->>'attempt' = '2' and r->'errors' = '["WRONG_BATCH"]'::jsonb
+   from (select record_pick_audit(pg_temp.task('PA2', 3), 'Sari', '550044709', 6, 'B8', null, false, 'palet isi B8') r) x));
+select pg_temp.check('wrong item on the pallet -> WRONG_SKU only',
+  record_pick_audit(pg_temp.task('PA3', 1), 'Sari', '550024919', 4, 'C1', null, false, null)->'errors' = '["WRONG_SKU"]'::jsonb);
+select pg_temp.check('damaged cartons -> DAMAGED',
+  record_pick_audit(pg_temp.task('PA3', 1), 'Sari', '550044709', 4, 'A7', null, true, 'karton penyok')->'errors' = '["DAMAGED"]'::jsonb);
+select pg_temp.check('line shows the latest attempt; shipment states follow',
+  (select line_state = 'MISMATCH' and attempts = 2 from pg_temp.line('PA2', 3))
+  and (pg_temp.ship('PA1')).state = 'READY_LOAD' and (pg_temp.ship('PA2')).state = 'HAS_MISMATCH');
+
 rollback;
