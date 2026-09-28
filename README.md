@@ -27,14 +27,12 @@
 <p align="center">
   <a href="#fitur"><img src="https://img.shields.io/badge/%F0%9F%93%8D-Fitur-2563EB?style=for-the-badge" alt="Fitur" /></a>
   <a href="#angka"><img src="https://img.shields.io/badge/%F0%9F%93%8A-Angka-0F766E?style=for-the-badge" alt="Angka" /></a>
-  <a href="#uji"><img src="https://img.shields.io/badge/%E2%9C%85-Status%20uji-16A34A?style=for-the-badge" alt="Status uji" /></a>
-  <a href="#setup"><img src="https://img.shields.io/badge/%F0%9F%93%A7-Setup-B45309?style=for-the-badge" alt="Setup" /></a>
-  <a href="#fase"><img src="https://img.shields.io/badge/%F0%9F%93%81-Fase-6D28D9?style=for-the-badge" alt="Fase" /></a>
-  <a href="#desain"><img src="https://img.shields.io/badge/%F0%9F%A7%A0-Keputusan%20desain-9333EA?style=for-the-badge" alt="Keputusan desain" /></a>
-  <a href="#catatan"><img src="https://img.shields.io/badge/%F0%9F%93%9C-Catatan-475569?style=for-the-badge" alt="Catatan" /></a>
+  <a href="#5-yang-sudah-diuji--belum"><img src="https://img.shields.io/badge/%E2%9C%85-Status%20uji-16A34A?style=for-the-badge" alt="Status uji" /></a>
+  <a href="#2-setup"><img src="https://img.shields.io/badge/%F0%9F%93%A7-Setup-B45309?style=for-the-badge" alt="Setup" /></a>
+  <a href="#3-per-fase-file-perintah-cara-uji"><img src="https://img.shields.io/badge/%F0%9F%93%81-Fase-6D28D9?style=for-the-badge" alt="Fase" /></a>
+  <a href="#4-keputusan-design-untuk-laporan-magang"><img src="https://img.shields.io/badge/%F0%9F%A7%A0-Keputusan%20desain-9333EA?style=for-the-badge" alt="Keputusan desain" /></a>
+  <a href="#6-catatan-teknis"><img src="https://img.shields.io/badge/%F0%9F%93%9C-Catatan-475569?style=for-the-badge" alt="Catatan" /></a>
 </p>
-
-<a id="angka"></a>
 
 ## 📊 Angka
 
@@ -45,8 +43,6 @@
 | **2.570** | **106** | **1.790** | **52.078** | **1.293** | **8** / 51 tugas |
 
 </p>
-
-<a id="fitur"></a>
 
 ## ✨ Fitur
 
@@ -70,8 +66,6 @@
 </details>
 
 ---
-
-<a id="konfirmasi"></a>
 
 ## ⚠️ 1. Konfirmasi dulu sebelum go-live
 
@@ -105,11 +99,7 @@ Nilai berikut **asumsi**. Ubah di file/menu yang disebut, jangan di banyak tempa
 
 ---
 
-<a id="setup"></a>
-
 ## 2. Setup
-
-<a id="setup-supabase"></a>
 
 ### 2.1 Supabase
 
@@ -131,8 +121,6 @@ python3 scripts/generate_seed.py path/ke/Warehouse_Management_System.xlsx
 ```
 Untuk update rutin, pakai menu **Import** di aplikasi (tercatat sebagai mutasi), bukan seed.
 
-<a id="setup-sql"></a>
-
 ### 2.2 Uji SQL lokal (tanpa Supabase)
 
 ```bash
@@ -152,8 +140,6 @@ psql -f supabase/tests/10_pick_audit.sql     # audit picking (0024), idem
 ```
 Atau semuanya sekaligus di database lokal sementara: `scripts/sql-test.sh`.
 
-<a id="setup-app"></a>
-
 ### 2.3 Aplikasi
 
 ```bash
@@ -163,19 +149,13 @@ npm run dev                  # http://localhost:3000
 ```
 Kamera ponsel butuh **HTTPS** (atau localhost). Untuk uji di ponsel saat dev: `npx next dev --experimental-https` atau deploy ke Vercel.
 
-<a id="setup-deploy"></a>
-
 ### 2.4 Deploy ke Vercel
 
 Import repo di Vercel → isi 3 environment variable yang sama → Deploy. Vercel mendeteksi Next.js otomatis (`vercel.json` lama untuk web statis sudah dihapus).
 
 ---
 
-<a id="fase"></a>
-
 ## 3. Per fase: file, perintah, cara uji
-
-<a id="fase-1"></a>
 
 ### Fase 1 — Skema, migrasi, RLS, seed
 File: `supabase/migrations/*`, `supabase/seed.sql`, `scripts/generate_seed.py`, `supabase/tests/*`.
@@ -187,39 +167,27 @@ select * from bin_summary where bin_code = 'CA01C01';
 ```
 Uji aturan stok & RLS di Postgres lokal (bukan Supabase): `psql -f supabase/tests/00_local_auth_stub.sql`, migrasi, seed, lalu `01_rls_and_stock_rules.sql`.
 
-<a id="fase-2"></a>
-
 ### Fase 2 — Import
 File: `app/(app)/admin/import/*`, `lib/import-validate.ts`, `lib/read-sheet.ts`, fungsi SQL `import_snapshot`.
 Uji: Import → pilih file WMS → sheet `WMS` & baris judul 4 terdeteksi otomatis → Validasi. Hasil yang diharapkan untuk file 24 Sep: **2.468 ok, 146 peringatan, 1 error** (CC01C01 berisi `#VALUE!`). Impor ulang file yang sama setelah seed → **0 mutasi**.
-
-<a id="fase-3"></a>
 
 ### Fase 3 — Label
 File: `lib/labels.ts`, `app/api/labels/route.ts`, `app/(app)/labels/*`.
 Uji: Label → Satu rak → CA / 01 → Strip → Buat PDF. Satu halaman = satu tiang (posisi 01 atau 02), lebar 80 mm, 5 sel × 85 mm + panah 22 mm atas/bawah = 469 mm. Mode **Per sel** = halaman 80 × 85 mm. Cetak di skala **100%**. Contoh hasil: `docs/label-samples/`.
 
-<a id="fase-4"></a>
-
 ### Fase 4 — Scan & detail bin
 File: `app/(app)/scan/*`, `app/(app)/bin/[code]/*`, `components/bin/*`, `components/scan/*`.
 Uji: buka `/scan` di ponsel → Scan pakai kamera → arahkan ke label → halaman bin terbuka. Coba ketik `XX99` → pesan "bukan format bin". Pick melebihi stok → ditolak database.
 
-<a id="fase-5"></a>
-
 ### Fase 5 — 3D
 File: `components/warehouse/*`, `app/(app)/warehouse/*`, `app/api/warehouse/route.ts`.
 Uji: `/warehouse` → ganti mode warna → klik kotak → panel detail. Cari `CB12` (semua bin rak CB12) atau SKU `550070612`.
-
-<a id="fase-6"></a>
 
 ### Fase 6 — Dashboard & laporan
 File: `app/(app)/dashboard/page.tsx`, `app/(app)/movements/page.tsx`, `app/api/movements/export/route.ts`, `lib/movement-query.ts`.
 Uji: Dashboard → angka total bin 2.570. Mutasi → filter jenis `adjustment` → Export .xlsx.
 
 ---
-
-<a id="fase-7"></a>
 
 ### Fase 7 — Alokasi & wave (dari FEFO allocator)
 
@@ -252,8 +220,6 @@ Stok database (inventory_detail) ───────┘        (supervisor)   
 
 Uji: `npm test` (mesin FEFO + paritas stok database vs workbook). SQL: lihat bagian 5.
 
-<a id="fase-8"></a>
-
 ### Fase 8 — Kontrol inventory
 
 Cara kerja, aturan, dan rutinitas harian: **`docs/INVENTORY_CONTROL.md`**. Migrasi `0016`–`0023`:
@@ -266,8 +232,6 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 `tests/min-shelf-life.test.ts`.
 
 ---
-
-<a id="desain"></a>
 
 ## 4. Keputusan desain (untuk laporan magang)
 
@@ -354,8 +318,6 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 
 ---
 
-<a id="uji"></a>
-
 ## 5. Yang sudah diuji / belum
 
 **✅ Sudah** — di sandbox pengembangan:
@@ -376,8 +338,6 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 - [ ] Cetak fisik di printer gudang dan scan dengan ponsel operator.
 
 ---
-
-<a id="catatan"></a>
 
 ## 6. Catatan teknis
 
