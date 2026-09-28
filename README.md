@@ -67,7 +67,9 @@ psql -f supabase/tests/06_audits.sql            # idem
 psql -f supabase/tests/07_stock_fixes.sql       # idem
 psql -f supabase/tests/08_cycle_count.sql       # idem
 psql -f supabase/tests/09_inventory_control.sql # kontrol inventory (0016–0023), idem
+psql -f supabase/tests/10_pick_audit.sql     # audit picking (0024), idem
 ```
+Atau semuanya sekaligus di database lokal sementara: `scripts/sql-test.sh`.
 
 ### 2.3 Aplikasi
 ```bash

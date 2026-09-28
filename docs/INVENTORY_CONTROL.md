@@ -89,6 +89,15 @@ Situs memakai satu akun bersama, jadi "orang" di sini adalah **nama yang
 diketik** di setiap langkah (disimpan di perangkat, tercatat di riwayat
 mutasi). Aturannya tetap dijalankan database: nama yang sama ditolak.
 
+    ## 4a. Audit picking sebelum muat
+
+    Setiap baris yang dipick dihitung ulang di staging oleh orang lain (bukan pickernya), tanpa melihat jumlah dan batch dari picker. Checker scan karton atau ketik SKU, tulis batch, expired (bila tercetak), jumlah dan tanda rusak; sistem yang membandingkan: kurang, lebih, SKU salah, batch salah, expired beda, rusak.
+
+    - Selisih diperbaiki di lantai lalu diaudit ulang. Supervisor (bukan picker, bukan checker) boleh **terima kurang** atau **terima batch lain**; stok dikoreksi dengan kode `PICK_AUDIT` dan bin asal dijadwalkan hitung ulang.
+    - Shipment hanya bisa **dimuat** bila semua barisnya lolos. Setelah dimuat tidak bisa diubah.
+    - Akurasi picking dihitung dari percobaan pertama (Audit picking → Akurasi picking): per picker, SKU, aisle dan jenis kesalahan, plus kepatuhan scan.
+    
+
 ## 5. Mengukur
 
 **Inventory → Akurasi & adjustment**:

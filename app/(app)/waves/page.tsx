@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { OutboundRow, TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
+import type { ShipmentState } from "@/lib/pick-audit";
 import { WavesClient, type OutboundDetail } from "./waves-client";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
   const supabase = await createClient();
 
-  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }] = await Promise.all([
+  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }] = await Promise.all([
     supabase.from("waves").select("id, wave_no, planned_date, shipment_numbers, truck, destination, planned_slot, status")
       .eq("planned_date", date).order("planned_slot", { nullsFirst: false }).order("wave_no"),
     fetchAll<TaskRow>((from, to) => supabase.from("pick_task_detail").select("*").eq("planned_date", date).order("seq").order("id").range(from, to)),
@@ -24,12 +25,13 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
       .eq("outbound_date", date).order("shipment_number"),
     supabase.from("waves").select("planned_date").order("planned_date", { ascending: false }).limit(200),
     supabase.from("task_shortfalls").select("task_id").eq("planned_date", date),
+    supabase.from("pick_audit_shipment").select("wave_id, shipment_number, state").eq("planned_date", date),
   ]);
   const dates = [...new Set((recent ?? []).map((r) => r.planned_date as string))].slice(0, 7);
 
   return (
     <main>
-      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements"]}>
+      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads"]}>
         <form className="flex items-center gap-2">
           <Input type="date" name="date" defaultValue={date} className="w-auto" aria-label="Tanggal" />
           <Button type="submit" variant="outline">Tampilkan</Button>
@@ -48,6 +50,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           tasks={tasks}
           outbound={(outbound ?? []) as (OutboundRow & OutboundDetail)[]}
           shortfalls={(shortfalls ?? []).map((r) => r.task_id as string)}
+          audit={Object.fromEntries((auditStates ?? []).map((a) => [`${a.wave_id}|${a.shipment_number}`, a.state as ShipmentState]))}
         />
       </div>
     </main>

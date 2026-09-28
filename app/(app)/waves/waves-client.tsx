@@ -14,6 +14,7 @@ import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import type { Role } from "@/lib/types";
 import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
+import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
 
 // jsPDF is ~380 kB: load it only when someone actually prints.
@@ -58,10 +59,12 @@ function StatusTag({ status }: { status: string }) {
  * (stock changes here, not when the plan was saved). Supervisors can also
  * cancel or reschedule; operators only execute.
  */
-export function WavesClient({ date, role, waves, tasks, outbound, shortfalls }: {
+export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit }: {
   date: string; role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
+  /** audit / loading state per `${wave_id}|${shipment}` (0024) */
+  audit: Record<string, ShipmentState>;
 }) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
@@ -127,7 +130,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls }: 
         </div>
       </div>
       {waves.map((w) => (
-        <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} onDone={() => router.refresh()}
+        <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} audit={audit} onDone={() => router.refresh()}
           print={() => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`)}
           tasks={tasks.filter((t) => t.wave_id === w.id)} outbound={outbound.filter((o) => o.wave_id === w.id)} />
       ))}
@@ -135,10 +138,10 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls }: 
   );
 }
 
-function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, onDone, print }: {
+function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onDone, print }: {
   wave: WaveRow; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[]; supervisor: boolean; print: () => void;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>;
-  short: Set<string>; onDone: () => void;
+  short: Set<string>; audit: Record<string, ShipmentState>; onDone: () => void;
 }) {
   const [showOrders, setShowOrders] = useState(false);
   const [person] = usePersonName();
@@ -161,7 +164,15 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, onDone, pr
             {w.planned_slot && <span className="text-sm font-semibold">{w.planned_slot}</span>}
           </div>
           <p className="flex flex-wrap items-center gap-x-2 text-sm text-steel-500">
-            <Truck className="h-4 w-4" />{w.truck ?? "–"} · {w.destination || "–"} · shipment {w.shipment_numbers.join(", ")}
+            <Truck className="h-4 w-4" />{w.truck ?? "–"} · {w.destination || "–"} · shipment {w.shipment_numbers.map((sh, i) => {
+              const st = audit[`${w.id}|${sh}`];
+              return (
+                <span key={sh}>{i > 0 && ", "}{sh}
+                  {st && <Link href={`/audit/picking/${w.id}/${encodeURIComponent(sh)}`}
+                    className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</Link>}
+                </span>
+              );
+            })}
           </p>
           <div className="h-1.5 w-48 overflow-hidden rounded bg-steel-100" aria-label={`${done} dari ${live} tugas selesai`}>
             <div className="h-full bg-ok" style={{ width: `${live ? (done / live) * 100 : 0}%` }} />

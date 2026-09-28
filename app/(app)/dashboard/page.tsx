@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth";
-import { quantityAccuracy } from "@/lib/inventory-control";
+import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
@@ -42,7 +42,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const todayStart = new Date(`${today}T00:00:00+07:00`);
   const accSince = new Date(Date.now() - ACCURACY_DAYS * 86_400_000).toISOString();
   const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
-    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }] = await Promise.all([
+    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }] = await Promise.all([
     fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
@@ -57,6 +57,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     supabase.from("stock_holds").select("id", { count: "exact", head: true }).eq("status", "ACTIVE"),
     supabase.from("receipts").select("id", { count: "exact", head: true }).in("status", ["OPEN", "CHECKED"]),
     supabase.from("stock_recon_summary").select("as_of, accuracy_pct, open_diffs").order("as_of", { ascending: false }).limit(1).maybeSingle(),
+    fetchAll<{ result: string }>((a, b) => supabase.from("pick_audit_first").select("result").gte("audited_at", accSince).order("task_id").range(a, b)),
+    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).in("state", ["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD"]),
+    supabase.rpc("inventory_policy"),
   ]);
   const cycleOk = cycleApplied.filter((c) => Number(c.variance_qty ?? 0) <= Number(c.tolerance)).length;
   const qtyIra = quantityAccuracy(cycleApplied);
@@ -119,7 +122,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     const a = audits.filter((x) => x.kind === k);
     return { n: a.length, ok: a.filter((x) => x.result === "OK").length };
   };
-  const pickAcc = acc("PICK"), putAcc = acc("PUTAWAY");
+  const pickAcc = { n: pickFirsts.length, ok: pickFirsts.filter((x) => x.result === "OK").length };
+  const putAcc = acc("PUTAWAY");
+  const pickTarget = parsePolicy(policyRaw).pick_accuracy_target_pct;
   const pct = (x: { n: number; ok: number }) => (x.n ? `${Math.round((x.ok / x.n) * 1000) / 10}%` : "–");
   const recentPicks = recentTasks.filter((t) => t.task_type === "PICK");
   const deviated = recentPicks.filter((t) =>
@@ -173,7 +178,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <main>
-      <PageHeader title="Dashboard gudang" live={["pick_tasks", "movements", "audits", "count_tasks", "stock_holds", "adjustment_requests", "receipts"]} liveDebounceMs={5000} />
+      <PageHeader title="Dashboard gudang" live={["pick_tasks", "movements", "audits", "count_tasks", "stock_holds", "adjustment_requests", "receipts", "pick_audits", "shipment_loads"]} liveDebounceMs={5000} />
       <div className="space-y-6 p-4 lg:p-8">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Kpi label="Total bin" value={fmtNum(bins.length)} note={`${fmtNum(rackBins.length)} rak · ${fmtNum(bins.length - rackBins.length)} lantai`} />
@@ -196,7 +201,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <section aria-labelledby="acc" className="space-y-2">
           <h2 id="acc" className="font-cond text-lg font-semibold">Akurasi · {ACCURACY_DAYS} hari terakhir</h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Akurasi picking (audit)" value={pct(pickAcc)} note={`${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} diaudit · target ≥ 99,5%`} href="/audit/picking" tone={pickAcc.n && pickAcc.ok / pickAcc.n < 0.995 ? "warn" : undefined} />
+            <Kpi label="Akurasi picking (audit)" value={pct(pickAcc)} note={`percobaan pertama · ${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} · target ≥ ${fmtNum(pickTarget, 1)}%`} href="/audit/picking?tab=akurasi" tone={pickAcc.n && (pickAcc.ok / pickAcc.n) * 100 < pickTarget ? "warn" : undefined} />
+            <Kpi label="Shipment menunggu audit / muat" value={fmtNum(shipmentsWaiting ?? 0)} note="semua baris harus lolos audit sebelum dimuat" href="/audit/picking" tone={shipmentsWaiting ? "warn" : undefined} />
             <Kpi label="Akurasi putaway (audit)" value={pct(putAcc)} note={`${fmtNum(putAcc.ok)} OK dari ${fmtNum(putAcc.n)} diaudit · target ≥ 99,5%`} href="/audit/putaway" tone={putAcc.n && putAcc.ok / putAcc.n < 0.995 ? "warn" : undefined} />
             <Kpi label="Picker lapor beda" value={recentPicks.length ? `${Math.round((deviated / recentPicks.length) * 1000) / 10}%` : "–"} note={`${fmtNum(deviated)} dari ${fmtNum(recentPicks.length)} pick selesai`} />
             <Kpi label="Akurasi stok (cycle count)" value={qtyIra === null ? "–" : `${qtyIra.toFixed(1)}%`}
