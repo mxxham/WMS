@@ -36,7 +36,7 @@
 
 </p>
 
-## 📊 Angka
+## Angka
 
 <p align="center">
 
@@ -46,7 +46,7 @@
 
 </p>
 
-## ✨ Fitur
+## Fitur
 
 | | Fitur | Yang dikerjakan |
 |:--:|---|---|
