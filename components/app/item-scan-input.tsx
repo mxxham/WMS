@@ -16,7 +16,7 @@ export type ScannedItem = { sku: string; description: string; uom: string | null
  * resolved against the item master (SKU or EAN, item_by_barcode).
  */
 export function ItemScanInput({ value, onChange, onItem, id, placeholder = "SKU / scan barcode", autoFocus }: {
-  value: string; onChange: (v: string) => void; onItem?: (item: ScannedItem | null) => void;
+  value: string; onChange: (v: string) => void; onItem?: (item: ScannedItem | null, code: string) => void;
   id?: string; placeholder?: string; autoFocus?: boolean;
 }) {
   const [camera, setCamera] = useState(false);
@@ -30,7 +30,7 @@ export function ItemScanInput({ value, onChange, onItem, id, placeholder = "SKU 
     const item = ((data ?? []) as ScannedItem[])[0] ?? null;
     setError(item ? null : `${c} tidak dikenal: bukan SKU atau barcode di master item`);
     if (item) onChange(item.sku);
-    onItem?.(item);
+    onItem?.(item, c);
   }
 
   return (

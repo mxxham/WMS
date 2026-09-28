@@ -30,7 +30,7 @@ const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   ] },
   { title: "Kontrol", links: [
     { href: "/counts", label: "Cycle count", icon: ListTodo, roles: ALL },
-    { href: "/audit/picking", label: "Audit picking", icon: PackageCheck, roles: SUP },
+    { href: "/audit/picking", label: "Audit picking", icon: PackageCheck, roles: ALL },
     { href: "/audit/putaway", label: "Audit putaway", icon: ClipboardCheck, roles: SUP },
     { href: "/data-quality", label: "Kualitas data", icon: ShieldCheck, roles: SUP },
     { href: "/trace", label: "Lacak batch", icon: Route, roles: SUP },

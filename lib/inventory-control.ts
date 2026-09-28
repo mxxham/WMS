@@ -16,10 +16,11 @@ export const REASON_CODES = {
   RETURN: "Retur",
   OPENING: "Saldo awal / impor",
   OTHER: "Lainnya",
+  PICK_AUDIT: "Koreksi audit picking",
 } as const;
 export type ReasonCode = keyof typeof REASON_CODES;
-/** Codes a person picks by hand (OPENING is set by imports only). */
-export const MANUAL_REASONS = (Object.keys(REASON_CODES) as ReasonCode[]).filter((c) => c !== "OPENING");
+/** Codes a person picks by hand (OPENING is set by imports, PICK_AUDIT by the picking audit). */
+export const MANUAL_REASONS = (Object.keys(REASON_CODES) as ReasonCode[]).filter((c) => c !== "OPENING" && c !== "PICK_AUDIT");
 
 export const HOLD_REASONS = {
   QC_HOLD: "Tunggu QC / Shell",
@@ -40,6 +41,7 @@ export type InventoryPolicy = {
   recount_on_variance: boolean;
   ira_target_pct: number;
   require_scan_on_pick: boolean;
+  pick_accuracy_target_pct: number;
 };
 
 export const POLICY_DEFAULTS: InventoryPolicy = {
@@ -51,6 +53,7 @@ export const POLICY_DEFAULTS: InventoryPolicy = {
   recount_on_variance: true,
   ira_target_pct: 98,
   require_scan_on_pick: false,
+  pick_accuracy_target_pct: 99.5,
 };
 
 export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: string }> = {
@@ -62,6 +65,7 @@ export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: 
   recount_on_variance: { label: "Hitung ulang buta bila ada selisih", help: "Hitungan yang berbeda dari sistem dihitung ulang oleh orang lain sebelum boleh diterapkan." },
   ira_target_pct: { label: "Target akurasi stok (%)", help: "Target Inventory Record Accuracy." },
   require_scan_on_pick: { label: "Wajib scan barcode karton saat konfirmasi pick", help: "Hanya untuk SKU yang barcode-nya sudah diisi di Master item." },
+  pick_accuracy_target_pct: { label: "Target akurasi picking (%)", help: "Baris yang lolos audit pada percobaan pertama. Umumnya 99,5%." },
 };
 
 export function parsePolicy(v: unknown): InventoryPolicy {

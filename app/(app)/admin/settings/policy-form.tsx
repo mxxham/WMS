@@ -8,7 +8,7 @@ import { Input, Label } from "@/components/ui/input";
 import { POLICY_LABEL, type InventoryPolicy } from "@/lib/inventory-control";
 import { cn } from "@/lib/utils";
 
-const NUMBERS = ["default_shelf_life_months", "min_dispatch_days", "near_expiry_days", "adjust_approval_qty", "ira_target_pct"] as const;
+const NUMBERS = ["default_shelf_life_months", "min_dispatch_days", "near_expiry_days", "adjust_approval_qty", "ira_target_pct", "pick_accuracy_target_pct"] as const;
 const FLAGS = ["recount_on_variance", "require_scan_on_pick"] as const;
 
 /** The rules every inventory control reads (inventory_policy, 0016). */
@@ -32,7 +32,7 @@ export function PolicyForm({ policy }: { policy: InventoryPolicy }) {
           {NUMBERS.map((k) => (
             <div key={k}>
               <Label htmlFor={k}>{POLICY_LABEL[k].label}</Label>
-              <Input id={k} type="number" min={0} value={v[k]} onChange={(e) => setV({ ...v, [k]: Number(e.target.value) })} />
+              <Input id={k} type="number" min={0} step="any" value={v[k]} onChange={(e) => setV({ ...v, [k]: Number(e.target.value) })} />
               <p className="mt-1 text-xs text-steel-500">{POLICY_LABEL[k].help}</p>
             </div>
           ))}

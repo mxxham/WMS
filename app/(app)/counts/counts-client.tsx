@@ -28,7 +28,7 @@ export type CountTask = {
 };
 
 const key = (l: { sku: string; batch_lot: string; expiry_date: string | null }) => `${l.sku}|${l.batch_lot ?? ""}|${(l.expiry_date ?? "").slice(0, 10)}`;
-const SOURCE: Record<string, string> = { MANUAL: "Manual", PUTAWAY: "Konflik putaway", DATA_QUALITY: "Kualitas data", CYCLE: "Cycle count", RECON: "Rekonsiliasi SAP", RECEIPT: "Penerimaan" };
+const SOURCE: Record<string, string> = { MANUAL: "Manual", PUTAWAY: "Konflik putaway", DATA_QUALITY: "Kualitas data", CYCLE: "Cycle count", RECON: "Rekonsiliasi SAP", RECEIPT: "Penerimaan", PICK_AUDIT: "Audit picking" };
 
 export type Schedule = {
   bins: number; due: Record<string, number>; neverCounted: number; countedLast30: number; accurateLast30: number;
