@@ -33,8 +33,19 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   ]);
   if (!s) notFound();
 
-  const view: LineView[] = ((lines ?? []) as LineRow[]).map((l) => ({
+  // What is in each line's source bin now, for that SKU (all batches).
+  const rows = (lines ?? []) as LineRow[];
+  const { data: stock } = rows.length
+    ? await supabase.from("inventory_detail").select("bin_code, sku, quantity").in("bin_code", [...new Set(rows.map((l) => l.from_bin))])
+    : { data: [] };
+  const inBin = new Map<string, number>();
+  for (const r of (stock ?? []) as { bin_code: string; sku: string; quantity: number }[]) {
+    inBin.set(`${r.bin_code}|${r.sku}`, (inBin.get(`${r.bin_code}|${r.sku}`) ?? 0) + Number(r.quantity));
+  }
+
+  const view: LineView[] = rows.map((l) => ({
     task_id: l.task_id, seq: l.seq, sku: l.sku, description: l.description, uom: l.uom, from_bin: l.from_bin,
+    bin_qty: inBin.get(`${l.from_bin}|${l.sku}`) ?? 0,
     picked_by_name: l.picked_by_name, bulk_posted: l.bulk_posted, state: l.line_state, attempts: l.attempts,
     picked: l.line_state === "TODO" ? undefined : {
       qty: Number(l.picked_qty), planned_qty: Number(l.planned_qty), batch: l.batch_lot, expiry: l.expiry_date, deviation: l.deviation_reason,
@@ -50,7 +61,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
 
   return (
     <main>
-      <PageHeader title={`Audit shipment ${ship}`} live={["pick_tasks", "pick_audits", "shipment_loads", "waves"]} />
+      <PageHeader title={`Audit shipment ${ship}`} live={["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
       <div className="p-4 lg:p-8">
         <ShipmentAuditClient shipment={s as ShipmentRow} lines={view} attempts={tries} supervisor={user.role !== "operator"} />
       </div>

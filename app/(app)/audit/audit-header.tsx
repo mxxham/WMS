@@ -12,7 +12,7 @@ export function auditDate(raw: string | undefined): string {
 
 export function AuditHeader({ title, date, active, live = ["audits", "movements", "pick_tasks"], putaway = true }: {
   title: string; date: string; active: "picking" | "putaway"; live?: LiveTable[];
-  /** show the picking / putaway switch (putaway audit is supervisor-only) */
+  /** show the picking / putaway switch */
   putaway?: boolean;
 }) {
   return (

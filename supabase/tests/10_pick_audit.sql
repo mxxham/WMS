@@ -248,9 +248,12 @@ select pg_temp.check('cancelled wave: no audit',
     'Wave dibatalkan%'));
 select pg_temp.check('the old audit function no longer takes picks',
   pg_temp.fails(format($q$select record_audit('PICK', %L, 4, true, true, null)$q$, pg_temp.task('PA3', 1)), 'Pakai audit picking baru%'));
-select pg_temp.check('first attempts only: 5 lines, 2 OK (PA1 #1, #2)',
-  (select count(*) = 5 and count(*) filter (where result = 'OK') = 2 and bool_and(minutes_to_audit is not null)
+select pg_temp.check('first attempts only: 4 lines, 2 OK (PA1 #1, #2)',
+  (select count(*) = 4 and count(*) filter (where result = 'OK') = 2 and bool_and(minutes_to_audit is not null)
    from pick_audit_first where planned_date = '2026-10-06'));
+select pg_temp.check('cancelled wave: unloaded PA5 leaves the KPIs, loaded PA1/PA2 stay (0026)',
+  not exists (select 1 from pick_audit_first where planned_date = '2026-10-06' and shipment_number = 'PA5')
+  and (select count(*) from pick_audit_first where planned_date = '2026-10-06' and shipment_number in ('PA1', 'PA2')) = 3);
 
 -- Legacy: a pick audited the old way before this migration. (save_plan's on-commit temp tables
 -- are dropped first: a second plan in one transaction would collide with them.)

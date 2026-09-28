@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ClipboardCheck, Truck, XCircle } from "lucide-react";
@@ -21,6 +21,8 @@ import { StateBadge, type ShipmentRow } from "../../shipment-list";
 
 export type LineView = {
   task_id: string; seq: number; sku: string; description: string; uom: string | null; from_bin: string;
+  /** current stock of this SKU in from_bin, all batches */
+  bin_qty: number;
   picked_by_name: string | null; bulk_posted: boolean; state: LineState; attempts: number;
   /** only once the line has been audited (or was picked as 0): what the picker reported */
   picked?: { qty: number; planned_qty: number; batch: string; expiry: string | null; deviation: string | null };
@@ -49,12 +51,23 @@ const LINE_TONE: Record<LineState, string> = {
 export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }: {
   shipment: ShipmentRow; lines: LineView[]; attempts: AttemptView[]; supervisor: boolean;
 }) {
-  const [audit, setAudit] = useState<LineView | null>(null);
+  const [audit, setAudit] = useState<{ line: LineView; flash?: string } | null>(null);
   const [resolve, setResolve] = useState<{ line: LineView; attempt: AttemptView; action: Resolution } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Lines saved in this session: the server list catches up after refresh.
+  const [saved, setSaved] = useState<Set<string>>(new Set());
   const frozen = s.state === "LOADED" || s.state === "CANCELLED";
   const byTask = new Map<string, AttemptView[]>();
   for (const a of attempts) byTask.set(a.task_id, [...(byTask.get(a.task_id) ?? []), a]);
+
+  /** Marks `from` as saved and returns the next line still to audit (after it, wrapping round), if any. */
+  function nextTodo(from: LineView): { line: LineView; left: number } | null {
+    const skip = new Set(saved).add(from.task_id);
+    setSaved(skip);
+    const todo = lines.filter((l) => l.state === "TODO" && !skip.has(l.task_id));
+    const line = todo.find((l) => l.seq > from.seq) ?? todo[0];
+    return line ? { line, left: todo.length } : null;
+  }
 
   return (
     <div className="space-y-4">
@@ -82,7 +95,7 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
       <Card>
         <CardContent>
           <Table>
-            <thead><tr><Th>#</Th><Th>SKU</Th><Th>Bin asal</Th><Th>Picker</Th><Th>Status</Th><Th>Dipick / audit</Th><Th /></tr></thead>
+            <thead><tr><Th>#</Th><Th>SKU</Th><Th>Bin asal</Th><Th>Sisa di bin</Th><Th>Picker</Th><Th>Status</Th><Th>Dipick / audit</Th><Th /></tr></thead>
             <tbody>{lines.map((l) => {
               const hist = byTask.get(l.task_id) ?? [];
               const last = hist[hist.length - 1];
@@ -92,6 +105,7 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
                   <Td className="tabular">{l.seq}</Td>
                   <Td><span className="font-semibold">{l.sku}</span><br /><span className="text-xs text-steel-500">{l.description}</span></Td>
                   <Td className="font-semibold">{l.from_bin}</Td>
+                  <Td className="tabular">{fmtNum(l.bin_qty)} {l.uom ?? ""}</Td>
                   <Td className="text-xs">{l.picked_by_name ?? "(tidak tercatat)"}
                     {l.bulk_posted && <span className="block text-warn">diposting massal, tanpa scan</span>}</Td>
                   <Td className={cn("text-xs font-semibold", LINE_TONE[l.state])}>{LINE_STATE_LABEL[l.state]}</Td>
@@ -104,7 +118,7 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
                   </Td>
                   <Td className="space-y-1 text-right">
                     {!frozen && (l.state === "TODO" || l.state === "MISMATCH") && (
-                      <Button size="sm" variant={l.state === "TODO" ? "default" : "outline"} onClick={() => setAudit(l)}>
+                      <Button size="sm" variant={l.state === "TODO" ? "default" : "outline"} onClick={() => setAudit({ line: l })}>
                         <ClipboardCheck className="h-4 w-4" />{l.state === "TODO" ? "Audit" : "Audit ulang"}
                       </Button>
                     )}
@@ -119,7 +133,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
         </CardContent>
       </Card>
 
-      {audit && <AuditDialog line={audit} onClose={() => setAudit(null)} />}
+      {audit && <AuditDialog key={audit.line.task_id} line={audit.line} flash={audit.flash} next={nextTodo}
+        onOpen={(line, flash) => setAudit({ line, flash })} onClose={() => setAudit(null)} />}
       {resolve && <ResolveDialog {...resolve} onClose={() => setResolve(null)} />}
       {loading && <LoadDialog shipment={s} onClose={() => setLoading(false)} />}
     </div>
@@ -144,7 +159,16 @@ function AttemptLine({ a }: { a: AttemptView }) {
   );
 }
 
-function AuditDialog({ line, onClose }: { line: LineView; onClose: () => void }) {
+/**
+ * One line's audit. An OK save goes straight on to the next line still to
+ * audit (checker name kept, cursor on the scan field); a mismatch stops and
+ * shows the difference, with a button to carry on.
+ */
+function AuditDialog({ line, flash, next, onOpen, onClose }: {
+  line: LineView; flash?: string;
+  next: (from: LineView) => { line: LineView; left: number } | null;
+  onOpen: (line: LineView, flash: string) => void; onClose: () => void;
+}) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
   const [skuInput, setSkuInput] = useState("");
@@ -157,6 +181,9 @@ function AuditDialog({ line, onClose }: { line: LineView; onClose: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SaveResult | null>(null);
+  const [upNext, setUpNext] = useState<{ line: LineView; left: number } | null>(null);
+  const batchRef = useRef<HTMLInputElement>(null);
+  const countRef = useRef<HTMLInputElement>(null);
 
   const n = Number(counted);
   const valid = checker.trim().length >= 2 && !!found && counted.trim() !== "" && Number.isFinite(n) && n >= 0;
@@ -172,28 +199,37 @@ function AuditDialog({ line, onClose }: { line: LineView; onClose: () => void })
     });
     setBusy(false);
     if (error) return setError(error.message);
-    setSaved(data as SaveResult);
+    const r = data as SaveResult;
+    const following = next(line);
     router.refresh();
+    if (r.result === "OK" && following) {
+      return onOpen(following.line, `#${line.seq} ${line.sku} sesuai · ${following.left} baris lagi`);
+    }
+    setUpNext(following);
+    setSaved(r);
   }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={`Audit #${line.seq} · ${line.sku}`} description={`${line.description} · dari ${line.from_bin}`}>
-        {saved ? <SavedResult r={saved} onClose={onClose} /> : (
+        {saved ? <SavedResult r={saved} onClose={onClose}
+          next={upNext && { label: `#${upNext.line.seq} ${upNext.line.sku}`, go: () => onOpen(upNext.line, "") }} /> : (
           <form onSubmit={save} className="space-y-4">
+            {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             <p className="rounded-md bg-plate/30 p-3 text-sm">Hitung dan catat apa yang ada di palet. Jumlah dan batch dari picker tidak ditampilkan.</p>
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan picker baris ini)" id="checker" />
             <div>
               <Label htmlFor="found">Scan karton / ketik SKU yang ada di palet</Label>
               <ItemScanInput id="found" value={skuInput} autoFocus
                 onChange={(v) => { setSkuInput(v); if (found && v !== found.sku && v !== found.code) setFound(null); }}
-                onItem={(it, code) => setFound(it ? { code, sku: it.sku } : null)} />
+                onItem={(it, code) => { setFound(it ? { code, sku: it.sku } : null); if (it) batchRef.current?.focus(); }} />
               {found && <p className="mt-1 text-xs font-semibold text-ok">Terbaca: {found.sku}</p>}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="batch">Batch di karton</Label>
-                <Input id="batch" value={batch} onChange={(e) => setBatch(e.target.value)} placeholder="mis. 14H26JJ" autoCapitalize="characters" />
+                <Input id="batch" ref={batchRef} value={batch}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); countRef.current?.focus(); } }} onChange={(e) => setBatch(e.target.value)} placeholder="mis. 14H26JJ" autoCapitalize="characters" />
               </div>
               <div>
                 <Label htmlFor="expiry">Expired (kalau tercetak)</Label>
@@ -203,11 +239,11 @@ function AuditDialog({ line, onClose }: { line: LineView; onClose: () => void })
             </div>
             <div>
               <Label htmlFor="counted">Jumlah karton dihitung</Label>
-              <Input id="counted" type="number" inputMode="numeric" min={0} step="any" value={counted} onChange={(e) => setCounted(e.target.value)} required />
+              <Input id="counted" ref={countRef} type="number" inputMode="numeric" min={0} step="any" value={counted} onChange={(e) => setCounted(e.target.value)} required />
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={damaged} onChange={(e) => setDamaged(e.target.checked)} />Ada karton rusak</label>
             <div>
-              <Label htmlFor="note">Catatan (opsional)</Label>
+              <Label htmlFor="note">Catatan (wajib bila tidak sesuai)</Label>
               <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. 2 karton penyok, label batch pudar" />
             </div>
             {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
@@ -219,7 +255,7 @@ function AuditDialog({ line, onClose }: { line: LineView; onClose: () => void })
   );
 }
 
-function SavedResult({ r, onClose }: { r: SaveResult; onClose: () => void }) {
+function SavedResult({ r, onClose, next }: { r: SaveResult; onClose: () => void; next: { label: string; go: () => void } | null }) {
   const rows: [string, string, string][] = [
     ["SKU", r.found.sku, r.expected.sku],
     ["Batch", r.found.batch || "–", r.expected.batch || "–"],
@@ -242,7 +278,8 @@ function SavedResult({ r, onClose }: { r: SaveResult; onClose: () => void }) {
         <p className="text-sm">Perbaiki di lantai: ambil yang kurang, kembalikan yang lebih, tukar barang atau batch yang salah. Setelah itu audit ulang.
           Supervisor bisa menerima kurang atau batch lain bila memang itu yang dikirim.</p>
       )}
-      <Button size="lg" className="w-full" onClick={onClose}>Tutup</Button>
+      {next && <Button size="lg" className="w-full" onClick={next.go}>Lanjut: {next.label}</Button>}
+      <Button size="lg" variant={next ? "outline" : "default"} className="w-full" onClick={onClose}>Tutup</Button>
     </div>
   );
 }

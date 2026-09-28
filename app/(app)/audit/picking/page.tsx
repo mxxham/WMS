@@ -5,6 +5,8 @@ import { SHIPMENT_STATE_LABEL, type ShipmentState } from "@/lib/pick-audit";
 import { fmtNum } from "@/lib/utils";
 import { AuditHeader, auditDate } from "../audit-header";
 import { AccuracyView } from "./accuracy-view";
+import { rackBins, rackSummary, RACK_STATE_LABEL, type RackState } from "./rack-data";
+import { RackList } from "./rack-list";
 import { ShipmentList, type ShipmentRow } from "./shipment-list";
 
 export const dynamic = "force-dynamic";
@@ -12,21 +14,41 @@ export const dynamic = "force-dynamic";
 const OPEN: ShipmentState[] = ["PICKING", "READY_AUDIT", "HAS_MISMATCH", "READY_LOAD"];
 
 /**
- * Every picked line is audited at staging by someone other than the picker;
- * a shipment is loaded only when all its lines passed (0024).
+ * Every picked line is audited by someone other than the picker, at the
+ * rack (0025, default tab) or at staging per shipment; a shipment is loaded
+ * only when all its lines passed (0024).
  */
 export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string }> }) {
   const user = await requireRole(["operator", "supervisor", "admin"]);
   const sp = await searchParams;
   const date = auditDate(sp.date);
   const supervisor = user.role !== "operator";
-  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : "shipment";
+  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : sp.tab === "shipment" ? "shipment" : "rak";
   const days = [7, 30, 90].includes(Number(sp.days)) ? Number(sp.days) : 30;
   const supabase = await createClient();
 
   let body: React.ReactNode;
   if (tab === "akurasi") body = <AccuracyView days={days} />;
-  else {
+  else if (tab === "rak") {
+    const racks = rackSummary(await rackBins(supabase, date));
+    const count = (s: RackState) => racks.filter((r) => r.state === s).length;
+    body = (
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          {(["TODO", "MISMATCH", "DONE"] as RackState[]).map((s) => (
+            <div key={s} className="rounded-lg border-l-4 border-ckb bg-white p-3">
+              <div className="font-cond text-3xl font-semibold tabular">{fmtNum(count(s))}</div>
+              <div className="text-xs text-steel-500">Rak {RACK_STATE_LABEL[s].toLowerCase()}</div>
+            </div>
+          ))}
+        </div>
+        <p className="text-sm text-steel-500">Checker menghitung sisa di bin yang dipick, rak demi rak. Buka rak untuk mulai.</p>
+        <RackList rows={racks} href={(z) => `/audit/picking/rak/${encodeURIComponent(z)}?date=${date}`}
+          empty="Belum ada pick di tanggal ini." head={["Bin dipick", "Baris"]}
+          unit={{ of: "bins", label: "bin", doneHead: "Sudah dihitung" }} />
+      </div>
+    );
+  } else {
     const [{ data: today }, { data: carried }] = await Promise.all([
       supabase.from("pick_audit_shipment").select("*").eq("planned_date", date).order("wave_no").order("shipment_number"),
       supabase.from("pick_audit_shipment").select("*").lt("planned_date", date).in("state", OPEN).order("planned_date").order("shipment_number"),
@@ -57,10 +79,11 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
 
   return (
     <main>
-      <AuditHeader title="Audit picking" date={date} active="picking" putaway={supervisor}
-        live={["pick_tasks", "pick_audits", "shipment_loads", "waves"]} />
-      {supervisor && <TabsNav base="/audit/picking" active={tab}
-        tabs={[{ key: "shipment", label: "Shipment" }, { key: "akurasi", label: "Akurasi picking" }]} />}
+      <AuditHeader title="Audit picking" date={date} active="picking"
+        live={["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
+      <TabsNav base="/audit/picking" active={tab}
+        tabs={[{ key: "rak", label: "Per rak" }, { key: "shipment", label: "Shipment" },
+               ...(supervisor ? [{ key: "akurasi", label: "Akurasi picking" }] : [])]} />
       <div className="p-4 lg:p-8">{body}</div>
     </main>
   );

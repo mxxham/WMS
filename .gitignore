@@ -39,3 +39,4 @@ picklist_*.xlsx
 .next/
 next-env.d.ts
 *.tsbuildinfo
+backups/

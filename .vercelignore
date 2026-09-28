@@ -7,3 +7,6 @@
 data/
 out/
 out-baseline/
+.omo
+.superpowers
+backups
