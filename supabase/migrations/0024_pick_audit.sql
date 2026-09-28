@@ -364,6 +364,111 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- 7. A supervisor accepts a mismatch instead of a floor fix
+--    ACCEPT_SHORT  ship what is there; the missing cartons go back on the
+--                  books in the source bin.
+--    ACCEPT_BATCH  ship the batch that is there; the planned batch goes
+--                  back to the source bin, the found batch comes out of
+--                  the bin it was taken from.
+--    Both open a recount of the source bin: its records were wrong or
+--    cartons are unaccounted for. No approval queue: the resolver is
+--    already a second person (≠ picker, ≠ checker).
+-- ---------------------------------------------------------------------
+create or replace function public.resolve_pick_mismatch(
+  p_audit_id uuid, p_action text, p_by_name text, p_note text, p_bin text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_name text; a public.pick_audits%rowtype; t record; v_latest int; v_src uuid; v_src_code text;
+  v_diff numeric; v_bin uuid; v_rows int; r public.inventory%rowtype; v_free numeric; v_count uuid; v_note text;
+begin
+  if not public.has_role(array['supervisor','admin']::public.user_role[]) then
+    raise exception 'Hanya supervisor atau admin yang bisa menerima selisih';
+  end if;
+  v_name := public.person_name(p_by_name, 'Nama supervisor');
+  if p_action not in ('ACCEPT_SHORT', 'ACCEPT_BATCH') then raise exception 'Tindakan tidak dikenal: %', p_action; end if;
+  v_note := nullif(trim(p_note), '');
+  if v_note is null then raise exception 'Alasan wajib diisi'; end if;
+
+  select * into a from public.pick_audits where id = p_audit_id;
+  if a.id is null then raise exception 'Audit tidak ditemukan'; end if;
+  select pt.id, pt.wave_id, pt.shipment_number, pt.item_id, pt.picked_by_name,
+         coalesce(pt.actual_from_bin_id, pt.from_bin_id) as src
+    into t
+  from public.pick_tasks pt where pt.id = a.task_id for update;
+  if exists (select 1 from public.shipment_loads where wave_id = t.wave_id and shipment_number = t.shipment_number) then
+    raise exception 'Shipment % sudah dimuat', t.shipment_number;
+  end if;
+  select max(attempt_no) into v_latest from public.pick_audits where task_id = a.task_id;
+  if a.attempt_no <> v_latest then raise exception 'Hanya audit terakhir baris ini yang bisa diputuskan'; end if;
+  if a.result <> 'MISMATCH' or a.resolution is not null then raise exception 'Audit ini tidak perlu diputuskan'; end if;
+  if public.same_person(v_name, t.picked_by_name) or public.same_person(v_name, a.checker_name) then
+    raise exception 'Yang memutuskan harus orang lain dari picker dan checker';
+  end if;
+  v_src := t.src;
+  select bin_code into v_src_code from public.bins where id = v_src;
+
+  perform set_config('app.by_name', v_name, true);
+  perform set_config('app.adjust_reason', 'PICK_AUDIT', true);
+  perform set_config('app.adjust_approved', 'on', true);
+
+  if p_action = 'ACCEPT_SHORT' then
+    if a.errors <> array['SHORT'] then
+      raise exception 'Terima kurang hanya untuk selisih kurang saja (SKU, batch dan kondisi sesuai)';
+    end if;
+    v_diff := a.expected_qty - a.counted_qty;
+    insert into public.movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, reason_code, note, ref_id)
+    values ('adjustment', t.item_id, a.expected_batch, v_diff, v_src, a.expected_expiry, 'PICK_AUDIT',
+            format('Audit picking SH %s: kurang %s karton, dicatat kembali di bin. %s', t.shipment_number, v_diff, v_note), a.id);
+    update public.pick_tasks set actual_quantity = a.counted_qty where id = t.id;
+    update public.outbound set quantity_picked = greatest(quantity_picked - v_diff, 0)
+    where wave_id = t.wave_id and shipment_number = t.shipment_number and item_id = t.item_id;
+  else
+    if a.errors = '{}' or not (a.errors <@ array['WRONG_BATCH', 'WRONG_EXPIRY']) or a.counted_qty <> a.expected_qty then
+      raise exception 'Terima batch hanya untuk batch / expired yang beda dengan jumlah sesuai';
+    end if;
+    select id into v_bin from public.bins where bin_code = upper(trim(coalesce(p_bin, '')));
+    if v_bin is null then raise exception 'Isi bin asal batch % yang ada di palet', a.found_batch; end if;
+    select count(*) into v_rows from public.inventory
+    where bin_id = v_bin and item_id = t.item_id and public.norm_batch(batch_lot) = a.found_batch
+      and (a.found_expiry is null or expiry_date = a.found_expiry);
+    if v_rows > 1 then
+      raise exception 'Batch % ada dengan beberapa tanggal expired di bin %: audit ulang dengan tanggal expired', a.found_batch, upper(p_bin);
+    end if;
+    select * into r from public.inventory
+    where bin_id = v_bin and item_id = t.item_id and public.norm_batch(batch_lot) = a.found_batch
+      and (a.found_expiry is null or expiry_date = a.found_expiry)
+    for update;
+    v_free := coalesce(r.quantity, 0);
+    if r.id is not null then
+      v_free := v_free - public.held_qty(r.bin_id, r.item_id, r.batch_lot, r.expiry_date, r.quantity)
+                - coalesce((select sum(o.quantity) from public.open_pick_tasks o
+                            where o.from_bin_id = r.bin_id and o.item_id = r.item_id and o.batch_lot = r.batch_lot
+                              and o.expiry_date = r.expiry_date), 0);
+    end if;
+    if v_free < a.counted_qty then
+      raise exception 'Stok batch % di bin % tidak cukup (bebas %): adjust atau hitung dulu', a.found_batch, upper(trim(p_bin)), v_free;
+    end if;
+    insert into public.movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, reason_code, note, ref_id)
+    values ('adjustment', t.item_id, a.expected_batch, a.expected_qty, v_src, a.expected_expiry, 'PICK_AUDIT',
+            format('Audit picking SH %s: batch %s tidak terkirim, dicatat kembali. %s', t.shipment_number, a.expected_batch, v_note), a.id),
+           ('adjustment', t.item_id, r.batch_lot, -a.counted_qty, v_bin, r.expiry_date, 'PICK_AUDIT',
+            format('Audit picking SH %s: batch %s terkirim. %s', t.shipment_number, r.batch_lot, v_note), a.id);
+    update public.pick_tasks set actual_batch_lot = r.batch_lot, actual_expiry_date = r.expiry_date, actual_from_bin_id = v_bin
+    where id = t.id;
+  end if;
+
+  v_count := public.create_count_task(v_src_code, format('Audit picking SH %s: %s', t.shipment_number,
+    case p_action when 'ACCEPT_SHORT' then 'terima kurang' else 'terima batch lain' end), 'PICK_AUDIT');
+
+  update public.pick_audits set resolution = p_action, resolved_by_name = v_name, resolved_at = now(), resolution_note = v_note
+  where id = a.id;
+
+  perform set_config('app.adjust_approved', '', true);
+  perform set_config('app.adjust_reason', '', true);
+  return jsonb_build_object('result', 'RESOLVED', 'action', p_action, 'count_task', v_count);
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Privileges (see 0005: nothing is granted by default)
 -- ---------------------------------------------------------------------
 grant select on public.pick_audits, public.shipment_loads,
@@ -375,3 +480,5 @@ grant execute on function public.norm_batch(text),
   public.pick_audit_errors(text, text, date, numeric, text, text, date, numeric, boolean) to authenticated;
 revoke execute on function public.record_pick_audit(uuid, text, text, numeric, text, date, boolean, text) from public, anon;
 grant execute on function public.record_pick_audit(uuid, text, text, numeric, text, date, boolean, text) to authenticated;
+revoke execute on function public.resolve_pick_mismatch(uuid, text, text, text, text) from public, anon;
+grant execute on function public.resolve_pick_mismatch(uuid, text, text, text, text) to authenticated;

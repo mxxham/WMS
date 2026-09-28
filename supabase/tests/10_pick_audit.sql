@@ -139,4 +139,75 @@ select pg_temp.check('line shows the latest attempt; shipment states follow',
   (select line_state = 'MISMATCH' and attempts = 2 from pg_temp.line('PA2', 3))
   and (pg_temp.ship('PA1')).state = 'READY_LOAD' and (pg_temp.ship('PA2')).state = 'HAS_MISMATCH');
 
+-- ---- C. resolve_pick_mismatch -------------------------------------------
+select set_config('t.pa2_1', (select id::text from pick_audits where task_id = pg_temp.task('PA2', 3) and attempt_no = 1), false);
+select set_config('t.pa2_2', (select id::text from pick_audits where task_id = pg_temp.task('PA2', 3) and attempt_no = 2), false);
+select set_config('t.pa3_2', (select id::text from pick_audits where task_id = pg_temp.task('PA3', 1) and attempt_no = 2), false);
+
+select pg_temp.check('an operator cannot accept a mismatch',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Pak Joko', 'ok', 'CF38C02')$q$, current_setting('t.pa2_2')),
+    'Hanya supervisor%'));
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.check('only the latest attempt of a line can be decided',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_SHORT', 'Pak Joko', 'ok')$q$, current_setting('t.pa2_1')),
+    'Hanya audit terakhir%'));
+select pg_temp.check('accept short only when short is the only error',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_SHORT', 'Pak Joko', 'ok')$q$, current_setting('t.pa2_2')),
+    'Terima kurang hanya%'));
+select pg_temp.check('accept batch only for batch / expiry differences',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Pak Joko', 'ok', 'CF38C01')$q$, current_setting('t.pa3_2')),
+    'Terima batch hanya%'));
+select pg_temp.check('the checker cannot decide',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'sari', 'ok', 'CF38C02')$q$, current_setting('t.pa2_2')),
+    'Yang memutuskan harus orang lain%'));
+select pg_temp.check('the picker cannot decide',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Budi Santoso', 'ok', 'CF38C02')$q$, current_setting('t.pa2_2')),
+    'Yang memutuskan harus orang lain%'));
+select pg_temp.check('a reason is required',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Pak Joko', ' ', 'CF38C02')$q$, current_setting('t.pa2_2')),
+    'Alasan wajib%'));
+select pg_temp.check('unknown action is refused',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'SHIP_ANYWAY', 'Pak Joko', 'ok')$q$, current_setting('t.pa2_2')),
+    'Tindakan tidak dikenal%'));
+select pg_temp.check('accept batch needs the found batch free in the named bin',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Pak Joko', 'ok', 'CF37C01')$q$, current_setting('t.pa2_2')),
+    'Stok batch B8 di bin CF37C01 tidak cukup%'));
+
+select pg_temp.check('accept batch B8 from CF38C02',
+  resolve_pick_mismatch(current_setting('t.pa2_2')::uuid, 'ACCEPT_BATCH', 'Pak Joko', 'B8 ikut terkirim', 'CF38C02')->>'result' = 'RESOLVED');
+select pg_temp.check('A7 back in CF38C01 (48 - 10 - 6 - 4 + 6 = 34), B8 out of CF38C02 (10 - 6 = 4)',
+  pg_temp.qty('CF38C01', 'A7') = 34 and pg_temp.qty('CF38C02', 'B8') = 4);
+select pg_temp.check('the pick now records what was shipped',
+  (select actual_batch_lot = 'B8' and actual_expiry_date = '2031-06-06' and actual_quantity = 6
+     and actual_from_bin_id = (select id from bins where bin_code = 'CF38C02') from pick_tasks where id = pg_temp.task('PA2', 3)));
+select pg_temp.check('two PICK_AUDIT adjustments by the supervisor, linked to the attempt',
+  (select count(*) = 2 and bool_and(reason_code = 'PICK_AUDIT' and by_name = 'Pak Joko')
+   from movements where ref_id = current_setting('t.pa2_2')::uuid));
+select pg_temp.check('the source bin gets a recount',
+  exists (select 1 from count_tasks c join bins b on b.id = c.bin_id
+          where b.bin_code = 'CF38C01' and c.source = 'PICK_AUDIT' and c.status = 'OPEN'));
+select pg_temp.check('line resolved, shipment ready to load',
+  (pg_temp.line('PA2', 3)).line_state = 'RESOLVED' and (pg_temp.ship('PA2')).state = 'READY_LOAD');
+select pg_temp.check('a decided attempt cannot be decided again',
+  pg_temp.fails(format($q$select resolve_pick_mismatch(%L, 'ACCEPT_BATCH', 'Pak Joko', 'ok', 'CF38C02')$q$, current_setting('t.pa2_2')),
+    'Audit ini tidak perlu diputuskan%'));
+select pg_temp.check('a resolved line cannot be audited again',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 6, 'B8', null, false, null)$q$, pg_temp.task('PA2', 3)),
+    'Baris ini sudah lolos audit%'));
+
+select pg_temp.check('PA3 re-audited after replacing the damaged cartons: 3 of 4 -> SHORT',
+  record_pick_audit(pg_temp.task('PA3', 1), 'Sari', '550044709', 3, 'A7', null, false, null)->'errors' = '["SHORT"]'::jsonb);
+select pg_temp.check('accept short',
+  resolve_pick_mismatch((select id from pick_audits where task_id = pg_temp.task('PA3', 1) and attempt_no = 3),
+    'ACCEPT_SHORT', 'Pak Joko', 'kirim 3, sisa 1 dicari')->>'result' = 'RESOLVED');
+select pg_temp.check('the missing carton is back on the books in CF38C01 (35), pick and outbound say 3',
+  pg_temp.qty('CF38C01', 'A7') = 35
+  and (select actual_quantity = 3 from pick_tasks where id = pg_temp.task('PA3', 1))
+  and (select quantity_picked = 3 from outbound where shipment_number = 'PA3'));
+select pg_temp.check('one open recount for CF38C01 (the second request is merged)',
+  (select count(*) = 1 from count_tasks c join bins b on b.id = c.bin_id
+   where b.bin_code = 'CF38C01' and c.status in ('OPEN', 'COUNTED', 'RECOUNT')));
+select pg_temp.check('adjustment settings do not leak out of the function',
+  coalesce(current_setting('app.adjust_approved', true), '') = '' and coalesce(current_setting('app.adjust_reason', true), '') = '');
+
 rollback;
