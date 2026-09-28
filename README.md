@@ -25,13 +25,15 @@
 > Sistem label barcode lokasi bin, scan, visualisasi stok 3D, **alokasi FEFO, picklist, dan eksekusi wave** untuk gudang pelumas Shell — satu aplikasi, satu database, satu ledger stok.
 
 <p align="center">
-  <a href="#fitur"><img src="https://img.shields.io/badge/%F0%9F%93%8D-Fitur-2563EB?style=for-the-badge" alt="Fitur" /></a>
-  <a href="#angka"><img src="https://img.shields.io/badge/%F0%9F%93%8A-Angka-0F766E?style=for-the-badge" alt="Angka" /></a>
-  <a href="#5-yang-sudah-diuji--belum"><img src="https://img.shields.io/badge/%E2%9C%85-Status%20uji-16A34A?style=for-the-badge" alt="Status uji" /></a>
-  <a href="#2-setup"><img src="https://img.shields.io/badge/%F0%9F%93%A7-Setup-B45309?style=for-the-badge" alt="Setup" /></a>
-  <a href="#3-per-fase-file-perintah-cara-uji"><img src="https://img.shields.io/badge/%F0%9F%93%81-Fase-6D28D9?style=for-the-badge" alt="Fase" /></a>
-  <a href="#4-keputusan-design-untuk-laporan-magang"><img src="https://img.shields.io/badge/%F0%9F%A7%A0-Keputusan%20desain-9333EA?style=for-the-badge" alt="Keputusan desain" /></a>
-  <a href="#6-catatan-teknis"><img src="https://img.shields.io/badge/%F0%9F%93%9C-Catatan-475569?style=for-the-badge" alt="Catatan" /></a>
+
+[![Fitur](https://img.shields.io/badge/%F0%9F%93%8D-Fitur-2563EB?style=for-the-badge)](#fitur)
+[![Angka](https://img.shields.io/badge/%F0%9F%93%8A-Angka-0F766E?style=for-the-badge)](#angka)
+[![Status uji](https://img.shields.io/badge/%E2%9C%85-Status%20uji-16A34A?style=for-the-badge)](#5-yang-sudah-diuji--belum)
+[![Setup](https://img.shields.io/badge/%F0%9F%93%A7-Setup-B45309?style=for-the-badge)](#2-setup)
+[![Fase](https://img.shields.io/badge/%F0%9F%93%81-Fase-6D28D9?style=for-the-badge)](#3-per-fase-file-perintah-cara-uji)
+[![Keputusan desain](https://img.shields.io/badge/%F0%9F%A7%A0-Keputusan%20desain-9333EA?style=for-the-badge)](#4-keputusan-design-untuk-laporan-magang)
+[![Catatan](https://img.shields.io/badge/%F0%9F%93%9C-Catatan-475569?style=for-the-badge)](#6-catatan-teknis)
+
 </p>
 
 ## 📊 Angka
