@@ -1,45 +1,84 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/public/k-one-logo.png" width="120" alt="WMS logo" />
+  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/public/k-one-logo.png" width="88" alt="CKB Warehouse logo" />
 </p>
 
 <h1 align="center">WMS — CKB Warehouse</h1>
 
-<p align="center"><b>PT Cipta Krida Bahari · WSM SUB 2 Surabaya</b><br />Gudang pelumas Shell — label bin · scan · 3D · alokasi FEFO · picklist · wave</p>
+<p align="center"><b>PT Cipta Krida Bahari · WSM SUB 2 Surabaya</b><br />Gudang pelumas Shell</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Next.js-15-black?logo=next.js" alt="Next.js 15" />
-  <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Supabase-Postgres-3FCF8E?logo=supabase" alt="Supabase" />
-  <img src="https://img.shields.io/badge/Tailwind-CSS-38BDF8?logo=tailwindcss" alt="Tailwind" />
+  <img src="https://img.shields.io/badge/Next.js-15-000000?logo=next.js" alt="Next.js 15" />
+  <img src="https://img.shields.io/badge/React-19-087ea4?logo=react" alt="React 19" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript" alt="TypeScript 5" />
+  <img src="https://img.shields.io/badge/Tailwind-3-38BDF8?logo=tailwindcss" alt="Tailwind CSS 3" />
+  <img src="https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase" alt="Supabase" />
+  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql" alt="PostgreSQL 16" />
+  <img src="https://img.shields.io/badge/Three.js-0.186-black?logo=three.js" alt="Three.js" />
+  <img src="https://img.shields.io/badge/Lucide-F565B3?logo=lucide" alt="Lucide" />
   <img src="https://img.shields.io/badge/version-2.0.0-orange" alt="v2.0.0" />
 </p>
 
-<p align="center"><i>Satu aplikasi · satu database · satu ledger stok — 2.570 bin · 106 SKU · 1.790 baris stok</i></p>
+<p align="center"><b>label bin · scan · 3D · alokasi FEFO · picklist · wave</b></p>
+
+---
 
 > Sistem label barcode lokasi bin, scan, visualisasi stok 3D, **alokasi FEFO, picklist, dan eksekusi wave** untuk gudang pelumas Shell — satu aplikasi, satu database, satu ledger stok.
 
-| 🏷️ Label | 📱 Scan | 🧊 3D | 🧠 FEFO | 🌊 Wave |
-|---|---|---|---|---|
-| Strip A–E 80×85mm, QR + Code128 vektor | Kamera / USB scanner, auto-focus + Enter | 2.570 bin 1 draw call, on-demand render | planning_stock, reservasi, re-plan aman | posting idempoten, ledger `movements` |
+<p align="center">
+  <a href="#fitur"><img src="https://img.shields.io/badge/%F0%9F%93%8D-Fitur-2563EB?style=for-the-badge" alt="Fitur" /></a>
+  <a href="#angka"><img src="https://img.shields.io/badge/%F0%9F%93%8A-Angka-0F766E?style=for-the-badge" alt="Angka" /></a>
+  <a href="#uji"><img src="https://img.shields.io/badge/%E2%9C%85-Status%20uji-16A34A?style=for-the-badge" alt="Status uji" /></a>
+  <a href="#setup"><img src="https://img.shields.io/badge/%F0%9F%93%A7-Setup-B45309?style=for-the-badge" alt="Setup" /></a>
+  <a href="#fase"><img src="https://img.shields.io/badge/%F0%9F%93%81-Fase-6D28D9?style=for-the-badge" alt="Fase" /></a>
+  <a href="#desain"><img src="https://img.shields.io/badge/%F0%9F%A7%A0-Keputusan%20desain-9333EA?style=for-the-badge" alt="Keputusan desain" /></a>
+  <a href="#catatan"><img src="https://img.shields.io/badge/%F0%9F%93%9C-Catatan-475569?style=for-the-badge" alt="Catatan" /></a>
+</p>
+
+<a id="angka"></a>
+
+## 📊 Angka
+
+<p align="center">
+
+| Bin | SKU | Baris stok | Total karton | Dialokasikan | Wave |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **2.570** | **106** | **1.790** | **52.078** | **1.293** | **8** / 51 tugas |
+
+</p>
+
+<a id="fitur"></a>
+
+## ✨ Fitur
+
+| | Fitur | Yang dikerjakan |
+|:--:|---|---|
+| 🏷️ | **Label** | Strip A–E 80×85mm, QR + Code128 vektor |
+| 📱 | **Scan** | Kamera / USB scanner, auto-focus + Enter |
+| 🧊 | **3D** | 2.570 bin 1 draw call, on-demand render |
+| 🧠 | **FEFO** | `planning_stock`, reservasi, re-plan aman |
+| 🌊 | **Wave** | Posting idempoten, ledger `movements` |
 
 📖 Aturan alokasi lengkap: **`docs/ALLOCATOR.md`** · ✅ Status verifikasi: bagian **Yang sudah diuji** · 🐞 Data issue: **`docs/DATA_ISSUES.md`**
 
 <details>
-<summary><b>🧭 Navigasi cepat</b></summary>
+<summary><b>🏷️ Contoh label — hasil cetak 203 dpi</b></summary>
 
-- [1. Konfirmasi sebelum go-live](#1-konfirmasi-dulu-sebelum-go-live)
-- [2. Setup](#2-setup)
-- [3. Per fase](#3-per-fase-file-perintah-cara-uji)
-- [4. Keputusan desain](#4-keputusan-desain-untuk-laporan-magang)
-- [5. Status uji](#5-yang-sudah-diuji--belum)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/docs/label-samples/contoh-strip-203dpi.png" width="260" alt="Contoh strip label rak A–E, 203 dpi" />
+</p>
 
 </details>
 
 ---
 
-## 1. Konfirmasi dulu sebelum go-live
+<a id="konfirmasi"></a>
+
+## ⚠️ 1. Konfirmasi dulu sebelum go-live
 
 Nilai berikut **asumsi**. Ubah di file/menu yang disebut, jangan di banyak tempat.
+
+<details>
+<summary><b>📋 12 asumsi yang harus dikonfirmasi sebelum go-live</b></summary>
 
 | # | Asumsi | Ubah di |
 |---|---|---|
@@ -56,15 +95,24 @@ Nilai berikut **asumsi**. Ubah di file/menu yang disebut, jangan di banyak tempa
 | 11 | Adjustment > **20 unit** butuh persetujuan orang lain; toleransi hitung A/B/C = **0** karton | idem |
 | 12 | Scan barcode karton saat posting pick **tidak wajib** (master belum punya EAN) | idem, setelah barcode diisi di Master item |
 
-**Warna vs printer thermal.** Printer thermal 4 inci (direct thermal) hanya mencetak hitam. Pita warna per level butuh salah satu dari: label pra-cetak berwarna, printer warna, atau mode **Hitam-putih** di menu Label (pita hitam, teks putih). Mode warna tetap disediakan karena mengikuti contoh foto.
+</details>
 
-Masalah data dari file WMS 24 Sep 2026: lihat **`docs/DATA_ISSUES.md`** (bin CC01C01 `#VALUE!`, CE08A01 expired tahun 1930, batch CD39C01/C02 terbaca tanggal oleh Excel, 129 bin ber-SKU dengan qty 0, dll.). Pemetaan kolom: **`docs/DATA_MAPPING.md`**.
+> [!WARNING]
+> **Warna vs printer thermal.** Printer thermal 4 inci (direct thermal) hanya mencetak hitam. Pita warna per level butuh salah satu dari: label pra-cetak berwarna, printer warna, atau mode **Hitam-putih** di menu Label (pita hitam, teks putih). Mode warna tetap disediakan karena mengikuti contoh foto.
+
+> [!CAUTION]
+> **Masalah data dari file WMS 24 Sep 2026.** Lihat **`docs/DATA_ISSUES.md`** (bin CC01C01 `#VALUE!`, CE08A01 expired tahun 1930, batch CD39C01/C02 terbaca tanggal oleh Excel, 129 bin ber-SKU dengan qty 0, dll.). Pemetaan kolom: **`docs/DATA_MAPPING.md`**.
 
 ---
 
+<a id="setup"></a>
+
 ## 2. Setup
 
+<a id="setup-supabase"></a>
+
 ### 2.1 Supabase
+
 1. Buat project di supabase.com (region Singapore).
 2. **SQL Editor** → jalankan berurutan: `supabase/migrations/0001_schema.sql`, `0002_functions.sql`, `0003_rls.sql`, `0004_allocation.sql`, `0005_explicit_grants.sql`, `0006_back_to_back_racks.sql`, `0007_rolling_execution.sql`, `0008_putaway_import.sql`, `0009_fixed_pickfaces.sql`, `0010_cycle_counts.sql`, `0011_stock_corrections.sql`, `0012_audits.sql`, `0013_stock_fixes.sql`, `0014_cycle_count.sql`, `0015_realtime.sql`. Atau dengan CLI: `supabase link --project-ref <ref>` lalu `supabase db push`.
    **Project yang sudah jalan** (0001–0003 sudah diterapkan): cukup jalankan `0004` sampai `0015`. `0015` menyalakan Realtime (halaman diperbarui otomatis, titik *Live* di judul); tanpa itu halaman tetap jalan tetapi titiknya tidak pernah menerima perubahan. `0004` mengubah identitas stok menjadi bin + SKU + batch + **expired**; data lama tetap valid.
@@ -83,7 +131,10 @@ python3 scripts/generate_seed.py path/ke/Warehouse_Management_System.xlsx
 ```
 Untuk update rutin, pakai menu **Import** di aplikasi (tercatat sebagai mutasi), bukan seed.
 
+<a id="setup-sql"></a>
+
 ### 2.2 Uji SQL lokal (tanpa Supabase)
+
 ```bash
 psql -f supabase/tests/00_local_auth_stub.sql   # stub skema auth + role
 for f in supabase/migrations/*.sql; do psql -f "$f"; done
@@ -101,7 +152,10 @@ psql -f supabase/tests/10_pick_audit.sql     # audit picking (0024), idem
 ```
 Atau semuanya sekaligus di database lokal sementara: `scripts/sql-test.sh`.
 
+<a id="setup-app"></a>
+
 ### 2.3 Aplikasi
+
 ```bash
 cp .env.example .env.local   # isi URL, anon key, service role key (Project Settings → API)
 npm install
@@ -109,12 +163,19 @@ npm run dev                  # http://localhost:3000
 ```
 Kamera ponsel butuh **HTTPS** (atau localhost). Untuk uji di ponsel saat dev: `npx next dev --experimental-https` atau deploy ke Vercel.
 
+<a id="setup-deploy"></a>
+
 ### 2.4 Deploy ke Vercel
+
 Import repo di Vercel → isi 3 environment variable yang sama → Deploy. Vercel mendeteksi Next.js otomatis (`vercel.json` lama untuk web statis sudah dihapus).
 
 ---
 
+<a id="fase"></a>
+
 ## 3. Per fase: file, perintah, cara uji
+
+<a id="fase-1"></a>
 
 ### Fase 1 — Skema, migrasi, RLS, seed
 File: `supabase/migrations/*`, `supabase/seed.sql`, `scripts/generate_seed.py`, `supabase/tests/*`.
@@ -126,21 +187,31 @@ select * from bin_summary where bin_code = 'CA01C01';
 ```
 Uji aturan stok & RLS di Postgres lokal (bukan Supabase): `psql -f supabase/tests/00_local_auth_stub.sql`, migrasi, seed, lalu `01_rls_and_stock_rules.sql`.
 
+<a id="fase-2"></a>
+
 ### Fase 2 — Import
 File: `app/(app)/admin/import/*`, `lib/import-validate.ts`, `lib/read-sheet.ts`, fungsi SQL `import_snapshot`.
 Uji: Import → pilih file WMS → sheet `WMS` & baris judul 4 terdeteksi otomatis → Validasi. Hasil yang diharapkan untuk file 24 Sep: **2.468 ok, 146 peringatan, 1 error** (CC01C01 berisi `#VALUE!`). Impor ulang file yang sama setelah seed → **0 mutasi**.
+
+<a id="fase-3"></a>
 
 ### Fase 3 — Label
 File: `lib/labels.ts`, `app/api/labels/route.ts`, `app/(app)/labels/*`.
 Uji: Label → Satu rak → CA / 01 → Strip → Buat PDF. Satu halaman = satu tiang (posisi 01 atau 02), lebar 80 mm, 5 sel × 85 mm + panah 22 mm atas/bawah = 469 mm. Mode **Per sel** = halaman 80 × 85 mm. Cetak di skala **100%**. Contoh hasil: `docs/label-samples/`.
 
+<a id="fase-4"></a>
+
 ### Fase 4 — Scan & detail bin
 File: `app/(app)/scan/*`, `app/(app)/bin/[code]/*`, `components/bin/*`, `components/scan/*`.
 Uji: buka `/scan` di ponsel → Scan pakai kamera → arahkan ke label → halaman bin terbuka. Coba ketik `XX99` → pesan "bukan format bin". Pick melebihi stok → ditolak database.
 
+<a id="fase-5"></a>
+
 ### Fase 5 — 3D
 File: `components/warehouse/*`, `app/(app)/warehouse/*`, `app/api/warehouse/route.ts`.
 Uji: `/warehouse` → ganti mode warna → klik kotak → panel detail. Cari `CB12` (semua bin rak CB12) atau SKU `550070612`.
+
+<a id="fase-6"></a>
 
 ### Fase 6 — Dashboard & laporan
 File: `app/(app)/dashboard/page.tsx`, `app/(app)/movements/page.tsx`, `app/api/movements/export/route.ts`, `lib/movement-query.ts`.
@@ -148,7 +219,10 @@ Uji: Dashboard → angka total bin 2.570. Mutasi → filter jenis `adjustment` �
 
 ---
 
+<a id="fase-7"></a>
+
 ### Fase 7 — Alokasi & wave (dari FEFO allocator)
+
 File: `lib/allocator/*` (mesin FEFO, murni tanpa I/O), `app/(app)/allocate/*`, `app/(app)/waves/*`, `supabase/migrations/0004_allocation.sql`, `docs/ALLOCATOR.md`.
 
 Alur harian:
@@ -159,6 +233,7 @@ Stok database (inventory_detail) ───────┘        (supervisor)   
                                                                                    │
             inventory ◀── trigger ◀── movements (picking / transfer) ◀── Posting tugas / Selesaikan wave (operator)
 ```
+
 - **Alokasi** (supervisor/admin): unggah file WMS harian → tanggal & opsi → *Jalankan alokasi* → cek picklist, kekurangan, rencana mutasi, pickface, double pick → unduh PDF/Excel → *Simpan rencana*. Sumber stok *Sheet WMS di file* = simulasi, tidak bisa disimpan.
 - **Stok untuk perencanaan = stok fisik − yang sudah dipesan tugas terbuka + yang akan masuk** (`planning_stock`). Rencana tanggal lain atau wave lain tidak bisa memakai karton yang sama.
 - **Wave** (semua role): konfirmasi satu tugas atau satu wave. Stok di database berubah saat itu juga, lewat ledger `movements`.
@@ -177,7 +252,10 @@ Stok database (inventory_detail) ───────┘        (supervisor)   
 
 Uji: `npm test` (mesin FEFO + paritas stok database vs workbook). SQL: lihat bagian 5.
 
+<a id="fase-8"></a>
+
 ### Fase 8 — Kontrol inventory
+
 Cara kerja, aturan, dan rutinitas harian: **`docs/INVENTORY_CONTROL.md`**. Migrasi `0016`–`0023`:
 aturan inventory + master item (barcode, umur simpan, sisa umur minimum per SKU) + dekode kode batch Shell;
 hold / karantina; kode alasan + persetujuan orang lain untuk adjustment besar; cycle count buta dengan hitung
@@ -187,9 +265,15 @@ Akurasi & adjustment, Rekonsiliasi SAP, Persetujuan), **Penerimaan**, **Master i
 Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tests/sap-stock.test.ts`,
 `tests/min-shelf-life.test.ts`.
 
+---
+
+<a id="desain"></a>
+
 ## 4. Keputusan desain (untuk laporan magang)
 
-**Data & integritas**
+<details open>
+<summary><b>🛡️ Data & integritas</b></summary>
+
 - **Stok hanya berubah lewat tabel `movements`.** Trigger `apply_movement` di database memvalidasi dan mengubah `inventory`; tabel `inventory` tidak punya policy tulis sama sekali, jadi aplikasi, API, maupun user tidak bisa mengubah stok tanpa jejak.
 - **Validasi stok di database, bukan di UI.** Dua operator yang pick bersamaan tetap aman karena baris stok dikunci (`FOR UPDATE`) sebelum dikurangi.
 - **Ledger tidak bisa diedit/dihapus.** Koreksi dilakukan dengan mutasi baru (adjustment), sesuai praktik audit gudang.
@@ -200,13 +284,21 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 - **Tanggal expired tahun tidak masuk akal (mis. 1930) diimpor sebagai peringatan, bukan ditolak.** Barangnya ada secara fisik; menolak baris akan menghilangkan stok dari sistem.
 - **Remain Qty dipakai, bukan Qty.** Remain Qty sudah memperhitungkan pick, putaway, dan transfer hari itu.
 
-**Keamanan (RLS)**
+</details>
+
+<details>
+<summary><b>🔒 Keamanan (RLS)</b></summary>
+
 - **Role disimpan di `profiles`, dicek lewat fungsi `has_role()` SECURITY DEFINER.** Policy tidak bisa rekursif membaca tabel yang sedang dilindungi.
 - **Pengecekan ganda: RLS + cek role di fungsi/route.** Jika satu lapis salah konfigurasi, lapis lain tetap menolak.
 - **Service role key hanya dipakai di server.** Key ini melewati RLS, jadi tidak pernah dikirim ke browser.
 - **Pendaftaran publik dimatikan.** Hanya akun situs yang dipakai.
 
-**Label**
+</details>
+
+<details>
+<summary><b>🏷️ Label</b></summary>
+
 - **Strip tiang rak A–E, satu sel 80 × 85 mm per level**, mengikuti contoh foto. Operator menemukan semua level dari lantai tanpa naik.
 - **QR + pita warna level, Code 128 opsional.** QR tetap terbaca meski label tertekuk di tiang; Code 128 untuk scanner laser lama.
 - **Barcode dirender sebagai vektor**, bukan gambar PNG. Tepi modul tetap tajam di printer 203 dpi (diuji: semua kode terbaca zbar).
@@ -214,7 +306,11 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 - **Mode hitam-putih.** Printer direct thermal tidak bisa mencetak warna.
 - **PDF dibuat di server.** Satu tempat untuk mencatat `print_logs` dan tidak bergantung kemampuan ponsel.
 
-**Scan & UI**
+</details>
+
+<details>
+<summary><b>📱 Scan &amp; UI</b></summary>
+
 - **Input scan selalu fokus dan submit saat Enter.** Scanner USB/Bluetooth bekerja sebagai keyboard, tanpa driver.
 - **Scan dicatat hanya jika datang dari layar scan (`?scan=1`).** Refresh halaman tidak menggelembungkan jumlah scan.
 - **Semua aksi punya langkah konfirmasi dengan kalimat ringkasan.** Salah tap di lantai gudang lebih mahal daripada satu tap ekstra.
@@ -222,12 +318,20 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 - **Tampilan kartu di ponsel, tabel di desktop.** Tabel 9 kolom tidak terbaca di layar 6 inci.
 - **Kode bin ditampilkan seperti plat lokasi kuning.** Tampilan di layar sama dengan yang dilihat operator di rak.
 
-**3D**
+</details>
+
+<details>
+<summary><b>🧊 3D</b></summary>
+
 - **Satu instanced mesh untuk 2.570 bin** (satu draw call), sehingga ringan di laptop kantor.
 - **Render on-demand (`frameloop="demand"`).** GPU hanya bekerja saat kamera bergerak atau data berubah, jadi baterai tablet lebih awet.
 - **Koordinat dihitung di database dari konfigurasi layout.** Ubah ukuran rak sekali, semua bin ikut pindah.
 
-**Alokasi & wave (gabungan)**
+</details>
+
+<details>
+<summary><b>🧠 Alokasi &amp; wave (gabungan)</b></summary>
+
 - **Satu sumber kebenaran stok.** Tabel `stock`/`stock_transactions` milik allocator lama dihapus; allocator membaca `inventory` dan menulis lewat ledger `movements` yang sama. Tugas pick yang diposting muncul di riwayat mutasi, ABC, dan 3D seperti mutasi manual.
 - **Rencana ≠ eksekusi.** Menyimpan rencana hanya menulis `waves`, `pick_tasks`, `outbound`. Stok berubah saat tugas diposting (`post_task` → satu baris `movements`).
 - **Identitas stok = bin + SKU + batch + expired.** Aturan dari allocator: dua tanggal expired dalam satu batch di satu bin adalah dua baris stok, supaya FEFO tidak tertukar. Mutasi tanpa tanggal expired tetap berjalan jika batch itu hanya punya satu baris di bin.
@@ -238,30 +342,45 @@ Uji: `supabase/tests/09_inventory_control.sql`, `tests/batch-code.test.ts`, `tes
 - **Tabel rencana tanpa policy tulis.** Semua perubahan lewat RPC `SECURITY DEFINER` yang mengecek role; klien juga tidak bisa memalsukan `task_id` di ledger (RLS).
 - **Mesin alokasi berjalan di browser**, sama persis dengan CLI (fungsi murni). Server hanya menyimpan hasilnya.
 
-**Lainnya**
+</details>
+
+<details>
+<summary><b>⚙️ Lainnya</b></summary>
+
 - **Query list dipaginasi 1.000 baris.** Batas default Supabase 1.000 baris akan memotong 2.570 bin tanpa error.
 - **Pembaca Excel hanya membaca sampai sel terakhir yang berisi.** Sheet WMS menyatakan range sampai baris 1.048.563; membaca manual memangkas waktu dari ±21 detik ke ±2 detik.
 
+</details>
+
 ---
+
+<a id="uji"></a>
 
 ## 5. Yang sudah diuji / belum
 
-Sudah (di sandbox pengembangan):
-- Migrasi + seed di PostgreSQL 16 (dengan stub skema `auth` Supabase): 2.570 bin, 1.790 baris stok, total 52.078.
-- Aturan: pick melebihi stok ditolak; transfer mempertahankan tanggal expired; transfer ke bin diblokir ditolak; operator tidak bisa adjustment/import/ubah inventory/hapus mutasi; `user_id` palsu diabaikan; adjustment supervisor tercatat.
-- Import file WMS asli: 2.614 baris masuk, re-import setelah seed = 0 mutasi.
-- Label: ukuran halaman tepat (80 × 85 mm & 80 × 469 mm); QR dan Code 128 terbaca zbar pada render 203 dpi.
-- `tsc`, ESLint, dan `next build` lolos.
-- Mesin FEFO: `npm test` → 107 uji (termasuk rute pick back-to-back) (regresi sisa/FEFO, workflow harian, pickface, paritas stok database = workbook pada file 15 & 18 Sep).
-- SQL: `supabase/tests/05_pickfaces_counts_corrections.sql` (20 cek: pickface unik & tukar, alur hitung buta → terapkan/tutup, konflik putaway jadi tugas hitung, koreksi identitas). `supabase/tests/04_putaway_import.sql` (14 cek: klasifikasi baris, keputusan konflik, preview = posting, unggah ulang aman). `supabase/tests/03_rolling_execution.sql` (21 cek: reservasi, hitung ulang, aktual, guard). `supabase/tests/02_allocation_flow.sql` (17 cek: rencana tidak mengubah stok, posting idempoten, re-plan ditolak setelah eksekusi, wave kurang stok di-rollback, dua expired dalam satu batch).
-- End-to-end di Supabase lokal (Auth + PostgREST, akun supervisor & operator): file 24 Sep → 1.790 baris stok → alokasi 1.293 karton → 8 wave / 51 tugas → semua wave selesai oleh operator → stok 52.078 → 50.785, semua baris ledger atas nama operator.
+**✅ Sudah** — di sandbox pengembangan:
 
-Belum:
-- Uji di project Supabase produksi (sudah diuji di Supabase lokal) dan UI di browser sungguhan.
-- Tampilan 3D di browser (WebGL tidak tersedia di sandbox).
-- Cetak fisik di printer gudang dan scan dengan ponsel operator.
+- [x] Migrasi + seed di PostgreSQL 16 (dengan stub skema `auth` Supabase): 2.570 bin, 1.790 baris stok, total 52.078.
+- [x] Aturan: pick melebihi stok ditolak; transfer mempertahankan tanggal expired; transfer ke bin diblokir ditolak; operator tidak bisa adjustment/import/ubah inventory/hapus mutasi; `user_id` palsu diabaikan; adjustment supervisor tercatat.
+- [x] Import file WMS asli: 2.614 baris masuk, re-import setelah seed = 0 mutasi.
+- [x] Label: ukuran halaman tepat (80 × 85 mm & 80 × 469 mm); QR dan Code 128 terbaca zbar pada render 203 dpi.
+- [x] `tsc`, ESLint, dan `next build` lolos.
+- [x] Mesin FEFO: `npm test` → 107 uji (termasuk rute pick back-to-back) (regresi sisa/FEFO, workflow harian, pickface, paritas stok database = workbook pada file 15 & 18 Sep).
+- [x] SQL: `supabase/tests/05_pickfaces_counts_corrections.sql` (20 cek: pickface unik & tukar, alur hitung buta → terapkan/tutup, konflik putaway jadi tugas hitung, koreksi identitas). `supabase/tests/04_putaway_import.sql` (14 cek: klasifikasi baris, keputusan konflik, preview = posting, unggah ulang aman). `supabase/tests/03_rolling_execution.sql` (21 cek: reservasi, hitung ulang, aktual, guard). `supabase/tests/02_allocation_flow.sql` (17 cek: rencana tidak mengubah stok, posting idempoten, re-plan ditolak setelah eksekusi, wave kurang stok di-rollback, dua expired dalam satu batch).
+- [x] End-to-end di Supabase lokal (Auth + PostgREST, akun supervisor & operator): file 24 Sep → 1.790 baris stok → alokasi 1.293 karton → 8 wave / 51 tugas → semua wave selesai oleh operator → stok 52.078 → 50.785, semua baris ledger atas nama operator.
+
+**⬜ Belum:**
+
+- [ ] Uji di project Supabase produksi (sudah diuji di Supabase lokal) dan UI di browser sungguhan.
+- [ ] Tampilan 3D di browser (WebGL tidak tersedia di sandbox).
+- [ ] Cetak fisik di printer gudang dan scan dengan ponsel operator.
+
+---
+
+<a id="catatan"></a>
 
 ## 6. Catatan teknis
+
 - **SheetJS**: npm `xlsx@0.18.5` punya advisori keamanan (prototype pollution/ReDoS) yang diperbaiki di versi CDN resmi. Sebelum produksi: `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
 - Label zona di lantai 3D (`<Text>` drei) memuat font dari CDN saat pertama dibuka.
 - Tanggal filter mutasi memakai WIB (UTC+7).
