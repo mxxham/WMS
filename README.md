@@ -1,9 +1,39 @@
-# CKB Warehouse — PT Cipta Krida Bahari, WSM SUB 2 Surabaya
+<p align="center">
+  <img src="public/k-one-logo.png" width="120" alt="WMS logo" />
+</p>
 
-Sistem label barcode lokasi bin, scan, visualisasi stok 3D, **alokasi FEFO, picklist, dan eksekusi wave** untuk gudang pelumas Shell — satu aplikasi, satu database, satu ledger stok.
-Next.js 15 (App Router) · TypeScript · Supabase (Postgres + Auth + RLS) · Tailwind + komponen gaya shadcn/ui · SheetJS · bwip-js · pdf-lib · jsPDF · React Three Fiber · html5-qrcode.
+<h1 align="center">WMS — CKB Warehouse</h1>
 
-Proyek ini gabungan dua proyek: **Bin Locator** (fase 1–6) dan **FEFO allocator** (dulu repo `fefo-allocator`, sekarang fase 7 di `lib/allocator/`). Aturan alokasi lengkap: **`docs/ALLOCATOR.md`**. Status verifikasi ada di bagian **Yang sudah diuji**.
+<p align="center"><b>PT Cipta Krida Bahari · WSM SUB 2 Surabaya</b><br />Gudang pelumas Shell — label bin · scan · 3D · alokasi FEFO · picklist · wave</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-15-black?logo=next.js" alt="Next.js 15" />
+  <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Supabase-Postgres-3FCF8E?logo=supabase" alt="Supabase" />
+  <img src="https://img.shields.io/badge/Tailwind-CSS-38BDF8?logo=tailwindcss" alt="Tailwind" />
+  <img src="https://img.shields.io/badge/version-2.0.0-orange" alt="v2.0.0" />
+</p>
+
+<p align="center"><i>Satu aplikasi · satu database · satu ledger stok — 2.570 bin · 106 SKU · 1.790 baris stok</i></p>
+
+> Sistem label barcode lokasi bin, scan, visualisasi stok 3D, **alokasi FEFO, picklist, dan eksekusi wave** untuk gudang pelumas Shell — satu aplikasi, satu database, satu ledger stok.
+
+| 🏷️ Label | 📱 Scan | 🧊 3D | 🧠 FEFO | 🌊 Wave |
+|---|---|---|---|---|
+| Strip A–E 80×85mm, QR + Code128 vektor | Kamera / USB scanner, auto-focus + Enter | 2.570 bin 1 draw call, on-demand render | planning_stock, reservasi, re-plan aman | posting idempoten, ledger `movements` |
+
+📖 Aturan alokasi lengkap: **`docs/ALLOCATOR.md`** · ✅ Status verifikasi: bagian **Yang sudah diuji** · 🐞 Data issue: **`docs/DATA_ISSUES.md`**
+
+<details>
+<summary><b>🧭 Navigasi cepat</b></summary>
+
+- [1. Konfirmasi sebelum go-live](#1-konfirmasi-dulu-sebelum-go-live)
+- [2. Setup](#2-setup)
+- [3. Per fase](#3-per-fase-file-perintah-cara-uji)
+- [4. Keputusan desain](#4-keputusan-desain-untuk-laporan-magang)
+- [5. Status uji](#5-yang-sudah-diuji--belum)
+
+</details>
 
 ---
 
