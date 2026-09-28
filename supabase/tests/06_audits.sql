@@ -31,20 +31,10 @@ select save_plan('2026-10-05', '{
   "outbound":[{"wave_no":"1","shipment_number":"AU1","sku":"550044709","quantity_requested":20,"quantity_allocated":20}]}'::jsonb);
 select set_config('t.task', (select t.id::text from pick_tasks t join waves w on w.id=t.wave_id where w.planned_date='2026-10-05' and t.shipment_number='AU1'), false);
 
--- Pick audit
-select pg_temp.check('a pick that is not completed cannot be audited',
-  pg_temp.fails(format($q$select record_audit('PICK', %L, 20, true, true, null)$q$, current_setting('t.task')), 'Tugas pick belum selesai%'));
+-- Pick audit moved to record_pick_audit (0024); the old function refuses picks.
 select post_task(current_setting('t.task')::uuid, 18, null, null, null, 'karton rusak');
-select pg_temp.check('completed pick shows in pick_audit_detail, not yet audited',
-  (select audit_id is null and actual_quantity = 18 from pick_audit_detail where task_id = current_setting('t.task')::uuid));
-select pg_temp.check('matches what the picker reported (18, not the plan 20) -> OK',
-  record_audit('PICK', current_setting('t.task')::uuid, 18, true, true, null)->>'result' = 'OK');
-select pg_temp.check('a mismatch needs a note',
-  pg_temp.fails(format($q$select record_audit('PICK', %L, 17, true, true, '')$q$, current_setting('t.task')), 'Ada selisih%'));
-select pg_temp.check('re-audit with a wrong batch -> MISMATCH',
-  record_audit('PICK', current_setting('t.task')::uuid, 18, true, false, 'batch lain di palet')->>'result' = 'MISMATCH');
-select pg_temp.check('one audit per task; the earlier OK is kept in history',
-  (select count(*) = 1 and bool_and(result = 'MISMATCH' and history->0->>'result' = 'OK') from audits where task_id = current_setting('t.task')::uuid));
+select pg_temp.check('picking is audited with record_pick_audit now (0024)',
+  pg_temp.fails(format($q$select record_audit('PICK', %L, 18, true, true, null)$q$, current_setting('t.task')), 'Pakai audit picking baru%'));
 
 -- Putaway audit
 select pg_temp.check('putaway shows in putaway_audit_detail',

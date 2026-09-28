@@ -210,4 +210,75 @@ select pg_temp.check('one open recount for CF38C01 (the second request is merged
 select pg_temp.check('adjustment settings do not leak out of the function',
   coalesce(current_setting('app.adjust_approved', true), '') = '' and coalesce(current_setting('app.adjust_reason', true), '') = '');
 
+-- ---- D. Loading, freeze, cancelled wave, old audits ---------------------
+select pg_temp.check('a shipment with open pick tasks cannot load',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA4', 'Andi')$q$, pg_temp.wave('1')), 'Masih ada tugas pick%'));
+select pg_temp.check('a shipment with an unaudited line cannot load, and says which',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA5', 'Andi')$q$, pg_temp.wave('1')),
+    'Belum boleh dimuat: #6 550024919 (belum diaudit)%'));
+select record_pick_audit(pg_temp.task('PA5', 6), 'Sari', '550024919', 1, 'C1', null, false, null);
+select pg_temp.check('a shipment with a mismatch cannot load',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA5', 'Andi')$q$, pg_temp.wave('1')), '%#6 550024919 (selisih)%'));
+select pg_temp.check('unknown shipment',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'NOPE', 'Andi')$q$, pg_temp.wave('1')), 'Shipment NOPE tidak ada%'));
+select pg_temp.check('a loader name is required',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA1', '')$q$, pg_temp.wave('1')), 'Nama petugas muat wajib%'));
+
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.check('PA1 (two OK lines + one picked as 0) loads; any staff may load',
+  mark_shipment_loaded(pg_temp.wave('1'), 'PA1', 'Andi', ' B 1234 XY ')->>'result' = 'LOADED');
+select pg_temp.check('loaded state, who and which truck',
+  (select state = 'LOADED' and loaded_by_name = 'Andi' and truck = 'B 1234 XY' and not load_legacy from pg_temp.ship('PA1')));
+select pg_temp.check('a shipment loads once',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA1', 'Andi')$q$, pg_temp.wave('1')), 'Shipment PA1 sudah dimuat%'));
+select pg_temp.check('nothing on a loaded shipment is audited again',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 10, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
+    'Shipment PA1 sudah dimuat%'));
+select pg_temp.check('PA2 (resolved line) loads',
+  mark_shipment_loaded(pg_temp.wave('1'), 'PA2', 'Andi')->>'result' = 'LOADED');
+
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select set_wave_status(pg_temp.wave('1'), 'CANCELLED', 'test');
+select pg_temp.check('cancelled wave: its shipments show CANCELLED, loaded ones stay LOADED',
+  (pg_temp.ship('PA5')).state = 'CANCELLED' and (pg_temp.ship('PA4')).state = 'CANCELLED' and (pg_temp.ship('PA1')).state = 'LOADED');
+select pg_temp.check('cancelled wave: no loading',
+  pg_temp.fails(format($q$select mark_shipment_loaded(%L, 'PA5', 'Andi')$q$, pg_temp.wave('1')), 'Wave dibatalkan%'));
+select pg_temp.check('cancelled wave: no audit',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550024919', 2, 'C1', null, false, null)$q$, pg_temp.task('PA5', 6)),
+    'Wave dibatalkan%'));
+select pg_temp.check('the old audit function no longer takes picks',
+  pg_temp.fails(format($q$select record_audit('PICK', %L, 4, true, true, null)$q$, pg_temp.task('PA3', 1)), 'Pakai audit picking baru%'));
+select pg_temp.check('first attempts only: 5 lines, 2 OK (PA1 #1, #2)',
+  (select count(*) = 5 and count(*) filter (where result = 'OK') = 2 and bool_and(minutes_to_audit is not null)
+   from pick_audit_first where planned_date = '2026-10-06'));
+
+-- Legacy: a pick audited the old way before this migration. (save_plan's on-commit temp tables
+-- are dropped first: a second plan in one transaction would collide with them.)
+reset role; drop table if exists pg_temp._replace, pg_temp._wave_ids; set role authenticated;
+select save_plan('2026-09-01', '{"waves":[{"wave_no":"1","shipment_numbers":["LG1"]}],
+  "tasks":[{"wave_no":"1","shipment_number":"LG1","task_type":"PICK","sku":"550024919","from_bin":"CF37C01","batch_lot":"C1","expiry_date":"2031-07-07","quantity":1,"seq":1}],
+  "outbound":[{"wave_no":"1","shipment_number":"LG1","sku":"550024919","quantity_requested":1,"quantity_allocated":1}]}'::jsonb);
+select set_config('app.by_name', '', true);
+select post_task((select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-09-01'));
+reset role;
+insert into audits (kind, task_id, expected_qty, counted_qty, sku_ok, batch_ok, result, note, history, audited_by, audited_at)
+select 'PICK', t.id, 1, 1, true, true, 'OK', null,
+  '[{"counted_qty":0,"sku_ok":true,"batch_ok":false,"result":"MISMATCH","note":"kosong","audited_by":"22222222-2222-2222-2222-222222222222","audited_at":"2026-09-01T10:00:00+07:00"}]'::jsonb,
+  '22222222-2222-2222-2222-222222222222', '2026-09-01 11:00+07'
+from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-09-01';
+-- (other test files may leave earlier completed shipments behind; those are loaded too)
+select pg_temp.check('backfill: the old audit and its history become 2 legacy attempts',
+  (pick_audit_backfill_legacy('2026-09-28')->>'attempts')::int = 2);
+select pg_temp.check('legacy attempts keep order, derived errors and the profile name',
+  (select array_agg(result || ':' || array_to_string(errors, ',') || ':' || checker_name order by attempt_no)
+     = array['MISMATCH:SHORT,WRONG_BATCH:Supervisor', 'OK::Supervisor'] and bool_and(legacy)
+   from pick_audits a join pick_tasks t on t.id = a.task_id join waves w on w.id = t.wave_id where w.planned_date = '2026-09-01'));
+select pg_temp.check('legacy shipment counts as loaded',
+  (select state = 'LOADED' and load_legacy and loaded_by_name = '(sebelum audit wajib)'
+   from pick_audit_shipment where planned_date = '2026-09-01' and shipment_number = 'LG1'));
+select pg_temp.check('legacy attempts are not in the KPIs',
+  not exists (select 1 from pick_audit_first where planned_date = '2026-09-01'));
+select pg_temp.check('backfill twice changes nothing',
+  pick_audit_backfill_legacy('2026-09-28') = '{"attempts": 0, "loads": 0}'::jsonb);
+
 rollback;

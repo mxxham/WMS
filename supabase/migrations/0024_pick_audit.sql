@@ -469,6 +469,153 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- 8. Loading: only when every picked line passed; final
+-- ---------------------------------------------------------------------
+create or replace function public.mark_shipment_loaded(p_wave_id uuid, p_shipment text, p_by_name text, p_truck text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_name text; w public.waves%rowtype; v_open int; v_lines int; v_block text;
+begin
+  if not public.has_role(array['operator','supervisor','admin']::public.user_role[]) then
+    raise exception 'Sesi situs tidak tersedia';
+  end if;
+  v_name := public.person_name(p_by_name, 'Nama petugas muat');
+  select * into w from public.waves where id = p_wave_id for update;
+  if not found then raise exception 'Wave tidak ditemukan'; end if;
+  -- Audits and decisions lock their task; take the same locks so none slips in.
+  perform 1 from public.pick_tasks where wave_id = w.id and shipment_number = p_shipment and task_type = 'PICK' for update;
+  select count(*) filter (where status in ('PLANNED', 'RESCHEDULED')), count(*) filter (where status = 'COMPLETED')
+    into v_open, v_lines
+  from public.pick_tasks where wave_id = w.id and shipment_number = p_shipment and task_type = 'PICK';
+  if v_open + v_lines = 0 and not exists (select 1 from public.pick_tasks where wave_id = w.id and shipment_number = p_shipment) then
+    raise exception 'Shipment % tidak ada di wave ini', p_shipment;
+  end if;
+  if exists (select 1 from public.shipment_loads where wave_id = w.id and shipment_number = p_shipment) then
+    raise exception 'Shipment % sudah dimuat', p_shipment;
+  end if;
+  if w.status = 'CANCELLED' then raise exception 'Wave dibatalkan: shipment % tidak dimuat', p_shipment; end if;
+  if v_open > 0 then raise exception 'Masih ada tugas pick yang belum selesai (%)', v_open; end if;
+  if v_lines = 0 then raise exception 'Tidak ada barang yang dipick untuk shipment %', p_shipment; end if;
+  select string_agg(format('#%s %s (%s)', seq, sku, case line_state when 'TODO' then 'belum diaudit' else 'selisih' end), ', ' order by seq)
+    into v_block
+  from public.pick_audit_line
+  where wave_id = w.id and shipment_number = p_shipment and line_state in ('TODO', 'MISMATCH');
+  if v_block is not null then raise exception 'Belum boleh dimuat: %', v_block; end if;
+
+  insert into public.shipment_loads (wave_id, shipment_number, loaded_by_name, truck, created_by)
+  values (w.id, p_shipment, v_name, nullif(trim(p_truck), ''), auth.uid());
+  return jsonb_build_object('result', 'LOADED', 'shipment', p_shipment, 'lines', v_lines);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 9. record_audit (0012): picks go through record_pick_audit now
+-- ---------------------------------------------------------------------
+create or replace function public.record_audit(
+  p_kind text, p_ref uuid, p_counted numeric, p_sku_ok boolean, p_batch_ok boolean, p_note text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_expected numeric; v_result text; v_prev public.audits%rowtype;
+begin
+  if p_kind = 'PICK' then
+    raise exception 'Pakai audit picking baru (Audit picking → shipment)';
+  end if;
+  if not public.has_role(array['supervisor','admin']::public.user_role[]) then
+    raise exception 'Hanya supervisor atau admin yang bisa mengaudit';
+  end if;
+  if p_counted is null or p_counted < 0 then raise exception 'Jumlah hitung tidak valid'; end if;
+
+  if p_kind = 'PUTAWAY' then
+    select quantity into v_expected from public.movements
+    where id = p_ref and type in ('putaway', 'inbound');
+    if v_expected is null then raise exception 'Mutasi putaway tidak ditemukan'; end if;
+  else
+    raise exception 'Jenis audit tidak dikenal: %', p_kind;
+  end if;
+
+  v_result := case when p_counted = v_expected and p_sku_ok and p_batch_ok then 'OK' else 'MISMATCH' end;
+  if v_result = 'MISMATCH' and nullif(trim(p_note), '') is null then
+    raise exception 'Ada selisih: catatan wajib diisi';
+  end if;
+
+  select * into v_prev from public.audits where movement_id = p_ref for update;
+
+  if v_prev.id is null then
+    insert into public.audits (kind, task_id, movement_id, expected_qty, counted_qty, sku_ok, batch_ok, result, note, audited_by)
+    values (p_kind, null, p_ref, v_expected, p_counted, p_sku_ok, p_batch_ok, v_result, nullif(trim(p_note), ''), auth.uid());
+  else
+    update public.audits set
+      history = v_prev.history || jsonb_build_object(
+        'counted_qty', v_prev.counted_qty, 'sku_ok', v_prev.sku_ok, 'batch_ok', v_prev.batch_ok,
+        'result', v_prev.result, 'note', v_prev.note, 'audited_by', v_prev.audited_by, 'audited_at', v_prev.audited_at),
+      expected_qty = v_expected, counted_qty = p_counted, sku_ok = p_sku_ok, batch_ok = p_batch_ok,
+      result = v_result, note = nullif(trim(p_note), ''), audited_by = auth.uid(), audited_at = now()
+    where id = v_prev.id;
+  end if;
+
+  return jsonb_build_object('result', v_result, 'expected', v_expected, 'counted', p_counted);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 10. Before this migration: old PICK audits become legacy attempts, and
+--     shipments picked before p_before count as loaded, so history does
+--     not block anything. Idempotent. Legacy rows are left out of KPIs.
+-- ---------------------------------------------------------------------
+create or replace function public.pick_audit_backfill_legacy(p_before date)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_attempts int; v_loads int;
+begin
+  with src as (
+    select a.task_id, a.expected_qty, e.ord, e.v
+    from public.audits a
+    cross join lateral (
+      select h.ord, h.v from jsonb_array_elements(a.history) with ordinality as h(v, ord)
+      union all
+      select 1000000, jsonb_build_object('counted_qty', a.counted_qty, 'sku_ok', a.sku_ok, 'batch_ok', a.batch_ok,
+        'note', a.note, 'audited_by', a.audited_by, 'audited_at', a.audited_at)
+    ) e
+    where a.kind = 'PICK' and not exists (select 1 from public.pick_audits p where p.task_id = a.task_id)
+  ), picked as (
+    select s.task_id, row_number() over (partition by s.task_id order by s.ord)::int as attempt_no,
+           coalesce(p.name, '(tidak tercatat)') as checker_name,
+           (s.v->>'sku_ok')::boolean as sku_ok, (s.v->>'batch_ok')::boolean as batch_ok,
+           (s.v->>'counted_qty')::numeric as counted, s.expected_qty, s.v->>'note' as note,
+           (s.v->>'audited_by')::uuid as audited_by, (s.v->>'audited_at')::timestamptz as audited_at,
+           it.sku, coalesce(t.actual_batch_lot, t.batch_lot) as batch, coalesce(t.actual_expiry_date, t.expiry_date) as expiry
+    from src s
+    join public.pick_tasks t on t.id = s.task_id
+    join public.items it on it.id = t.item_id
+    left join public.profiles p on p.id = (s.v->>'audited_by')::uuid
+  ), ins as (
+    insert into public.pick_audits (task_id, attempt_no, checker_name, found_sku, found_batch, counted_qty,
+      expected_sku, expected_batch, expected_expiry, expected_qty, errors, result, note, legacy, created_by, created_at)
+    select r.task_id, r.attempt_no, r.checker_name,
+           case when r.sku_ok then r.sku else '(lain)' end,
+           case when r.batch_ok then public.norm_batch(r.batch) else '(lain)' end,
+           r.counted, r.sku, r.batch, r.expiry, r.expected_qty, e.errs,
+           case when e.errs = '{}' then 'OK' else 'MISMATCH' end, r.note, true, r.audited_by, coalesce(r.audited_at, now())
+    from picked r
+    cross join lateral (select array_remove(array[
+      case when not r.sku_ok then 'WRONG_SKU' end,
+      case when r.sku_ok and r.counted < r.expected_qty then 'SHORT' end,
+      case when r.sku_ok and r.counted > r.expected_qty then 'OVER' end,
+      case when r.sku_ok and not r.batch_ok then 'WRONG_BATCH' end], null) as errs) e
+    returning 1
+  )
+  select count(*) into v_attempts from ins;
+
+  with ins as (
+    insert into public.shipment_loads (wave_id, shipment_number, loaded_by_name, legacy, loaded_at)
+    select distinct t.wave_id, t.shipment_number, '(sebelum audit wajib)', true, now()
+    from public.pick_tasks t join public.waves w on w.id = t.wave_id
+    where t.task_type = 'PICK' and t.status = 'COMPLETED' and w.planned_date < p_before
+    on conflict (wave_id, shipment_number) do nothing
+    returning 1
+  )
+  select count(*) into v_loads from ins;
+
+  return jsonb_build_object('attempts', v_attempts, 'loads', v_loads);
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Privileges (see 0005: nothing is granted by default)
 -- ---------------------------------------------------------------------
 grant select on public.pick_audits, public.shipment_loads,
@@ -482,3 +629,25 @@ revoke execute on function public.record_pick_audit(uuid, text, text, numeric, t
 grant execute on function public.record_pick_audit(uuid, text, text, numeric, text, date, boolean, text) to authenticated;
 revoke execute on function public.resolve_pick_mismatch(uuid, text, text, text, text) from public, anon;
 grant execute on function public.resolve_pick_mismatch(uuid, text, text, text, text) to authenticated;
+revoke execute on function public.mark_shipment_loaded(uuid, text, text, text) from public, anon;
+grant execute on function public.mark_shipment_loaded(uuid, text, text, text) to authenticated;
+revoke execute on function public.pick_audit_backfill_legacy(date) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- Live updates (see 0015) and the one-time backfill
+-- ---------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    raise notice 'supabase_realtime publication not found; skipping';
+    return;
+  end if;
+  foreach t in array array['pick_audits', 'shipment_loads'] loop
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
+select public.pick_audit_backfill_legacy((now() at time zone 'Asia/Jakarta')::date);
