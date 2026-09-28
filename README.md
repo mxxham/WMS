@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/k-one-logo.png" width="120" alt="WMS logo" />
+  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/public/k-one-logo.png" width="120" alt="WMS logo" />
 </p>
 
 <h1 align="center">WMS — CKB Warehouse</h1>
