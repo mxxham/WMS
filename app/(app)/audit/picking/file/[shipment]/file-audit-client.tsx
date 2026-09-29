@@ -59,7 +59,7 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
       </Card>
       <Card>
         <CardContent>
-          <Table>
+          <Table sticky>
             <thead><tr><Th>#</Th><Th>SKU</Th><Th>Bin asal</Th><Th>Status</Th><Th>Di file / audit</Th><Th /></tr></thead>
             <tbody>{lines.map((l) => (
               <tr key={l.id} className={cn(l.state === "MISMATCH" && "bg-bad/5")}>

@@ -1,10 +1,17 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
+/**
+ * `sticky`: the header row stays visible while scrolling. The table then
+ * scrolls in its own box (at most the screen height), because a sticky
+ * header cannot stick to the page from inside the horizontal-scroll wrapper.
+ */
+export function Table({ className, sticky, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { sticky?: boolean }) {
   return (
-    <div className="w-full overflow-x-auto">
-      <table className={cn("w-full border-collapse text-sm tabular", className)} {...props} />
+    <div className={cn("w-full overflow-x-auto", sticky && "max-h-[calc(100dvh-5rem)] overflow-y-auto")}>
+      <table className={cn("w-full border-collapse text-sm tabular", className,
+        // border-collapse drops a sticky cell's border: draw the line with a shadow instead
+        sticky && "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-white [&_thead_th]:shadow-[inset_0_-1px_0_#A8B6B0]")} {...props} />
     </div>
   );
 }

@@ -96,7 +96,7 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
 
       <Card>
         <CardContent>
-          <Table>
+          <Table sticky>
             <thead><tr><Th>#</Th><Th>SKU</Th><Th>Bin asal</Th><Th>Sisa di bin</Th><Th>Picker</Th><Th>Status</Th><Th>Dipick / audit</Th><Th /></tr></thead>
             <tbody>{lines.map((l) => {
               const hist = byTask.get(l.task_id) ?? [];

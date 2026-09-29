@@ -96,7 +96,7 @@ export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit"
 
       <Card>
         <CardContent>
-          <Table>
+          <Table sticky>
             <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Shipment</Th><Th>Picker</Th><Th>Baris</Th><Th>Sisa di bin</Th><Th>Status</Th><Th>Hitung terakhir</Th><Th /></tr></thead>
             <tbody>{bins.map((b, i) => (
               <Fragment key={key(b)}>
