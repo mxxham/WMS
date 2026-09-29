@@ -83,6 +83,22 @@ select pg_temp.check('30 - 5 = 25 expected, 27 left: mismatch',
 select pg_temp.check('RA3 SHORT, counted 3',
   (pg_temp.line('RA3')).errors = '{SHORT}'
   and (select counted_qty from pick_audits where task_id = pg_temp.task('RA3')) = 3);
+-- ---- Wrong item in the bin (0031), undone after ----------------------------
+savepoint wrong_item;
+select pg_temp.check('wrong item: unknown barcode refused',
+  pg_temp.fails($$select record_rack_audit('2026-10-07', 'CF37C01', '550024919', 'Sari', 0, 'x', '000')$$, '%tidak dikenal%'));
+select pg_temp.check('wrong item: note required',
+  pg_temp.fails($$select record_rack_audit('2026-10-07', 'CF37C01', '550024919', 'Sari', 25, null, '550044709')$$, '%barang di bin salah%'));
+select pg_temp.check('wrong item: scanning the expected SKU is a normal count',
+  record_rack_audit('2026-10-07', 'CF37C01', '550024919', 'Sari', 25, null, '550024919') @> '{"result":"OK","found_sku":null}');
+rollback to savepoint wrong_item;
+select pg_temp.check('wrong item: other SKU found fails every open line with WRONG_SKU',
+  record_rack_audit('2026-10-07', 'CF37C01', '550024919', 'Sari', 25, 'isi bin 550044709', ' 550044709 ')
+    @> '{"result":"MISMATCH","found_sku":"550044709"}');
+select pg_temp.check('wrong item: line records WRONG_SKU and the SKU found',
+  (select found_sku = '550044709' and found_scanned_code is null and errors = '{WRONG_SKU}'
+       from pick_audits where task_id = pg_temp.task('RA3') order by attempt_no desc limit 1));
+rollback to savepoint wrong_item;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select resolve_pick_mismatch((select id from pick_audits where task_id = pg_temp.task('RA3')), 'ACCEPT_SHORT', 'Pak Dedi', 'kirim 3');
 select pg_temp.check('Terima kurang puts the 2 back: bin now 27, line resolved',

@@ -92,7 +92,7 @@ select pg_temp.check('rack: difference needs a note',
   pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 24, null)$q$, '%Catatan wajib%'));
 select pg_temp.check('rack: 2 more left than the file -> short on the last line only',
   record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 24, 'sisa lebih 2')
-  = '{"result":"MISMATCH","system":22,"counted":24,"diff":2,"lines":2}'::jsonb);
+  @> '{"result":"MISMATCH","system":22,"counted":24,"diff":2,"lines":2}'::jsonb);
 select pg_temp.check('rack: first line OK, last line SHORT counted 6',
   (pg_temp.rline('R1')).line_state = 'OK' and (pg_temp.rline('R2')).line_state = 'MISMATCH'
   and (select counted_qty = 6 and errors = '{SHORT}' and method = 'RACK' and rack_system = 22
@@ -104,6 +104,17 @@ select pg_temp.check('rack: nothing left to audit in the bin',
   pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 22, null)$q$, '%Tidak ada baris%'));
 select pg_temp.check('rack: count equal to the file is OK',
   (record_sheet_rack_audit('2026-10-08', 'CF37C01', '550024919', 'Sari Dewi', 0, null)->>'result') = 'OK');
+select load_sheet_pick_lines('2026-10-10', 'ALLOCATOR', 'WMS4.xlsx', '[
+  {"shipment_number":"W1","seq":1,"bin_code":"CA01A01","sku":"550024919","batch":"C1","qty":2,"bin_remaining":4},
+  {"shipment_number":"W2","seq":2,"bin_code":"CA01A01","sku":"550024919","batch":"C1","qty":3,"bin_remaining":1}]'::jsonb);
+select pg_temp.check('wrong item: note required',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-10', 'CA01A01', '550024919', 'Sari Dewi', 0, null, '550044709')$q$, '%barang di bin salah%'));
+select pg_temp.check('wrong item: scanned carton of another SKU fails every line with WRONG_SKU',
+  record_sheet_rack_audit('2026-10-10', 'CA01A01', '550024919', 'Sari Dewi', 1, 'isi bin Advance', '8994123456789')
+    @> '{"result":"MISMATCH","found_sku":"550044709","lines":2}');
+select pg_temp.check('wrong item: both lines WRONG_SKU with what was scanned',
+  (select bool_and(a.errors = '{WRONG_SKU}' and a.found_sku = '550044709' and a.found_scanned_code = '8994123456789')
+       from sheet_pick_audits a join sheet_pick_lines l on l.id = a.line_id where l.pick_date = '2026-10-10'));
 select pg_temp.check('rack: negative remaining refused on load',
   pg_temp.fails($q$select load_sheet_pick_lines('2026-10-09', 'K_ONE', null, '[{"shipment_number":"X","bin_code":"CA01A01","sku":"550024919","qty":1,"bin_remaining":-1}]'::jsonb)$q$, '%bin_remaining%'));
 select pg_temp.check('rack: bin without remaining in the file refused',
