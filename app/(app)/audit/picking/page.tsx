@@ -5,6 +5,8 @@ import { SHIPMENT_STATE_LABEL, type ShipmentState } from "@/lib/pick-audit";
 import { fmtNum } from "@/lib/utils";
 import { AuditHeader, auditDate } from "../audit-header";
 import { AccuracyView } from "./accuracy-view";
+import { sheetShipments, type SheetLineRow } from "./file/data";
+import { FileView } from "./file/file-view";
 import { rackBins, rackSummary, RACK_STATE_LABEL, type RackState } from "./rack-data";
 import { RackList } from "./rack-list";
 import { ShipmentList, type ShipmentRow } from "./shipment-list";
@@ -23,12 +25,18 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
   const sp = await searchParams;
   const date = auditDate(sp.date);
   const supervisor = user.role !== "operator";
-  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : sp.tab === "shipment" ? "shipment" : "rak";
+  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : sp.tab === "shipment" || sp.tab === "file" ? sp.tab : "rak";
   const days = [7, 30, 90].includes(Number(sp.days)) ? Number(sp.days) : 30;
   const supabase = await createClient();
 
   let body: React.ReactNode;
   if (tab === "akurasi") body = <AccuracyView days={days} />;
+  else if (tab === "file") {
+    const { data } = await supabase.from("sheet_pick_line_state").select("shipment_number, wave_no, line_state, source, file_name").eq("pick_date", date);
+    const rows = (data ?? []) as Pick<SheetLineRow, "shipment_number" | "wave_no" | "line_state" | "source" | "file_name">[];
+    const files = [...new Set(rows.map((r) => `${r.file_name ?? "file"} (${r.source === "K_ONE" ? "sheet K_ONE" : "alokasi dari stok WMS"})`))];
+    body = <FileView date={date} shipments={sheetShipments(rows)} source={files.join(", ") || null} />;
+  }
   else if (tab === "rak") {
     const racks = rackSummary(await rackBins(supabase, date));
     const count = (s: RackState) => racks.filter((r) => r.state === s).length;
@@ -80,9 +88,9 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
   return (
     <main>
       <AuditHeader title="Audit picking" date={date} active="picking"
-        live={["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
+        live={tab === "file" ? ["sheet_pick_lines", "sheet_pick_audits"] : ["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
       <TabsNav base="/audit/picking" active={tab}
-        tabs={[{ key: "rak", label: "Per rak" }, { key: "shipment", label: "Shipment" },
+        tabs={[{ key: "rak", label: "Per rak" }, { key: "shipment", label: "Shipment" }, { key: "file", label: "Dari file WMS" },
                ...(supervisor ? [{ key: "akurasi", label: "Akurasi picking" }] : [])]} />
       <div className="p-4 lg:p-8">{body}</div>
     </main>
