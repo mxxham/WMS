@@ -4,12 +4,15 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
-import { fmtDate, fmtNum } from "@/lib/utils";
+import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { ItemScanInput } from "@/components/app/item-scan-input";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 
 type Source = { bin_code: string; batch_lot: string; expiry_date: string | null; quantity: number };
+/** Other open tasks of this SKU taking from / bringing into a bin + batch: what that stock is already promised to. */
+type Claim = { reserved: number; incoming: number; by: string[] };
+const srcKey = (bin: string, batch: string, expiry: string | null) => `${bin}|${batch}|${(expiry ?? "").slice(0, 10)}`;
 type Fefo = "planned" | "same" | "earlier" | "later" | "none";
 
 /** Where a candidate bin stands against the planned expiry (FEFO: earliest first). */
@@ -37,6 +40,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [different, setDifferent] = useState(false);
   const [qty, setQty] = useState(String(t.quantity));
   const [sources, setSources] = useState<Source[] | null>(null);
+  const [claims, setClaims] = useState<Map<string, Claim>>(new Map());
   const [source, setSource] = useState("0");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,6 +78,20 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
       .select("bin_code, batch_lot, expiry_date, quantity").eq("sku", t.sku).gt("quantity", 0)
       .order("expiry_date", { ascending: true, nullsFirst: false }).order("bin_code");
     const rows = (data ?? []) as Source[];
+    // What each bin's stock is already planned for: the other open tasks of this SKU (any wave).
+    const { data: open } = await createClient().from("pick_task_detail")
+      .select("id, wave_no, seq, shipment_number, task_type, from_bin, to_bin, batch_lot, expiry_date, quantity")
+      .eq("sku", t.sku).eq("status", "PLANNED").in("wave_status", ["PENDING", "RESCHEDULED"]);
+    const c = new Map<string, Claim>();
+    const claim = (k: string) => c.get(k) ?? c.set(k, { reserved: 0, incoming: 0, by: [] }).get(k)!;
+    for (const o of (open ?? []) as { id: string; wave_no: string; seq: number; shipment_number: string | null; task_type: string; from_bin: string; to_bin: string | null; batch_lot: string; expiry_date: string | null; quantity: number }[]) {
+      if (o.id === t.id) continue;
+      const out = claim(srcKey(o.from_bin, o.batch_lot, o.expiry_date));
+      out.reserved += Number(o.quantity);
+      out.by.push(`NO ${o.wave_no} #${o.seq}${o.task_type === "PICK" ? ` SH ${o.shipment_number}` : " relokasi"} ${fmtNum(Number(o.quantity))}`);
+      if (o.to_bin) claim(srcKey(o.to_bin, o.batch_lot, o.expiry_date)).incoming += Number(o.quantity);
+    }
+    setClaims(c);
     const idx = rows.findIndex((r) => `${r.bin_code}|${r.batch_lot}|${r.expiry_date}` === planned);
     const ordered = idx >= 0 ? [rows[idx], ...rows.filter((_, i) => i !== idx)]
       : [{ bin_code: t.from_bin, batch_lot: t.batch_lot, expiry_date: t.expiry_date, quantity: 0 }, ...rows];
@@ -97,6 +115,10 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
 
   const fefo = (sources ?? []).map((s, i) => fefoOf(s, t.expiry_date, i === 0));
   const picked = fefo[Number(source)];
+  const claimOf = (s: Source) => claims.get(srcKey(s.bin_code, s.batch_lot, s.expiry_date));
+  const freeOf = (s: Source) => Number(s.quantity) - (claimOf(s)?.reserved ?? 0);
+  const chosen = sources?.[Number(source)];
+  const chosenClaim = chosen ? claimOf(chosen) : undefined;
 
   const n = Number(qty);
   // A pick takes at most the planned cartons; a relocation at most what the chosen bin holds.
@@ -142,13 +164,23 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
                       <optgroup key={g.key} label={g.label}>
                         {items.map(({ s, i }) => (
                           <option key={i} value={i}>
-                            {s.bin_code} · batch {s.batch_lot || "–"} · exp {fmtDate(s.expiry_date)} · stok {fmtNum(Number(s.quantity))}
+                            {freeOf(s) > 0 ? "✓" : "⚠"} {s.bin_code} · batch {s.batch_lot || "–"} · exp {fmtDate(s.expiry_date)} · stok {fmtNum(Number(s.quantity))}
+                            {claimOf(s)?.reserved ? ` · dipesan ${fmtNum(claimOf(s)!.reserved)} · bebas ${fmtNum(Math.max(freeOf(s), 0))}` : " · bebas semua"}
+                            {claimOf(s)?.incoming ? ` · +${fmtNum(claimOf(s)!.incoming)} akan masuk` : ""}
                           </option>
                         ))}
                       </optgroup>
                     );
                   })}
                 </Select>
+                {chosen && chosenClaim && chosenClaim.reserved > 0 && (
+                  <p className={cn("mt-1 rounded-md p-2 text-xs", freeOf(chosen) < n ? "bg-bad/10 font-semibold text-bad" : "bg-plate/30")}>
+                    Stok ini sudah dipesan tugas lain: {chosenClaim.by.join(", ")}.
+                    {freeOf(chosen) < n
+                      ? ` Bebas hanya ${fmtNum(Math.max(freeOf(chosen), 0))}: mengambil ${fmtNum(n)} dari sini membuat tugas itu kurang. Pilih bin bertanda ✓ bila ada.`
+                      : ` Masih bebas ${fmtNum(freeOf(chosen))}.`}
+                  </p>
+                )}
                 {picked === "same" && <p className="mt-1 text-xs text-ok">Expired sama dengan rencana: sesuai FEFO.</p>}
                 {picked === "earlier" && <p className="mt-1 text-xs text-ok">Expired lebih awal dari rencana: sesuai FEFO.</p>}
                 {picked === "later" && <p className="mt-1 rounded-md bg-warn/10 p-2 text-xs text-warn">Expired lebih lama dari rencana ({fmtDate(t.expiry_date)}): melanggar FEFO. Pakai hanya jika stok yang lebih awal memang tidak ada, dan tulis alasannya.</p>}
