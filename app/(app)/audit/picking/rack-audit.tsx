@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ClipboardCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { ItemScanInput } from "@/components/app/item-scan-input";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import { BIN_STATE_LABEL, BIN_STATE_TONE, RACK_STATE_LABEL, RACK_STATE_TONE, type RackBin, type RackSummary } from "./rack-data";
 
-type SaveResult = { result: "OK" | "MISMATCH"; system: number; counted: number; diff: number; lines: number };
+type SaveResult = { result: "OK" | "MISMATCH"; system: number; counted: number; diff: number; lines: number; found_sku: string | null };
 const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
 
 /**
@@ -138,6 +139,10 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SaveResult | null>(null);
   const [upNext, setUpNext] = useState<{ bin: RackBin; left: number } | null>(null);
+  // Another SKU in the bin than the one picked from it (0031).
+  const [wrongItem, setWrongItem] = useState(false);
+  const [skuInput, setSkuInput] = useState("");
+  const [found, setFound] = useState<{ code: string; sku: string } | null>(null);
   const noteRef = useRef<HTMLInputElement>(null);
   const n = Number(counted);
 
@@ -146,9 +151,12 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
     if (checker.trim().length < 2 || counted.trim() === "" || !Number.isFinite(n) || n < 0) {
       return setError("Isi nama checker dan jumlah sisa di bin.");
     }
+    if (wrongItem && !found) return setError("Scan karton / ketik SKU barang yang ada di bin.");
+    if (wrongItem && found?.sku === bin.sku) return setError(`Itu ${bin.sku}, barang yang benar: hapus centang barang salah.`);
     setBusy(true); setError(null);
     const { data, error } = await createClient().rpc(rpc, {
       p_date: date, p_bin: bin.bin_code, p_sku: bin.sku, p_checker_name: checker, p_counted: n, p_note: note,
+      p_found_sku: wrongItem ? found!.code : null,
     });
     setBusy(false);
     if (error) {
@@ -171,12 +179,17 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
         {saved ? (
           <div className="space-y-4">
             <p className={cn("rounded-md p-3 text-base font-semibold", saved.result === "OK" ? "bg-ok/10 text-ok" : "bg-bad/10 text-bad")}>
-              {saved.result === "OK" ? "Sesuai. Semua baris di bin ini lolos." : saved.diff > 0
+              {saved.result === "OK" ? "Sesuai. Semua baris di bin ini lolos." : saved.found_sku
+                ? `Barang salah di bin: ada ${saved.found_sku}, seharusnya ${bin.sku}.` : saved.diff > 0
                 ? `Sisa lebih ${fmtNum(saved.diff)}: picker mengambil kurang dari yang dicatat.`
                 : `Sisa kurang ${fmtNum(-saved.diff)}: picker mengambil lebih dari yang dicatat.`}
             </p>
             <p className="text-sm">Dihitung {fmtNum(saved.counted)} · {rpc === "record_rack_audit" ? "sistem" : "file"} {fmtNum(saved.system)} {bin.uom ?? ""}</p>
-            {saved.result === "MISMATCH" && (
+            {saved.found_sku && (
+              <p className="text-sm">Cek karton di palet: kalau picker mengambil {saved.found_sku}, tukar dengan {bin.sku}.
+                Laporkan bin ini ke supervisor supaya isi bin dibetulkan, lalu hitung ulang.</p>
+            )}
+            {saved.result === "MISMATCH" && !saved.found_sku && (
               <p className="text-sm">{saved.diff > 0
                 ? `Ambil karton yang kurang ke palet, lalu hitung ulang bin ini.${rpc === "record_rack_audit" ? " Atau supervisor menerima kurang di halaman shipment." : ""}`
                 : "Kembalikan karton lebih dari palet ke bin ini, lalu hitung ulang."}</p>
@@ -188,13 +201,26 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
           <form onSubmit={save} className="space-y-4">
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan picker)" id="checker" />
+            <label className="flex items-center gap-2 rounded-md border border-steel-200 p-2 text-sm">
+              <input type="checkbox" checked={wrongItem} onChange={(e) => { setWrongItem(e.target.checked); if (!e.target.checked) { setFound(null); setSkuInput(""); } }} />
+              Barang di bin salah (bukan {bin.sku})
+            </label>
+            {wrongItem && (
+              <div>
+                <Label htmlFor="found-sku">Scan karton / ketik SKU yang ada di {bin.bin_code}</Label>
+                <ItemScanInput id="found-sku" value={skuInput} autoFocus
+                  onChange={(v) => { setSkuInput(v); if (found && v !== found.sku && v !== found.code) setFound(null); }}
+                  onItem={(it, code) => setFound(it ? { code, sku: it.sku } : null)} />
+                {found && <p className="mt-1 text-xs font-semibold text-bad">Terbaca: {found.sku}{found.sku === bin.sku ? " (ini barang yang benar)" : ""}</p>}
+              </div>
+            )}
             <div>
-              <Label htmlFor="left">Sisa {bin.sku} di {bin.bin_code} (semua batch) · {rpc === "record_rack_audit" ? "sistem" : "file"}: {fmtNum(bin.bin_qty ?? 0)} {bin.uom ?? ""}</Label>
+              <Label htmlFor="left">{wrongItem ? `Sisa ${bin.sku} yang benar di ${bin.bin_code} (0 bila tidak ada)` : `Sisa ${bin.sku} di ${bin.bin_code} (semua batch)`} · {rpc === "record_rack_audit" ? "sistem" : "file"}: {fmtNum(bin.bin_qty ?? 0)} {bin.uom ?? ""}</Label>
               <Input id="left" type="number" inputMode="numeric" min={0} step="any" autoFocus value={counted}
                 onChange={(e) => setCounted(e.target.value)} className="h-12 text-lg" required />
             </div>
             <div>
-              <Label htmlFor="rnote">Catatan (wajib bila tidak sesuai)</Label>
+              <Label htmlFor="rnote">Catatan (wajib bila tidak sesuai / barang salah)</Label>
               <Input id="rnote" ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. sisa 2 karton lebih" />
             </div>
             {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
