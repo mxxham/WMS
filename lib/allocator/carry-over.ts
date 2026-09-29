@@ -21,6 +21,12 @@ export type CarryMatch = {
   unmatched: { sku: string; shipment: string; qty: number }[];
   /** one old shipment matched to several new ones: needs a look before saving */
   ambiguous: boolean;
+  /**
+   * fresh: nothing of the wave posted yet, so it is cancelled on save and the
+   * whole shipment (new items too) is planned again in one wave.
+   * carry: something posted, so the wave is carried over and new items join it.
+   */
+  mode: 'fresh' | 'carry';
 };
 
 const clean = (s: string) => s.trim();
@@ -40,7 +46,7 @@ export function matchParked(demand: DemandLine[], parked: ParkedOrder[]): { matc
     used.add(p); matchedDemand.add(d);
     const m = byWave.get(p.wave_id) ?? {
       wave_id: p.wave_id, wave_no: p.wave_no, planned_date: p.planned_date, posted_tasks: p.posted_tasks,
-      shipments: {}, lines: [], unmatched: [], ambiguous: false,
+      shipments: {}, lines: [], unmatched: [], ambiguous: false, mode: p.posted_tasks > 0 ? 'carry' : 'fresh',
     };
     m.lines.push({ sku: d.sku, description: d.description || p.description, oldShipment: p.shipment_number, newShipment: d.shipmentNumber,
       oldQty: Number(p.quantity_requested), newQty: d.qtyCartons });
@@ -59,6 +65,13 @@ export function matchParked(demand: DemandLine[], parked: ParkedOrder[]): { matc
     for (const [o, n] of Object.entries(m.shipments)) if (o === n) delete m.shipments[o];
     m.unmatched = parked.filter((x) => x.wave_id === m.wave_id && !used.has(x))
       .map((x) => ({ sku: x.sku, shipment: x.shipment_number, qty: Number(x.quantity_requested) }));
+  }
+  // A fresh plan takes the whole shipment again: only carried waves keep their lines out of it.
+  const carried = new Set([...byWave.values()].filter((m) => m.mode === 'carry').map((m) => m.wave_id));
+  for (const d of [...matchedDemand]) {
+    const p = parked.find((x) => used.has(x) && x.sku === d.sku && carried.has(x.wave_id)
+      && (x.shipment_number === d.shipmentNumber || x.order_nos.some((o) => d.orderNos.map(clean).includes(clean(o)))));
+    if (!p) matchedDemand.delete(d);
   }
   return { matches: [...byWave.values()], matchedDemand };
 }

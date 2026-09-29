@@ -78,20 +78,23 @@ export function AllocateClient() {
         const supabase = createClient();
         // Stock net of what open tasks of other waves will still take or bring in.
         ctx = await loadPlanContext(supabase, asOf);
-        const db = inventoryToStock(await loadPlanningStock(supabase, asOf), config);
-        // The workbook's warnings are all about its stock sheet, which is not used here.
-        stock = db.stock; staged = db.stagedBySku; warnings = db.warnings;
         // Shipments of waves already worked on / paused / cancelled are not planned again.
         const kept = keptShipments(ctx);
         skipped = [...new Set(demand.filter((d) => kept.has(d.shipmentNumber)).map((d) => d.shipmentNumber))];
         demand = demand.filter((d) => !kept.has(d.shipmentNumber));
-        // Orders parked on an earlier day, back on today's schedule (maybe under a new shipment
-        // number): their old wave still holds their stock, so it is carried over, not planned again.
+        // Orders parked on an earlier day, back on today's schedule (0036/0037). Nothing posted
+        // yet: planned fresh, whole shipment in one wave, with the parked stock counted as free.
+        // Something posted: the old wave is carried over and only the new items are planned.
         const { data: parked, error: pe } = await supabase.rpc("parked_orders", { p_date: asOf });
         if (pe) throw new Error(pe.message);
         const found = matchParked(demand, ((parked ?? []) as ParkedOrder[]).filter((p) => p.planned_date < asOf));
         carry = found.matches;
         demand = demand.filter((d) => !found.matchedDemand.has(d));
+        // Stock net of what open tasks of other waves will still take or bring in.
+        const release = carry.filter((m) => m.mode === "fresh").map((m) => m.wave_id);
+        const db = inventoryToStock(await loadPlanningStock(supabase, asOf, release), config);
+        // The workbook's warnings are all about its stock sheet, which is not used here.
+        stock = db.stock; staged = db.stagedBySku; warnings = db.warnings;
       }
       setRun({ ...runPipeline(stock, demand, staged, config, warnings), source, asOf, demand, ctx, skipped, carry });
       setTab("picklist");
@@ -105,19 +108,31 @@ export function AllocateClient() {
     try {
       const db = createClient();
       const r = await savePlan(db, run.asOf, run, run.demand);
-      // After save_plan (which replaces the date's untouched waves): move the parked waves in.
+      // After save_plan (which replaces the date's untouched waves), the parked waves:
+      // fresh -> cancelled (the new plan has the whole shipment); carry -> moved in, new items merged.
       const carried: string[] = [];
       for (const m of run.carry) {
-        const { data, error } = await db.rpc("carry_over_wave", {
-          p_wave_id: m.wave_id, p_date: run.asOf, p_shipments: m.shipments, p_reason: `order muncul lagi di jadwal ${run.asOf}`,
-        });
+        const why = `order muncul lagi di jadwal ${run.asOf}`;
+        if (m.mode === "fresh") {
+          const { error } = await db.rpc("set_wave_status", { p_wave_id: m.wave_id, p_status: "CANCELLED", p_reason: `${why}: direncanakan ulang` });
+          if (error) throw new Error(`Rencana tersimpan, tapi wave lama NO ${m.wave_no} (${m.planned_date}) gagal dibatalkan: ${error.message}. Batalkan manual di halaman wave.`);
+          continue;
+        }
+        const { data, error } = await db.rpc("carry_over_wave", { p_wave_id: m.wave_id, p_date: run.asOf, p_shipments: m.shipments, p_reason: why });
         if (error) throw new Error(`Rencana tersimpan, tapi wave NO ${m.wave_no} (${m.planned_date}) gagal dilanjutkan: ${error.message}`);
-        carried.push((data as { wave_no: string }).wave_no);
+        const moved = data as { wave_no: string; shipment_numbers: string[] };
+        for (const sh of moved.shipment_numbers) {
+          const { error: me } = await db.rpc("merge_into_carried_wave", { p_wave_id: m.wave_id, p_shipment: sh });
+          if (me) throw new Error(`Wave ${moved.wave_no} dilanjutkan, tapi item baru SH ${sh} gagal digabung: ${me.message}`);
+        }
+        carried.push(moved.wave_no);
       }
+      const fresh = run.carry.filter((m) => m.mode === "fresh").length;
       setSaved(`${fmtNum(r.waves)} wave, ${fmtNum(r.tasks)} tugas, ${fmtNum(r.outbound)} baris order disimpan`
         + (r.replaced ? `, ${r.replaced} wave lama yang belum dikerjakan diganti` : "")
         + (r.kept ? `, ${r.kept} wave yang sudah berjalan tetap` : "")
-        + (carried.length ? `, ${carried.length} wave yang ditunda dilanjutkan (${carried.join(", ")})` : "") + ".");
+        + (carried.length ? `, ${carried.length} wave yang ditunda dilanjutkan (${carried.join(", ")})` : "")
+        + (fresh ? `, ${fresh} wave yang ditunda diganti rencana baru` : "") + ".");
       return null;
     } catch (e) { return (e as Error).message; }
   }
@@ -182,14 +197,7 @@ export function AllocateClient() {
             </p>
           )}
           {run.carry.length > 0 && (
-            <CarryPanel matches={run.carry} asOf={run.asOf} onReplan={async (m) => {
-              const { error } = await createClient().rpc("set_wave_status", {
-                p_wave_id: m.wave_id, p_status: "CANCELLED", p_reason: `direncanakan ulang di jadwal ${run.asOf}`,
-              });
-              if (error) return error.message;
-              await execute();
-              return null;
-            }} />
+            <CarryPanel matches={run.carry} asOf={run.asOf} />
           )}
           {run.doubles.total > 0 && (
             <p role="alert" className="flex items-center gap-2 rounded-md bg-bad p-3 text-sm font-semibold text-white">
@@ -317,33 +325,32 @@ function PicklistTab({ run }: { run: PipelineResult }) {
 }
 
 /**
- * Parked (Tunda) orders of earlier days found again on this schedule. By
- * default their old wave is carried over on save (same stock, same picks,
- * new shipment number); "Rencana baru" cancels it and plans them fresh.
+ * Parked (Tunda) orders of earlier days found again on this schedule (0036/0037):
+ * nothing posted yet -> planned fresh with the whole shipment in one wave, the
+ * old wave cancelled on save; something posted -> the old wave is carried over
+ * on save and new items of the shipment join it.
  */
-function CarryPanel({ matches, asOf, onReplan }: { matches: CarryMatch[]; asOf: string; onReplan: (m: CarryMatch) => Promise<string | null> }) {
+function CarryPanel({ matches, asOf }: { matches: CarryMatch[]; asOf: string }) {
   return (
     <div className="space-y-3 rounded-md border-2 border-warn bg-white p-3 text-sm">
-      <p className="font-semibold">{matches.length} wave yang ditunda muncul lagi di jadwal ini (SKU dan shipment / Order No sama). Tidak direncanakan ulang:
-        saat disimpan, wave lama dilanjutkan ke {asOf} dengan nomor shipment baru.</p>
+      <p className="font-semibold">{matches.length} wave yang ditunda muncul lagi di jadwal ini (SKU dan shipment / Order No sama).</p>
       {matches.map((m) => (
         <div key={m.wave_id} className="space-y-1 rounded border border-steel-100 p-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p><b>NO {m.wave_no}</b> · {m.planned_date} · ditunda{m.posted_tasks > 0 ? ` · ${m.posted_tasks} tugas sudah diposting` : ""}
-              {" → "}<b>T{m.wave_no.replace(/^T/, "")}</b> di {asOf}</p>
-            <ConfirmButton size="sm" variant="outline" title={`Rencana baru untuk NO ${m.wave_no}`} confirmLabel="Batalkan wave lama & hitung ulang"
-              summary={`Wave NO ${m.wave_no} (${m.planned_date}) dibatalkan dan stoknya dilepas, lalu order ini direncanakan baru dari stok sekarang.${m.posted_tasks > 0 ? ` Perhatian: ${m.posted_tasks} tugas sudah diposting; barangnya tidak kembali otomatis.` : ""}`}
-              onConfirm={() => onReplan(m)}>Rencana baru</ConfirmButton>
-          </div>
+          <p><b>NO {m.wave_no}</b> · {m.planned_date} · ditunda{m.posted_tasks > 0 ? ` · ${m.posted_tasks} tugas sudah diposting` : " · belum ada yang dipick"}</p>
+          <p className={cn("rounded p-1.5", m.mode === "fresh" ? "bg-plate/30" : "bg-ok/10")}>
+            {m.mode === "fresh"
+              ? <>Direncanakan baru: seluruh shipment (termasuk item baru) masuk rencana ini dalam satu wave, dari stok sekarang. Saat disimpan, wave lama NO {m.wave_no} dibatalkan.</>
+              : <>Dilanjutkan: saat disimpan wave lama pindah ke {asOf} sebagai <b>T{m.wave_no.replace(/^T/, "")}</b>; item baru shipment ini ikut digabung ke wave itu.</>}
+          </p>
           <ul className="text-xs">
             {m.lines.map((l, i) => (
               <li key={i} className={cn(l.oldQty !== l.newQty && "font-semibold text-warn")}>
                 SH {l.oldShipment}{l.newShipment !== l.oldShipment ? ` → ${l.newShipment}` : ""} · {l.sku} {l.description} · {fmtNum(l.newQty)}
-                {l.oldQty !== l.newQty && ` (wave lama ${fmtNum(l.oldQty)}: sesuaikan dengan Ubah jumlah order setelah disimpan)`}
+                {l.oldQty !== l.newQty && ` (wave lama ${fmtNum(l.oldQty)}${m.mode === "carry" ? ": sesuaikan dengan Ubah jumlah order setelah disimpan" : ""})`}
               </li>
             ))}
             {m.unmatched.map((u, i) => (
-              <li key={`u${i}`} className="text-steel-500">SH {u.shipment} · {u.sku} · {fmtNum(u.qty)}: tidak ada di jadwal ini, ikut dipindah</li>
+              <li key={`u${i}`} className="text-steel-500">SH {u.shipment} · {u.sku} · {fmtNum(u.qty)}: tidak ada di jadwal ini, {m.mode === "fresh" ? "ikut dibatalkan" : "ikut dipindah"}</li>
             ))}
           </ul>
           {m.ambiguous && <p className="text-xs font-semibold text-bad">Satu shipment lama cocok dengan beberapa shipment baru: dipakai yang pertama. Periksa sebelum menyimpan.</p>}
