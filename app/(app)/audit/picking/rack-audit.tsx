@@ -21,7 +21,12 @@ const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
  * counts what is left of the SKU in each bin, blind (0025); an OK count goes
  * straight on to the next bin still to count.
  */
-export function RackAudit({ zone, date, bins, summary }: { zone: string; date: string; bins: RackBin[]; summary: RackSummary }) {
+type RackRpc = "record_rack_audit" | "record_sheet_rack_audit";
+
+/** `rpc`: the count against the system (0025) or against the WMS file (0030). */
+export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit", backHref = `/audit/picking?date=${date}` }: {
+  zone: string; date: string; bins: RackBin[]; summary: RackSummary; rpc?: RackRpc; backHref?: string;
+}) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
   const [open, setOpen] = useState<{ bin: RackBin; flash?: string } | null>(null);
@@ -35,13 +40,13 @@ export function RackAudit({ zone, date, bins, summary }: { zone: string; date: s
     const k = key(b);
     if (checker.trim().length < 2) return setRowError((e) => ({ ...e, [k]: "Isi nama checker di atas dulu." }));
     setBusy(k); setRowError((e) => ({ ...e, [k]: "" }));
-    const { data, error } = await createClient().rpc("record_rack_audit", {
+    const { data, error } = await createClient().rpc(rpc, {
       p_date: date, p_bin: b.bin_code, p_sku: b.sku, p_checker_name: checker, p_counted: b.bin_qty ?? 0, p_note: null,
     });
     setBusy(null);
     if (error) {
       // The system moved since the page loaded: count it in the form instead.
-      const msg = error.message.startsWith("Catatan wajib") ? "Sisa di sistem berubah: pakai Tidak sesuai / hitung." : error.message;
+      const msg = error.message.startsWith("Catatan wajib") ? "Sisa di sistem berubah: pakai Salah / hitung." : error.message;
       return setRowError((e) => ({ ...e, [k]: msg }));
     }
     if ((data as SaveResult).result === "OK") setSaved((s) => new Set(s).add(k));
@@ -60,7 +65,7 @@ export function RackAudit({ zone, date, bins, summary }: { zone: string; date: s
 
   return (
     <div className="space-y-4">
-      <Link href={`/audit/picking?date=${date}`} className="inline-flex items-center gap-1 text-sm underline"><ArrowLeft className="h-4 w-4" />Semua rak</Link>
+      <Link href={backHref} className="inline-flex items-center gap-1 text-sm underline"><ArrowLeft className="h-4 w-4" />Semua rak</Link>
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
@@ -80,7 +85,7 @@ export function RackAudit({ zone, date, bins, summary }: { zone: string; date: s
           </div>
         </CardContent>
       </Card>
-      <p className="text-sm text-steel-500">Cek <b>sisa</b> SKU di tiap bin (semua batch). Sama dengan sisa di sistem: tekan <b>✓ Sesuai</b>. Beda: <b>Tidak sesuai</b> lalu isi hitungan.</p>
+      <p className="text-sm text-steel-500">Cek <b>sisa</b> SKU di tiap bin (semua batch). Sama dengan sisa {rpc === "record_sheet_rack_audit" ? "di file" : "di sistem"}: tekan <b>✓ Sesuai</b> (kanan). Beda: <b>✗ Salah</b> (kiri) lalu isi hitungan.</p>
 
       <Card>
         <CardContent>
@@ -93,17 +98,17 @@ export function RackAudit({ zone, date, bins, summary }: { zone: string; date: s
                 <Td className="text-xs">{b.shipments.join(", ")}</Td>
                 <Td className="text-xs">{b.pickers.join(", ") || "(tidak tercatat)"}</Td>
                 <Td className="tabular">{fmtNum(b.lines)}</Td>
-                <Td className="tabular font-semibold">{fmtNum(b.bin_qty ?? 0)} {b.uom ?? ""}</Td>
+                <Td className="tabular font-semibold">{b.bin_qty === null ? "–" : `${fmtNum(b.bin_qty)} ${b.uom ?? ""}`}</Td>
                 <Td><span className={cn("rounded px-2 py-0.5 text-xs font-semibold", BIN_STATE_TONE[b.state])}>{BIN_STATE_LABEL[b.state]}</span></Td>
                 <Td className="text-xs">{b.last
-                  ? <>sisa {fmtNum(b.last.counted ?? 0)} · sistem {fmtNum(b.last.system ?? 0)} {b.uom ?? ""}<br />
+                  ? <>sisa {fmtNum(b.last.counted ?? 0)} · {rpc === "record_rack_audit" ? "sistem" : "file"} {fmtNum(b.last.system ?? 0)} {b.uom ?? ""}<br />
                       <span className="text-steel-500">{b.last.checker} · {fmtDateTime(b.last.at)}</span></>
                   : b.state === "TODO" ? "–" : <span className="text-steel-500">diaudit di staging</span>}</Td>
                 <Td className="text-right">
                   {b.countable && !saved.has(key(b)) && (
                     <div className="flex flex-wrap justify-end gap-1">
+                      <Button size="sm" variant="outline" className="border-bad text-bad" onClick={() => setOpen({ bin: b })}>✗ Salah</Button>
                       <Button size="sm" disabled={busy === key(b)} onClick={() => confirm(b)}>{busy === key(b) ? "…" : "✓ Sesuai"}</Button>
-                      <Button size="sm" variant="outline" onClick={() => setOpen({ bin: b })}>Tidak sesuai</Button>
                     </div>
                   )}
                   {rowError[key(b)] && <p role="alert" className="mt-1 text-xs text-bad">{rowError[key(b)]}</p>}
@@ -114,14 +119,14 @@ export function RackAudit({ zone, date, bins, summary }: { zone: string; date: s
           </Table>
         </CardContent>
       </Card>
-      {open && <CountDialog key={key(open.bin)} bin={open.bin} date={date} flash={open.flash} next={next}
+      {open && <CountDialog key={key(open.bin)} bin={open.bin} date={date} rpc={rpc} flash={open.flash} next={next}
         onOpen={(bin, flash) => setOpen({ bin, flash })} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function CountDialog({ bin, date, flash, next, onOpen, onClose }: {
-  bin: RackBin; date: string; flash?: string;
+function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
+  bin: RackBin; date: string; rpc: RackRpc; flash?: string;
   next: (from: RackBin) => { bin: RackBin; left: number } | null;
   onOpen: (bin: RackBin, flash: string) => void; onClose: () => void;
 }) {
@@ -142,7 +147,7 @@ function CountDialog({ bin, date, flash, next, onOpen, onClose }: {
       return setError("Isi nama checker dan jumlah sisa di bin.");
     }
     setBusy(true); setError(null);
-    const { data, error } = await createClient().rpc("record_rack_audit", {
+    const { data, error } = await createClient().rpc(rpc, {
       p_date: date, p_bin: bin.bin_code, p_sku: bin.sku, p_checker_name: checker, p_counted: n, p_note: note,
     });
     setBusy(false);
@@ -170,10 +175,10 @@ function CountDialog({ bin, date, flash, next, onOpen, onClose }: {
                 ? `Sisa lebih ${fmtNum(saved.diff)}: picker mengambil kurang dari yang dicatat.`
                 : `Sisa kurang ${fmtNum(-saved.diff)}: picker mengambil lebih dari yang dicatat.`}
             </p>
-            <p className="text-sm">Dihitung {fmtNum(saved.counted)} · sistem {fmtNum(saved.system)} {bin.uom ?? ""}</p>
+            <p className="text-sm">Dihitung {fmtNum(saved.counted)} · {rpc === "record_rack_audit" ? "sistem" : "file"} {fmtNum(saved.system)} {bin.uom ?? ""}</p>
             {saved.result === "MISMATCH" && (
               <p className="text-sm">{saved.diff > 0
-                ? "Ambil karton yang kurang ke palet, lalu hitung ulang bin ini. Atau supervisor menerima kurang di halaman shipment."
+                ? `Ambil karton yang kurang ke palet, lalu hitung ulang bin ini.${rpc === "record_rack_audit" ? " Atau supervisor menerima kurang di halaman shipment." : ""}`
                 : "Kembalikan karton lebih dari palet ke bin ini, lalu hitung ulang."}</p>
             )}
             {upNext && <Button size="lg" className="w-full" onClick={() => onOpen(upNext.bin, "")}>Lanjut: {upNext.bin.bin_code} {upNext.bin.sku}</Button>}
@@ -184,7 +189,7 @@ function CountDialog({ bin, date, flash, next, onOpen, onClose }: {
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan picker)" id="checker" />
             <div>
-              <Label htmlFor="left">Sisa {bin.sku} di {bin.bin_code} (semua batch) · sistem: {fmtNum(bin.bin_qty ?? 0)} {bin.uom ?? ""}</Label>
+              <Label htmlFor="left">Sisa {bin.sku} di {bin.bin_code} (semua batch) · {rpc === "record_rack_audit" ? "sistem" : "file"}: {fmtNum(bin.bin_qty ?? 0)} {bin.uom ?? ""}</Label>
               <Input id="left" type="number" inputMode="numeric" min={0} step="any" autoFocus value={counted}
                 onChange={(e) => setCounted(e.target.value)} className="h-12 text-lg" required />
             </div>

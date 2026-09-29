@@ -3,13 +3,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtNum } from "@/lib/utils";
 import { FileUpload } from "../file-upload";
-import { sheetShipmentHref, type SheetShipment } from "./data";
+import { RACK_STATE_LABEL, type RackState, type RackSummary } from "../rack-data";
+import { RackList } from "../rack-list";
+import { sheetRackHref, sheetShipmentHref, type SheetShipment } from "./data";
 
-/** The "Dari file WMS" tab: load the day's file, then audit shipment by shipment. */
-export function FileView({ date, shipments, source }: { date: string; shipments: SheetShipment[]; source: string | null }) {
+/**
+ * The "Dari file WMS" tab: load the day's file, then audit rack by rack
+ * (default, like "Per rak") or shipment by shipment.
+ */
+export function FileView({ date, shipments, racks, view, source }: {
+  date: string; shipments: SheetShipment[]; racks: RackSummary[]; view: "rak" | "shipment"; source: string | null;
+}) {
   const lines = shipments.reduce((s, x) => s + x.lines, 0);
   const tile = (n: number, label: string) => (
-    <div className="rounded-lg border-l-4 border-ckb bg-white p-3">
+    <div key={label} className="rounded-lg border-l-4 border-ckb bg-white p-3">
       <div className="font-cond text-3xl font-semibold tabular">{fmtNum(n)}</div>
       <div className="text-xs text-steel-500">{label}</div>
     </div>
@@ -17,7 +24,12 @@ export function FileView({ date, shipments, source }: { date: string; shipments:
   return (
     <div className="space-y-4">
       <FileUpload date={date} existing={lines} />
-      {shipments.length > 0 && (
+      {shipments.length > 0 && view === "rak" && (
+        <div className="grid grid-cols-3 gap-3">
+          {(["TODO", "MISMATCH", "DONE"] as RackState[]).map((s) => tile(racks.filter((r) => r.state === s).length, `Rak ${RACK_STATE_LABEL[s].toLowerCase()}`))}
+        </div>
+      )}
+      {shipments.length > 0 && view === "shipment" && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {tile(shipments.reduce((s, x) => s + x.todo, 0), "Baris belum diaudit")}
           {tile(shipments.reduce((s, x) => s + x.mismatch, 0), "Baris selisih")}
@@ -25,8 +37,17 @@ export function FileView({ date, shipments, source }: { date: string; shipments:
           {tile(shipments.filter((x) => x.ok === x.lines).length, "Shipment selesai")}
         </div>
       )}
-      {source && <p className="text-sm text-steel-500">Baris dari {source}. Checker mencatat isi palet tanpa melihat angka di file.</p>}
-      {!shipments.length ? <p className="text-sm text-steel-500">Belum ada file WMS untuk tanggal ini. Pilih file di atas.</p> : (
+      {source && (
+        <p className="text-sm text-steel-500">Baris dari {source}.{" "}
+          {view === "rak" ? "Checker menghitung sisa di bin yang dipick, rak demi rak." : "Checker mencatat isi palet tanpa melihat angka di file."}{" "}
+          <Link className="underline" href={`/audit/picking?tab=file&date=${date}${view === "rak" ? "&view=shipment" : ""}`}>
+            {view === "rak" ? "Lihat per shipment" : "Lihat per rak"}</Link>
+        </p>
+      )}
+      {!shipments.length ? <p className="text-sm text-steel-500">Belum ada file WMS untuk tanggal ini. Pilih file di atas.</p> : view === "rak" ? (
+        <RackList rows={racks} href={(z) => sheetRackHref(date, z)} empty="Belum ada pick di file tanggal ini." head={["Bin dipick", "Baris"]}
+          unit={{ of: "bins", label: "bin", doneHead: "Sudah dihitung" }} />
+      ) : (
         <Card>
           <CardContent>
             <Table>

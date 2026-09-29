@@ -46,7 +46,7 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
 
   return (
     <div className="space-y-4">
-      <Link href={`/audit/picking?tab=file&date=${date}`} className="inline-flex items-center gap-1 text-sm underline"><ArrowLeft className="h-4 w-4" />Semua shipment</Link>
+      <Link href={`/audit/picking?tab=file&view=shipment&date=${date}`} className="inline-flex items-center gap-1 text-sm underline"><ArrowLeft className="h-4 w-4" />Semua shipment</Link>
       <Card>
         <CardContent className="space-y-1">
           <h2 className="font-cond text-2xl font-semibold">SH {shipment}</h2>

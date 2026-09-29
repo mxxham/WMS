@@ -11,7 +11,7 @@ import { withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
 import { loadDispatchRules, loadPickfaceOverrides } from "@/lib/allocator/browser/plan-client";
 import { runPipeline } from "@/lib/allocator/pipeline";
-import { allocatorLines, K_ONE_SHEET, kOneLines, skuBatches, stagedLines, type SheetPickLine } from "@/lib/sheet-picklist";
+import { allocatorLines, K_ONE_SHEET, kOneLines, skuBatches, stagedLines, withBinRemaining, type SheetPickLine } from "@/lib/sheet-picklist";
 import { fmtNum } from "@/lib/utils";
 
 type Parsed = {
@@ -62,7 +62,7 @@ export function FileUpload({ date, existing }: { date: string; existing: number 
     if (!parsed) return;
     setBusy(true); setError(null);
     const { data, error } = await createClient().rpc("load_sheet_pick_lines", {
-      p_date: date, p_source: parsed.source, p_file: parsed.file, p_lines: [...parsed.lines, ...parsed.short.filter((_, i) => staged.has(i))],
+      p_date: date, p_source: parsed.source, p_file: parsed.file, p_lines: withBinRemaining([...parsed.lines, ...parsed.short.filter((_, i) => staged.has(i))]),
     });
     setBusy(false);
     if (error) return setError(error.message);

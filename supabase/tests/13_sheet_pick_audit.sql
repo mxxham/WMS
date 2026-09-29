@@ -78,4 +78,35 @@ select pg_temp.check('reload: audited line keeps its original qty',
 select pg_temp.check('reload: line gone from the new file is removed', pg_temp.line('S2', 'CF38C02') is null);
 select pg_temp.check('reload: new line added', pg_temp.state('S3', 'CF38C02') = 'TODO');
 
+-- ---- D. At the rack (0030) --------------------------------------------------
+select load_sheet_pick_lines('2026-10-08', 'ALLOCATOR', 'WMS3.xlsx', '[
+  {"shipment_number":"R1","seq":1,"bin_code":"CF38C01","sku":"550044709","batch":"A7","qty":10,"bin_remaining":30,"picker_name":"Budi Santoso"},
+  {"shipment_number":"R2","seq":2,"bin_code":"CF38C01","sku":"550044709","batch":"A7","qty":8,"bin_remaining":22},
+  {"shipment_number":"R3","seq":1,"bin_code":"CF37C01","sku":"550024919","batch":"C1","qty":5,"bin_remaining":0},
+  {"shipment_number":"R4","seq":1,"bin_code":"STAGING","sku":"550024919","batch":"C1","qty":3}]'::jsonb);
+create or replace function pg_temp.rline(p_ship text) returns sheet_pick_line_state language sql as $$
+  select * from sheet_pick_line_state where pick_date = '2026-10-08' and shipment_number = p_ship $$;
+select pg_temp.check('rack: checker = picker of a line in the bin refused',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'cf38c01', '550044709', 'Budi Santoso', 22, null)$q$, '%Checker tidak boleh picker%'));
+select pg_temp.check('rack: difference needs a note',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 24, null)$q$, '%Catatan wajib%'));
+select pg_temp.check('rack: 2 more left than the file -> short on the last line only',
+  record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 24, 'sisa lebih 2')
+  = '{"result":"MISMATCH","system":22,"counted":24,"diff":2,"lines":2}'::jsonb);
+select pg_temp.check('rack: first line OK, last line SHORT counted 6',
+  (pg_temp.rline('R1')).line_state = 'OK' and (pg_temp.rline('R2')).line_state = 'MISMATCH'
+  and (select counted_qty = 6 and errors = '{SHORT}' and method = 'RACK' and rack_system = 22
+       from sheet_pick_audits where line_id = (pg_temp.rline('R2')).id));
+select pg_temp.check('rack: recount after the fix passes the rest',
+  (record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 22, null)->>'lines') = '1'
+  and (pg_temp.rline('R2')).line_state = 'OK');
+select pg_temp.check('rack: nothing left to audit in the bin',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'CF38C01', '550044709', 'Sari Dewi', 22, null)$q$, '%Tidak ada baris%'));
+select pg_temp.check('rack: count equal to the file is OK',
+  (record_sheet_rack_audit('2026-10-08', 'CF37C01', '550024919', 'Sari Dewi', 0, null)->>'result') = 'OK');
+select pg_temp.check('rack: negative remaining refused on load',
+  pg_temp.fails($q$select load_sheet_pick_lines('2026-10-09', 'K_ONE', null, '[{"shipment_number":"X","bin_code":"CA01A01","sku":"550024919","qty":1,"bin_remaining":-1}]'::jsonb)$q$, '%bin_remaining%'));
+select pg_temp.check('rack: bin without remaining in the file refused',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'STAGING', '550024919', 'Sari Dewi', 3, null)$q$, '%tidak mencatat sisa%'));
+
 rollback;
