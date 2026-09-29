@@ -1,5 +1,5 @@
 import type { PickError } from "@/lib/pick-audit";
-import { walkKey, type BinState, type RackBin } from "../rack-data";
+import type { BinState, RackBin } from "../rack-data";
 
 /** One row of sheet_pick_line_state (0029, 0030). */
 export type SheetLineRow = {
@@ -37,7 +37,7 @@ export function sheetZone(bin: string): string {
 export const sheetRackHref = (date: string, zone: string) => `/audit/picking/file/rak/${encodeURIComponent(zone)}?date=${date}`;
 
 /**
- * The file's lines per bin + SKU, in walking order, with what the file says
+ * The file's lines per bin + SKU, grouped by bin (CA17A01, CA17A02, CA17B01 …), with what the file says
  * is left in the bin (`bin_qty`) and the last count at the rack.
  */
 export function sheetRackBins(rows: SheetLineRow[]): RackBin[] {
@@ -64,5 +64,5 @@ export function sheetRackBins(rows: SheetLineRow[]): RackBin[] {
     countable: bin.bin_qty !== null && states.some((s) => s !== "OK"),
     correctable: bin.bin_qty !== null && states.some((s) => s !== "TODO"),
     state: states.includes("MISMATCH") ? "MISMATCH" : states.includes("TODO") ? "TODO" : "OK",
-  })).sort((a, b) => walkKey(a.bin_code).localeCompare(walkKey(b.bin_code)) || a.sku.localeCompare(b.sku));
+  })).sort((a, b) => a.bin_code.localeCompare(b.bin_code) || a.sku.localeCompare(b.sku));
 }
