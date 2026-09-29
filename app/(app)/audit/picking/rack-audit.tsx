@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ClipboardCheck } from "lucide-react";
@@ -16,6 +16,8 @@ import { BIN_STATE_LABEL, BIN_STATE_TONE, RACK_STATE_LABEL, RACK_STATE_TONE, typ
 
 type SaveResult = { result: "OK" | "MISMATCH"; system: number; counted: number; diff: number; lines: number; found_sku: string | null };
 const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
+/** Rack number of a bin (CA17C01 -> CA17); anything else is its own group. */
+const rackOf = (bin: string) => (/^[A-Z]{2}\d{2}[A-Z]\d{2}$/.test(bin) ? bin.slice(0, 4) : bin);
 
 /**
  * One rack (aisle) on a date: its picked bins in walking order. The checker
@@ -25,10 +27,12 @@ const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
 type RackRpc = "record_rack_audit" | "record_sheet_rack_audit";
 
 /** `rpc`: the count against the system (0025) or against the WMS file (0030). */
-export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit", backHref = `/audit/picking?date=${date}`, canCorrect = false }: {
+export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit", backHref = `/audit/picking?date=${date}`, canCorrect = false, groupByRack = false }: {
   zone: string; date: string; bins: RackBin[]; summary: RackSummary; rpc?: RackRpc; backHref?: string;
   /** supervisor / admin: a counted bin can be counted again (Ubah, 0032) */
   canCorrect?: boolean;
+  /** bins come sorted by code: put a header row above each rack number (CA17, CA18 …) */
+  groupByRack?: boolean;
 }) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
@@ -94,8 +98,13 @@ export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit"
         <CardContent>
           <Table>
             <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Shipment</Th><Th>Picker</Th><Th>Baris</Th><Th>Sisa di bin</Th><Th>Status</Th><Th>Hitung terakhir</Th><Th /></tr></thead>
-            <tbody>{bins.map((b) => (
-              <tr key={key(b)} className={cn(b.state === "MISMATCH" && "bg-bad/5")}>
+            <tbody>{bins.map((b, i) => (
+              <Fragment key={key(b)}>
+              {groupByRack && rackOf(b.bin_code) !== rackOf(bins[i - 1]?.bin_code ?? "") && (
+                <tr className="bg-steel-100"><td colSpan={9} className="px-3 py-1.5 font-cond text-base font-semibold">
+                  {rackOf(b.bin_code)} · {bins.filter((x) => rackOf(x.bin_code) === rackOf(b.bin_code)).length} bin</td></tr>
+              )}
+              <tr className={cn(b.state === "MISMATCH" && "bg-bad/5")}>
                 <Td className="font-cond text-lg font-semibold">{b.bin_code}</Td>
                 <Td><span className="font-semibold">{b.sku}</span><br /><span className="text-xs text-steel-500">{b.description}</span></Td>
                 <Td className="text-xs">{b.shipments.join(", ")}</Td>
@@ -121,6 +130,7 @@ export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit"
                   )}
                 </Td>
               </tr>
+              </Fragment>
             ))}</tbody>
           </Table>
         </CardContent>

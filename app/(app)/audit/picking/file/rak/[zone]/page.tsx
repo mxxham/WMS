@@ -29,7 +29,7 @@ export default async function FileRackAuditPage({ params, searchParams }: {
       <div className="space-y-4 p-4 lg:p-8">
         {summary && <DownloadAudit date={date} zone={zone} />}
         {summary
-          ? <RackAudit zone={zone} date={date} bins={bins} summary={summary} rpc="record_sheet_rack_audit" canCorrect={user.role !== "operator"}
+          ? <RackAudit zone={zone} date={date} bins={bins} summary={summary} rpc="record_sheet_rack_audit" canCorrect={user.role !== "operator"} groupByRack
               backHref={`/audit/picking?tab=file&date=${date}`} />
           : <p className="text-sm text-steel-500">Tidak ada pick dari rak {zone} di file tanggal ini.</p>}
       </div>
