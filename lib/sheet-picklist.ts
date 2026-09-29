@@ -12,6 +12,8 @@ export type SheetPickLine = {
   picklist: string | null; wave_no: string | null; shipment_number: string; seq: number;
   bin_code: string; sku: string; description: string; uom: string | null;
   batch: string; expiry: string | null; qty: number; picker_name: string | null;
+  /** what stays of the SKU in the bin after the day's picks, per the file (null: not known) */
+  bin_remaining: number | null;
 };
 
 export const K_ONE_SHEET = "K_ONE";
@@ -21,6 +23,11 @@ export const STAGING_BIN = "STAGING";
 
 const text = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
 const num = (v: unknown) => (typeof v === "number" ? v : Number(text(v).replace(/,/g, "")) || 0);
+const numOrNull = (v: unknown): number | null => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = text(v).replace(/,/g, "");
+  return s !== "" && Number.isFinite(Number(s)) ? Number(s) : null;
+};
 const isoDay = (v: unknown): string | null => {
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : excelDateIso(v);
   const s = text(v);
@@ -50,6 +57,7 @@ export function kOneLines(wb: XLSX.WorkBook): SheetPickLine[] {
       shipment_number: shipment, seq: num(get(r, "Seq")), bin_code: bin, sku,
       description: text(get(r, "Description")), uom: text(get(r, "UOM")) || null,
       batch: excelBatchText(get(r, "Batch")), expiry: isoDay(get(r, "Exp Date")), qty, picker_name: null,
+      bin_remaining: numOrNull(get(r, "Sisa di Bin")),
     });
   }
   return mergeLines(out);
@@ -61,6 +69,7 @@ export function allocatorLines(allocation: AllocationResult): SheetPickLine[] {
     picklist: p.picklistId, wave_no: p.waveNo, shipment_number: l.shipmentNumber, seq: l.seq,
     bin_code: l.location.toUpperCase(), sku: l.sku, description: l.description, uom: l.uom,
     batch: l.batch ?? "", expiry: l.expiryDate.toISOString().slice(0, 10), qty: l.qtyPick, picker_name: null,
+    bin_remaining: l.qtyRemainingInBin,
   }))));
 }
 
@@ -73,10 +82,31 @@ export function mergeLines(lines: SheetPickLine[]): SheetPickLine[] {
   for (const l of lines) {
     const k = [l.shipment_number, l.bin_code, l.sku, normBatch(l.batch)].join("|");
     const prev = by.get(k);
-    if (prev) { prev.qty += l.qty; prev.seq = Math.min(prev.seq, l.seq); }
+    if (prev) {
+      prev.qty += l.qty; prev.seq = Math.min(prev.seq, l.seq);
+      prev.bin_remaining = minKnown(prev.bin_remaining, l.bin_remaining);
+    }
     else by.set(k, { ...l });
   }
   return [...by.values()];
+}
+
+const minKnown = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.min(a, b));
+
+/**
+ * One remaining qty per bin + SKU, for the count at the rack: in a rack
+ * bin the lowest (after the day's last pick); at STAGING all the lines'
+ * cartons, which is what the checker finds there.
+ */
+export function withBinRemaining(lines: SheetPickLine[]): SheetPickLine[] {
+  const by = new Map<string, number | null>();
+  const key = (l: SheetPickLine) => `${l.bin_code}|${l.sku}`;
+  for (const l of lines) {
+    const k = key(l);
+    if (l.bin_code === STAGING_BIN) by.set(k, (by.get(k) ?? 0) + l.qty);
+    else by.set(k, by.has(k) ? minKnown(by.get(k)!, l.bin_remaining) : l.bin_remaining);
+  }
+  return lines.map((l) => ({ ...l, bin_remaining: by.get(key(l)) ?? null }));
 }
 
 export type KnownBatch = { batch: string; expiry: string | null };
@@ -118,7 +148,7 @@ export function stagedLines(shortages: Shortage[], batches: Map<string, KnownBat
     return {
       picklist: `PL-${s.shipmentNumber}`, wave_no: waveOf.get(s.shipmentNumber) ?? null, shipment_number: s.shipmentNumber,
       seq: 999, bin_code: STAGING_BIN, sku: s.sku, description: s.description, uom: null,
-      batch: b?.batch ?? "", expiry: b?.expiry ?? null, qty: s.qtyShort, picker_name: null,
+      batch: b?.batch ?? "", expiry: b?.expiry ?? null, qty: s.qtyShort, picker_name: null, bin_remaining: null,
     };
   }));
 }

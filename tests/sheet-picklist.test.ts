@@ -1,7 +1,7 @@
 /** Picking audit from the WMS file (lib/sheet-picklist.ts). */
 import { strict as assert } from 'node:assert';
 import * as XLSX from 'xlsx';
-import { kOneLines, mergeLines, skuBatches, stagedLines, type SheetPickLine } from '../lib/sheet-picklist';
+import { kOneLines, mergeLines, skuBatches, stagedLines, withBinRemaining, type SheetPickLine } from '../lib/sheet-picklist';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -11,7 +11,7 @@ function test(name: string, fn: () => void) {
 console.log('\nPicklist from the WMS file');
 
 const HEAD = ['Picklist', 'NO (Wave)', 'Shipments', 'DO Number', 'Seq', 'Lokasi', 'Chk', 'Material', 'Description', 'Ke Lokasi',
-  'Batch', 'Exp Date', 'Qty Pick', 'UOM', 'Pick Type'];
+  'Batch', 'Exp Date', 'Qty Pick', 'UOM', 'Pick Type', 'Sisa di Bin'];
 function book(rows: unknown[][]): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'K_ONE');
@@ -23,12 +23,12 @@ test('reads K_ONE rows below a header that is not on row 1', () => {
   const lines = kOneLines(book([
     [null, null, null, ' '],
     HEAD,
-    ['PL-1', 1, 109693263, 'DO1', 1, 'cd40a02', null, 550024918, 'Spirax', 'STG', '12600813', new Date(Date.UTC(2030, 0, 10)), 2, 'EA', 'CASE'],
+    ['PL-1', 1, 109693263, 'DO1', 1, 'cd40a02', null, 550024918, 'Spirax', 'STG', '12600813', new Date(Date.UTC(2030, 0, 10)), 2, 'EA', 'CASE', 6],
   ]));
   assert.equal(lines.length, 1);
   assert.deepEqual(lines[0], {
     picklist: 'PL-1', wave_no: '1', shipment_number: '109693263', seq: 1, bin_code: 'CD40A02', sku: '550024918',
-    description: 'Spirax', uom: 'EA', batch: '12600813', expiry: '2030-01-10', qty: 2, picker_name: null,
+    description: 'Spirax', uom: 'EA', batch: '12600813', expiry: '2030-01-10', qty: 2, picker_name: null, bin_remaining: 6,
   });
 });
 
@@ -50,7 +50,7 @@ test('an empty K_ONE (header only) or a missing sheet gives no lines', () => {
 test('same shipment + bin + SKU + batch is one line, quantities added', () => {
   const l = (o: Partial<SheetPickLine>): SheetPickLine => ({
     picklist: null, wave_no: null, shipment_number: 'S1', seq: 1, bin_code: 'CA01A01', sku: '1', description: '', uom: null,
-    batch: 'A7', expiry: null, qty: 1, picker_name: null, ...o,
+    batch: 'A7', expiry: null, qty: 1, picker_name: null, bin_remaining: null, ...o,
   });
   const out = mergeLines([l({ seq: 4, qty: 2 }), l({ seq: 2, qty: 3, batch: ' a7' }), l({ batch: 'B8' })]);
   assert.equal(out.length, 2);
@@ -77,6 +77,19 @@ test('short lines already at staging: STAGING bin, batch from the WMS sheet (ear
   assert.equal(l.expiry, '2030-06-22');
   assert.equal(l.qty, 3);
   assert.equal(l.wave_no, '7');
+});
+
+test('one remaining per bin + SKU: lowest in a rack bin, all cartons at STAGING', () => {
+  const l = (o: Partial<SheetPickLine>): SheetPickLine => ({
+    picklist: null, wave_no: null, shipment_number: 'S1', seq: 1, bin_code: 'CA01A01', sku: '1', description: '', uom: null,
+    batch: 'A7', expiry: null, qty: 1, picker_name: null, bin_remaining: null, ...o,
+  });
+  const out = withBinRemaining([
+    l({ shipment_number: 'S1', bin_remaining: 30 }), l({ shipment_number: 'S2', bin_remaining: 22 }), l({ shipment_number: 'S3' }),
+    l({ bin_code: 'STAGING', shipment_number: 'S1', qty: 3 }), l({ bin_code: 'STAGING', shipment_number: 'S2', qty: 3 }),
+    l({ bin_code: 'CB01A01' }),
+  ]);
+  assert.deepEqual(out.map((x) => x.bin_remaining), [22, 22, 22, 6, 6, null]);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

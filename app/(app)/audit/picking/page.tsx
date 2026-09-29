@@ -5,7 +5,7 @@ import { SHIPMENT_STATE_LABEL, type ShipmentState } from "@/lib/pick-audit";
 import { fmtNum } from "@/lib/utils";
 import { AuditHeader, auditDate } from "../audit-header";
 import { AccuracyView } from "./accuracy-view";
-import { sheetShipments, type SheetLineRow } from "./file/data";
+import { sheetRackBins, sheetShipments, type SheetLineRow } from "./file/data";
 import { FileView } from "./file/file-view";
 import { rackBins, rackSummary, RACK_STATE_LABEL, type RackState } from "./rack-data";
 import { RackList } from "./rack-list";
@@ -20,7 +20,7 @@ const OPEN: ShipmentState[] = ["PICKING", "READY_AUDIT", "HAS_MISMATCH", "READY_
  * rack (0025, default tab) or at staging per shipment; a shipment is loaded
  * only when all its lines passed (0024).
  */
-export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string }> }) {
+export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string; view?: string }> }) {
   const user = await requireRole(["operator", "supervisor", "admin"]);
   const sp = await searchParams;
   const date = auditDate(sp.date);
@@ -32,10 +32,11 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
   let body: React.ReactNode;
   if (tab === "akurasi") body = <AccuracyView days={days} />;
   else if (tab === "file") {
-    const { data } = await supabase.from("sheet_pick_line_state").select("shipment_number, wave_no, line_state, source, file_name").eq("pick_date", date);
-    const rows = (data ?? []) as Pick<SheetLineRow, "shipment_number" | "wave_no" | "line_state" | "source" | "file_name">[];
+    const { data } = await supabase.from("sheet_pick_line_state").select("*").eq("pick_date", date);
+    const rows = (data ?? []) as SheetLineRow[];
     const files = [...new Set(rows.map((r) => `${r.file_name ?? "file"} (${r.source === "K_ONE" ? "sheet K_ONE" : "alokasi dari stok WMS"})`))];
-    body = <FileView date={date} shipments={sheetShipments(rows)} source={files.join(", ") || null} />;
+    body = <FileView date={date} shipments={sheetShipments(rows)} racks={rackSummary(sheetRackBins(rows))}
+      view={sp.view === "shipment" ? "shipment" : "rak"} source={files.join(", ") || null} />;
   }
   else if (tab === "rak") {
     const racks = rackSummary(await rackBins(supabase, date));
