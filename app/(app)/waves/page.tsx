@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { OutboundRow, TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import type { ShipmentState } from "@/lib/pick-audit";
-import { WavesClient, type OutboundDetail } from "./waves-client";
+import { WavesClient, type OutboundDetail, type TaskWait } from "./waves-client";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
   const supabase = await createClient();
 
-  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }] = await Promise.all([
+  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }, { data: waits }] = await Promise.all([
     supabase.from("waves").select("id, wave_no, planned_date, shipment_numbers, truck, destination, planned_slot, status")
       .eq("planned_date", date).order("planned_slot", { nullsFirst: false }).order("wave_no"),
     fetchAll<TaskRow>((from, to) => supabase.from("pick_task_detail").select("*").eq("planned_date", date).order("seq").order("id").range(from, to)),
@@ -26,6 +26,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     supabase.from("waves").select("planned_date").order("planned_date", { ascending: false }).limit(200),
     supabase.from("task_shortfalls").select("task_id").eq("planned_date", date),
     supabase.from("pick_audit_shipment").select("wave_id, shipment_number, state").eq("planned_date", date),
+    supabase.from("task_waits").select("task_id, have, wait_wave_no, wait_seq, wait_from, wait_to, wait_qty").eq("planned_date", date),
   ]);
   const dates = [...new Set((recent ?? []).map((r) => r.planned_date as string))].slice(0, 7);
 
@@ -50,6 +51,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           tasks={tasks}
           outbound={(outbound ?? []) as (OutboundRow & OutboundDetail)[]}
           shortfalls={(shortfalls ?? []).map((r) => r.task_id as string)}
+          waits={Object.fromEntries(((waits ?? []) as TaskWait[]).map((w) => [w.task_id, w]))}
           audit={Object.fromEntries((auditStates ?? []).map((a) => [`${a.wave_id}|${a.shipment_number}`, a.state as ShipmentState]))}
         />
       </div>

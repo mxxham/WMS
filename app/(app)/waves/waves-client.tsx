@@ -29,6 +29,10 @@ async function printPicklists(waves: WaveRow[], allWaves: WaveRow[], tasks: Task
   downloadPicklistPdf(picklistsFromTasks(waves, tasks, outbound, (data ?? []) as StockNow[], allWaves), undefined, filename);
 }
 
+/** An open task whose bin is still waiting for a relocation into it (task_waits, 0038). */
+export type TaskWait = { task_id: string; have: number; wait_wave_no: string; wait_seq: number; wait_from: string; wait_to: string; wait_qty: number };
+const waitText = (w: TaskWait) => `Tunggu relokasi NO ${w.wait_wave_no} #${w.wait_seq}: ${w.wait_from} → ${w.wait_to} (${fmtNum(Number(w.wait_qty))}). Di ${w.wait_to} baru ${fmtNum(Number(w.have))}.`;
+
 export type OutboundDetail = {
   description: string; quantity_requested: number; quantity_allocated: number; quantity_picked: number; shortage_reason: string | null; status: string;
 };
@@ -62,12 +66,14 @@ function StatusTag({ status }: { status: string }) {
  * (stock changes here, not when the plan was saved). Supervisors can also
  * cancel or reschedule; operators only execute.
  */
-export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit }: {
+export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit, waits = {} }: {
   date: string; role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
   /** audit / loading state per `${wave_id}|${shipment}` (0024) */
   audit: Record<string, ShipmentState>;
+  /** open tasks that must wait for a relocation into their bin, by task id */
+  waits?: Record<string, TaskWait>;
 }) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
@@ -133,7 +139,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
         </div>
       </div>
       {waves.map((w) => (
-        <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} audit={audit} onDone={() => router.refresh()}
+        <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} audit={audit} waits={waits} onDone={() => router.refresh()}
           print={() => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`)}
           tasks={tasks.filter((t) => t.wave_id === w.id)} outbound={outbound.filter((o) => o.wave_id === w.id)} />
       ))}
@@ -141,10 +147,10 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
   );
 }
 
-function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onDone, print }: {
+function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, waits, onDone, print }: {
   wave: WaveRow; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[]; supervisor: boolean; print: () => void;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>;
-  short: Set<string>; audit: Record<string, ShipmentState>; onDone: () => void;
+  short: Set<string>; audit: Record<string, ShipmentState>; waits: Record<string, TaskWait>; onDone: () => void;
 }) {
   const [showOrders, setShowOrders] = useState(false);
   const [person] = usePersonName();
@@ -234,7 +240,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
             <p className="text-sm"><b>{fmtNum(Number(it.pick.quantity))} {it.pick.uom}</b> · {it.pick.sku} {it.pick.description}</p>
             <p className="text-xs text-steel-500">Batch {it.pick.batch_lot || "–"} · exp {fmtDate(it.pick.expiry_date)} · CASE* (buka palet)</p>
             <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
-            <PairAction pick={it.pick} move={it.move} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} />
+            <PairAction pick={it.pick} move={it.move} wait={waits[it.pick.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} />
           </li>
         ) : ((t) => (
           <li key={t.id} className={cn("space-y-2 p-4", t.status !== "PLANNED" && "opacity-60", short.has(t.id) && "bg-bad/10")}>
@@ -250,7 +256,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
             <p className="text-xs text-steel-500">Batch {t.batch_lot || "–"} · exp {fmtDate(t.expiry_date)} · {t.breaks_pallet ? "CASE* (buka palet)" : t.pick_type}</p>
             {short.has(t.id) && <p className="text-xs font-semibold text-bad">Stok bin ini tidak cukup lagi untuk tugas ini</p>}
             <Actual task={t} />
-            <TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
+            <TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
           </li>
         ))(it.task))}
       </ul>
@@ -272,7 +278,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
                 {it.pick.completed_at && <span className="block text-xs">{it.pick.completed_by_name} · {fmtDateTime(it.pick.completed_at)}</span>}
                 <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
               </Td>
-              <Td><PairAction pick={it.pick} move={it.move} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} /></Td>
+              <Td><PairAction pick={it.pick} move={it.move} wait={waits[it.pick.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} /></Td>
             </tr>
           ) : ((t) => (
             <tr key={t.id} className={cn(t.status !== "PLANNED" && "text-steel-500", short.has(t.id) && "bg-bad/10")}>
@@ -289,7 +295,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
                 {t.completed_at && <span className="block text-xs">{t.completed_by_name} · {fmtDateTime(t.completed_at)}</span>}
                 <Actual task={t} />
               </Td>
-              <Td><TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
+              <Td><TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
             </tr>
           ))(it.task))}</tbody>
         </Table>
@@ -336,16 +342,27 @@ function Actual({ task: t, label = "Aktual" }: { task: TaskRow; label?: string }
   );
 }
 
-function PairAction({ pick, move, canPost, canUndo, supervisor, onDone }: {
-  pick: TaskRow; move: TaskRow; canPost: boolean; canUndo: boolean; supervisor: boolean; onDone: () => void;
+/** The wait (0038): Posting stays locked until the relocation into this bin is posted. */
+function WaitNotice({ wait }: { wait: TaskWait }) {
+  return (
+    <div className="space-y-1">
+      <p className="max-w-64 rounded bg-warn/15 p-1.5 text-xs font-semibold text-steel">{waitText(wait)}</p>
+      <Button size="sm" disabled title="Posting setelah relokasinya diposting">Posting</Button>
+    </div>
+  );
+}
+
+function PairAction({ pick, move, wait, canPost, canUndo, supervisor, onDone }: {
+  pick: TaskRow; move: TaskRow; wait?: TaskWait; canPost: boolean; canUndo: boolean; supervisor: boolean; onDone: () => void;
 }) {
   if (pick.status === "COMPLETED") return supervisor && canUndo ? <UnpostPairButton pick={pick} move={move} /> : null;
   if (pick.status !== "PLANNED" || !canPost) return null;
+  if (wait) return <WaitNotice wait={wait} />;
   return <PairPostDialog pick={pick} move={move} onDone={onDone} />;
 }
 
-function TaskAction({ task: t, canPost, canUndo, supervisor, rpc, onDone }: {
-  task: TaskRow; canPost: boolean; canUndo: boolean; supervisor: boolean;
+function TaskAction({ task: t, wait, canPost, canUndo, supervisor, rpc, onDone }: {
+  task: TaskRow; wait?: TaskWait; canPost: boolean; canUndo: boolean; supervisor: boolean;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>; onDone: () => void;
 }) {
   // A posted task can be undone and posted again (0034).
@@ -353,7 +370,7 @@ function TaskAction({ task: t, canPost, canUndo, supervisor, rpc, onDone }: {
   if (t.status !== "PLANNED" || !canPost) return null;
   return (
     <div className="flex gap-2">
-      <TaskPostDialog task={t} onDone={onDone} />
+      {wait ? <WaitNotice wait={wait} /> : <TaskPostDialog task={t} onDone={onDone} />}
       {supervisor && (
         <ConfirmButton size="sm" variant="ghost" title="Batalkan tugas" confirmLabel="Batalkan tugas"
           summary={`Batalkan tugas #${t.seq}: ${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}.`}
