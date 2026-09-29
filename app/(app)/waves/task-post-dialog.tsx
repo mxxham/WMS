@@ -41,6 +41,17 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [qty, setQty] = useState(String(t.quantity));
   const [sources, setSources] = useState<Source[] | null>(null);
   const [claims, setClaims] = useState<Map<string, Claim>>(new Map());
+  // "Bin lain": a bin the books do not list for this SKU (0039).
+  const [otherBin, setOtherBin] = useState("");
+  const [otherHave, setOtherHave] = useState<number | null>(null);
+  async function lookOther(code: string) {
+    setOtherBin(code); setOtherHave(null);
+    const c = code.trim().toUpperCase();
+    if (!/^[A-Z0-9_]{3,20}$/.test(c)) return;
+    const { data } = await createClient().from("inventory_detail").select("quantity")
+      .eq("bin_code", c).eq("sku", t.sku).eq("batch_lot", t.batch_lot);
+    setOtherHave((data ?? []).reduce((a, r) => a + Number(r.quantity), 0));
+  }
   const [source, setSource] = useState("0");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -100,6 +111,15 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
 
   async function submit() {
     setBusy(true); setError(null);
+    if (different && source === "other") {
+      const { error } = await createClient().rpc("post_task_found_elsewhere", {
+        p_task_id: t.id, p_bin: otherBin.trim().toUpperCase(), p_qty: Number(qty), p_reason: reason.trim(), p_by_name: person, p_scanned: scanned,
+      });
+      setBusy(false);
+      if (error) return setError(error.message);
+      setOpen(false); onDone();
+      return;
+    }
     const args: Record<string, unknown> = { p_task_id: t.id, p_by_name: person, p_scanned: scanned };
     if (different) {
       const src = sources?.[Number(source)];
@@ -125,10 +145,11 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const maxQty = relocate ? Number(sources?.[Number(source)]?.quantity ?? left ?? t.quantity) : Number(t.quantity);
   const wrongItem = scanned !== null && scanned !== t.sku;
   const invalid = (different && (!Number.isFinite(n) || n < 0 || n > maxQty || !reason.trim()))
+    || (different && source === "other" && (otherHave === null || n <= 0))
     || person.trim().length < 2 || wrongItem || (!!scanRule?.required && scanned !== t.sku);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); loadScanRule(); loadLeft(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); setOtherBin(""); setOtherHave(null); setSource("0"); loadScanRule(); loadLeft(); } }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting tugas" description={`NO ${t.wave_no} · #${t.seq}`}>
         <div className="space-y-4">
@@ -172,7 +193,19 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
                       </optgroup>
                     );
                   })}
+                  {!relocate && <option value="other">Bin lain… (ketik kode bin, tidak ada di daftar)</option>}
                 </Select>
+                {source === "other" && (
+                  <div className="mt-2 space-y-1">
+                    <Input value={otherBin} onChange={(e) => lookOther(e.target.value)} placeholder="mis. CB23A01" autoCapitalize="characters" aria-label="Kode bin" />
+                    {otherHave !== null && (
+                      <p className={cn("rounded-md p-2 text-xs", otherHave >= n ? "bg-plate/30" : "bg-warn/10")}>
+                        Tercatat di {otherBin.trim().toUpperCase()}: {fmtNum(otherHave)} (batch {t.batch_lot || "–"}).
+                        {otherHave < n && ` Barang rencana ternyata di bin ini: ${fmtNum(n - otherHave)} dicatat pindah dari ${t.from_bin} dulu, lalu pick diposting dari ${otherBin.trim().toUpperCase()}. ${t.from_bin} otomatis dijadwalkan hitung ulang.`}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {chosen && chosenClaim && chosenClaim.reserved > 0 && (
                   <p className={cn("mt-1 rounded-md p-2 text-xs", freeOf(chosen) < n ? "bg-bad/10 font-semibold text-bad" : "bg-plate/30")}>
                     Stok ini sudah dipesan tugas lain: {chosenClaim.by.join(", ")}.
