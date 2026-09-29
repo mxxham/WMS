@@ -31,11 +31,15 @@ export async function loadPlanContext(db: SupabaseClient, date: string): Promise
   return data as PlanContext;
 }
 
-/** Stock rows free for a plan of `date`, in the shape inventoryToStock() expects. */
-export async function loadPlanningStock(db: SupabaseClient, date: string): Promise<InventoryRow[]> {
+/**
+ * Stock rows free for a plan of `date`, in the shape inventoryToStock() expects.
+ * `release`: parked waves whose reservation counts as free (they are cancelled
+ * and planned fresh when the plan is saved, 0037).
+ */
+export async function loadPlanningStock(db: SupabaseClient, date: string, release: string[] = []): Promise<InventoryRow[]> {
   return fetchAll<InventoryRow>((from, to) =>
     // planning_stock returns a table; supabase-js types an untyped RPC as "row or rows".
-    db.rpc('planning_stock', { p_date: date }).select(STOCK_COLUMNS)
+    db.rpc('planning_stock', { p_date: date, p_release: release }).select(STOCK_COLUMNS)
       .order('bin_code').order('sku').order('batch_lot').order('expiry_date')
       .range(from, to) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>);
 }

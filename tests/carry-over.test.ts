@@ -21,8 +21,9 @@ const p = (o: Partial<ParkedOrder>): ParkedOrder => ({
 
 test('same SKU + Order No under a new shipment number is the parked order', () => {
   const demand = [d({}), d({ sku: '550044709', orderNos: ['999'] })];
-  const { matches, matchedDemand } = matchParked(demand, [p({})]);
+  const { matches, matchedDemand } = matchParked(demand, [p({ posted_tasks: 1 })]);
   assert.equal(matches.length, 1);
+  assert.equal(matches[0].mode, 'carry');
   assert.deepEqual(matches[0].shipments, { '109689769': '109693399' });
   assert.equal(matchedDemand.size, 1);
   assert.ok(matchedDemand.has(demand[0]));
@@ -52,6 +53,18 @@ test('one old shipment split over two new ones is flagged', () => {
 test('quantities differ: both kept for the warning', () => {
   const { matches } = matchParked([d({ qtyCartons: 2 })], [p({})]);
   assert.deepEqual([matches[0].lines[0].oldQty, matches[0].lines[0].newQty], [3, 2]);
+});
+
+test('nothing picked yet: planned fresh, the whole shipment (with a new item) stays in the plan', () => {
+  const demand = [d({ shipmentNumber: '109689769' }), d({ shipmentNumber: '109689769', sku: '550044709', orderNos: ['538999999'] })];
+  const { matches, matchedDemand } = matchParked(demand, [p({})]);
+  assert.equal(matches[0].mode, 'fresh');
+  assert.equal(matchedDemand.size, 0);
+});
+test('something picked: only the old item leaves the plan, the new item is planned (then merged)', () => {
+  const demand = [d({ shipmentNumber: '109689769' }), d({ shipmentNumber: '109689769', sku: '550044709', orderNos: ['538999999'] })];
+  const { matchedDemand } = matchParked(demand, [p({ posted_tasks: 2 })]);
+  assert.deepEqual([...matchedDemand].map((x) => x.sku), ['550056224']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
