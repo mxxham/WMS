@@ -16,7 +16,7 @@ type AuditRow = Omit<AttemptView, "task_id" | "resolution" | "resolved_by_name" 
 export default async function FileShipmentAuditPage({ params, searchParams }: {
   params: Promise<{ shipment: string }>; searchParams: Promise<{ date?: string }>;
 }) {
-  await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requireRole(["operator", "supervisor", "admin"]);
   const ship = decodeURIComponent((await params).shipment);
   const date = auditDate((await searchParams).date);
   const supabase = await createClient();
@@ -37,14 +37,15 @@ export default async function FileShipmentAuditPage({ params, searchParams }: {
     found_batch: a.found_batch, found_expiry: a.found_expiry, counted_qty: Number(a.counted_qty), damaged: a.damaged,
     expected_sku: a.expected_sku, expected_batch: a.expected_batch, expected_expiry: a.expected_expiry, expected_qty: Number(a.expected_qty),
     errors: a.errors, result: a.result, note: a.note, resolution: null, resolved_by_name: null,
-    resolved_at: null, resolution_note: null, created_at: a.created_at, legacy: false,
+    resolved_at: null, resolution_note: null, created_at: a.created_at, legacy: false, correction: a.correction,
   }));
 
   return (
     <main>
       <PageHeader title={`Audit shipment ${ship}`} live={["sheet_pick_lines", "sheet_pick_audits"]} />
       <div className="p-4 lg:p-8">
-        <FileAuditClient date={date} shipment={ship} waveNo={rows[0].wave_no} source={rows[0].source} lines={lines} attempts={tries} />
+        <FileAuditClient date={date} shipment={ship} waveNo={rows[0].wave_no} source={rows[0].source} lines={lines} attempts={tries}
+          canCorrect={user.role !== "operator"} />
       </div>
     </main>
   );

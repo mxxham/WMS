@@ -120,4 +120,31 @@ select pg_temp.check('rack: negative remaining refused on load',
 select pg_temp.check('rack: bin without remaining in the file refused',
   pg_temp.fails($q$select record_sheet_rack_audit('2026-10-08', 'STAGING', '550024919', 'Sari Dewi', 3, null)$q$, '%tidak mencatat sisa%'));
 
+-- ---- E. Correcting a mistaken count (0032) ----------------------------------
+reset role;
+update profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111111';
+set role authenticated;
+select load_sheet_pick_lines('2026-10-11', 'ALLOCATOR', 'WMS5.xlsx', '[
+  {"shipment_number":"K1","seq":1,"bin_code":"CB01A01","sku":"550024919","batch":"C1","qty":2,"bin_remaining":4},
+  {"shipment_number":"K2","seq":1,"bin_code":"CB01A02","sku":"550044709","batch":"A7","qty":5,"bin_remaining":1}]'::jsonb);
+select record_sheet_rack_audit('2026-10-11', 'CB01A01', '550024919', 'Sari Dewi', 4, null);
+select pg_temp.check('correct: a passed bin cannot be counted again without Ubah',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-11', 'CB01A01', '550024919', 'Sari Dewi', 3, 'x')$q$, '%Tidak ada baris%'));
+select pg_temp.check('correct: reason required',
+  pg_temp.fails($q$select record_sheet_rack_audit('2026-10-11', 'CB01A01', '550024919', 'Sari Dewi', 3, null, null, true)$q$, '%Alasan ubah%'));
+select pg_temp.check('correct: Ubah re-counts a passed bin',
+  record_sheet_rack_audit('2026-10-11', 'CB01A01', '550024919', 'Sari Dewi', 5, 'salah klik sesuai, sisa 5', null, true)
+    @> '{"result":"MISMATCH","diff":1}');
+select pg_temp.check('correct: new attempt flagged, old one kept',
+  (select array_agg(correction order by attempt_no) = '{f,t}' and array_agg(result order by attempt_no) = '{OK,MISMATCH}'
+   from sheet_pick_audits a join sheet_pick_lines l on l.id = a.line_id where l.pick_date = '2026-10-11' and l.bin_code = 'CB01A01'));
+select record_sheet_pick_audit((select id from sheet_pick_lines where pick_date = '2026-10-11' and bin_code = 'CB01A02'),
+  'Sari Dewi', '550044709', 5, 'A7', null, false, null);
+select pg_temp.check('correct: per shipment, passed line refused without Ubah',
+  pg_temp.fails($q$select record_sheet_pick_audit((select id from sheet_pick_lines where pick_date = '2026-10-11' and bin_code = 'CB01A02'),
+    'Sari Dewi', '550044709', 4, 'A7', null, false, 'x')$q$, '%sudah lolos%'));
+select pg_temp.check('correct: per shipment Ubah records the right count',
+  (record_sheet_pick_audit((select id from sheet_pick_lines where pick_date = '2026-10-11' and bin_code = 'CB01A02'),
+    'Sari Dewi', '550044709', 4, 'A7', null, false, 'salah klik, isi 4', true)->>'result') = 'MISMATCH');
+
 rollback;

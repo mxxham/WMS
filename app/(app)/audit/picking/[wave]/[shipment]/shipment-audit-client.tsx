@@ -32,6 +32,8 @@ export type AttemptView = {
   counted_qty: number; damaged: boolean; expected_sku: string; expected_batch: string; expected_expiry: string | null; expected_qty: number;
   errors: PickError[]; result: "OK" | "MISMATCH"; note: string | null; resolution: Resolution | null; resolved_by_name: string | null;
   resolved_at: string | null; resolution_note: string | null; created_at: string; legacy: boolean;
+  /** recorded again by a supervisor after a mistaken save (Ubah, 0032) */
+  correction?: boolean;
 };
 type SaveResult = {
   result: "OK" | "MISMATCH"; errors: PickError[]; attempt: number;
@@ -51,7 +53,7 @@ const LINE_TONE: Record<LineState, string> = {
 export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }: {
   shipment: ShipmentRow; lines: LineView[]; attempts: AttemptView[]; supervisor: boolean;
 }) {
-  const [audit, setAudit] = useState<{ line: LineView; flash?: string } | null>(null);
+  const [audit, setAudit] = useState<{ line: LineView; flash?: string; correct?: boolean } | null>(null);
   const [resolve, setResolve] = useState<{ line: LineView; attempt: AttemptView; action: Resolution } | null>(null);
   const [loading, setLoading] = useState(false);
   // Lines saved in this session: the server list catches up after refresh.
@@ -122,6 +124,9 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
                         <ClipboardCheck className="h-4 w-4" />{l.state === "TODO" ? "Audit" : "Audit ulang"}
                       </Button>
                     )}
+                    {!frozen && supervisor && l.state === "OK" && (
+                      <Button size="sm" variant="ghost" className="underline" onClick={() => setAudit({ line: l, correct: true })}>Ubah</Button>
+                    )}
                     {!frozen && supervisor && last && options.map((action) => (
                       <Button key={action} size="sm" variant="outline" onClick={() => setResolve({ line: l, attempt: last, action })}>{RESOLUTION_LABEL[action]}</Button>
                     ))}
@@ -133,8 +138,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
         </CardContent>
       </Card>
 
-      {audit && <AuditDialog key={audit.line.task_id} line={audit.line} rpc="record_pick_audit" target={{ p_task_id: audit.line.task_id }}
-        flash={audit.flash} next={nextTodo}
+      {audit && <AuditDialog key={`${audit.line.task_id}|${audit.correct ? "ubah" : ""}`} line={audit.line} rpc="record_pick_audit"
+        target={{ p_task_id: audit.line.task_id }} correct={audit.correct} flash={audit.flash} next={nextTodo}
         onOpen={(line, flash) => setAudit({ line, flash })} onClose={() => setAudit(null)} />}
       {resolve && <ResolveDialog {...resolve} onClose={() => setResolve(null)} />}
       {loading && <LoadDialog shipment={s} onClose={() => setLoading(false)} />}
@@ -149,7 +154,7 @@ export function AttemptLine({ a }: { a: AttemptView }) {
         {a.result === "OK"
           ? <span className="inline-flex items-center gap-1 font-semibold text-ok"><CheckCircle2 className="h-3.5 w-3.5" />OK</span>
           : <span className="inline-flex items-center gap-1 font-semibold text-bad"><XCircle className="h-3.5 w-3.5" />{a.errors.map((e) => PICK_ERROR_LABEL[e]).join(", ")}</span>}
-        {" "}· audit {a.attempt_no}{a.legacy ? " (lama)" : ""} · {a.checker_name} · {fmtDateTime(a.created_at)}
+        {" "}· audit {a.attempt_no}{a.legacy ? " (lama)" : ""}{a.correction ? " · ubah" : ""} · {a.checker_name} · {fmtDateTime(a.created_at)}
       </p>
       {a.result === "MISMATCH" && (
         <p className="text-steel-700">ditemukan {a.found_sku} · {fmtNum(a.counted_qty)} · batch {a.found_batch || "–"}{a.found_expiry ? ` · exp ${fmtDate(a.found_expiry)}` : ""}{a.damaged ? " · rusak" : ""}</p>
@@ -168,12 +173,14 @@ export function AttemptLine({ a }: { a: AttemptView }) {
 /** What the dialog needs of a line, from pick_tasks (0024) or from the WMS file (0029). */
 export type AuditLine = { seq: number; sku: string; description: string; from_bin: string };
 
-export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLabel = "Dilaporkan picker", flash, next, onOpen, onClose }: {
+export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLabel = "Dilaporkan picker", correct = false, flash, next, onOpen, onClose }: {
   line: L;
   /** the function that records the attempt, and the argument naming the line */
   rpc: "record_pick_audit" | "record_sheet_pick_audit"; target: Record<string, string>;
   /** heading of the expected column in the result */
   expectedLabel?: string;
+  /** Ubah: record a line that already passed again, with a reason (supervisor / admin, 0032) */
+  correct?: boolean;
   flash?: string;
   next: (from: L) => { line: L; left: number } | null;
   onOpen: (line: L, flash: string) => void; onClose: () => void;
@@ -201,15 +208,16 @@ export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLa
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!valid) return setError("Isi nama checker, scan karton / SKU dan jumlah karton.");
+    if (correct && !note.trim()) return setError("Isi alasan ubah di catatan.");
     setBusy(true); setError(null);
     const { data, error } = await createClient().rpc(rpc, {
       ...target, p_checker_name: checker, p_found: found!.code, p_counted: n,
-      p_batch: batch, p_expiry: expiry || null, p_damaged: damaged, p_note: note,
+      p_batch: batch, p_expiry: expiry || null, p_damaged: damaged, p_note: note, p_correct: correct,
     });
     setBusy(false);
     if (error) return setError(error.message);
     const r = data as SaveResult;
-    const following = next(line);
+    const following = correct ? null : next(line);
     router.refresh();
     if (r.result === "OK" && following) {
       return onOpen(following.line, `#${line.seq} ${line.sku} sesuai · ${following.left} baris lagi`);
@@ -220,12 +228,13 @@ export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLa
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={`Audit #${line.seq} · ${line.sku}`} description={`${line.description} · dari ${line.from_bin}`}>
+      <DialogContent title={`${correct ? "Ubah audit" : "Audit"} #${line.seq} · ${line.sku}`} description={`${line.description} · dari ${line.from_bin}`}>
         {saved ? <SavedResult r={saved} onClose={onClose} expectedLabel={expectedLabel} resolvable={rpc === "record_pick_audit"}
           next={upNext && { label: `#${upNext.line.seq} ${upNext.line.sku}`, go: () => onOpen(upNext.line, "") }} /> : (
           <form onSubmit={save} className="space-y-4">
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             <p className="rounded-md bg-plate/30 p-3 text-sm">Hitung dan catat apa yang ada di palet. Jumlah dan batch dari picker tidak ditampilkan.</p>
+            {correct && <p className="rounded-md bg-warn/10 p-2 text-sm">Audit sebelumnya tetap tersimpan sebagai riwayat. Isi yang benar dan alasan ubah.</p>}
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan picker baris ini)" id="checker" />
             <div>
               <Label htmlFor="found">Scan karton / ketik SKU yang ada di palet</Label>
@@ -252,7 +261,7 @@ export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLa
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={damaged} onChange={(e) => setDamaged(e.target.checked)} />Ada karton rusak</label>
             <div>
-              <Label htmlFor="note">Catatan (wajib bila tidak sesuai)</Label>
+              <Label htmlFor="note">{correct ? "Alasan ubah (wajib)" : "Catatan (wajib bila tidak sesuai)"}</Label>
               <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. 2 karton penyok, label batch pudar" />
             </div>
             {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}

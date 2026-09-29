@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function RackAuditPage({ params, searchParams }: {
   params: Promise<{ zone: string }>; searchParams: Promise<{ date?: string }>;
 }) {
-  await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requireRole(["operator", "supervisor", "admin"]);
   const zone = decodeURIComponent((await params).zone).toUpperCase();
   const date = auditDate((await searchParams).date);
   if (!/^[A-Z0-9_]{1,20}$/.test(zone)) notFound();
@@ -24,7 +24,7 @@ export default async function RackAuditPage({ params, searchParams }: {
         live={["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
       <div className="p-4 lg:p-8">
         {summary
-          ? <RackAudit zone={zone} date={date} bins={bins} summary={summary} />
+          ? <RackAudit zone={zone} date={date} bins={bins} summary={summary} canCorrect={user.role !== "operator"} />
           : <p className="text-sm text-steel-500">Tidak ada pick dari rak {zone} di tanggal ini.</p>}
       </div>
     </main>

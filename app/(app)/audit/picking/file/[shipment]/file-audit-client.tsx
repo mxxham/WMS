@@ -26,10 +26,12 @@ const STATE: Record<FileLineView["state"], { label: string; tone: string }> = {
  * the pallet without seeing the file's numbers; the database compares.
  * A mismatch is fixed on the floor and audited again.
  */
-export function FileAuditClient({ date, shipment, waveNo, source, lines, attempts }: {
+export function FileAuditClient({ date, shipment, waveNo, source, lines, attempts, canCorrect }: {
   date: string; shipment: string; waveNo: string | null; source: "K_ONE" | "ALLOCATOR"; lines: FileLineView[]; attempts: AttemptView[];
+  /** supervisor / admin: a passed line can be recorded again (Ubah, 0032) */
+  canCorrect: boolean;
 }) {
-  const [audit, setAudit] = useState<{ line: FileLineView; flash?: string } | null>(null);
+  const [audit, setAudit] = useState<{ line: FileLineView; flash?: string; correct?: boolean } | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const byLine = new Map<string, AttemptView[]>();
   for (const a of attempts) byLine.set(a.task_id, [...(byLine.get(a.task_id) ?? []), a]);
@@ -72,6 +74,9 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
                   {(byLine.get(l.id) ?? []).map((a) => <AttemptLine key={a.id} a={a} />)}
                 </Td>
                 <Td className="text-right">
+                  {l.state === "OK" && canCorrect && (
+                    <Button size="sm" variant="ghost" className="underline" onClick={() => setAudit({ line: l, correct: true })}>Ubah</Button>
+                  )}
                   {l.state !== "OK" && (
                     <Button size="sm" variant={l.state === "TODO" ? "default" : "outline"} onClick={() => setAudit({ line: l })}>
                       <ClipboardCheck className="h-4 w-4" />{l.state === "TODO" ? "Audit" : "Audit ulang"}
@@ -83,7 +88,8 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
           </Table>
         </CardContent>
       </Card>
-      {audit && <AuditDialog key={audit.line.id} line={audit.line} rpc="record_sheet_pick_audit" target={{ p_line_id: audit.line.id }}
+      {audit && <AuditDialog key={`${audit.line.id}|${audit.correct ? "ubah" : ""}`} line={audit.line} rpc="record_sheet_pick_audit"
+        target={{ p_line_id: audit.line.id }} correct={audit.correct}
         expectedLabel="Di file WMS" flash={audit.flash} next={nextTodo}
         onOpen={(line, flash) => setAudit({ line, flash })} onClose={() => setAudit(null)} />}
     </div>

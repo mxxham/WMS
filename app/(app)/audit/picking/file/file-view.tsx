@@ -6,6 +6,7 @@ import { FileUpload } from "../file-upload";
 import { RACK_STATE_LABEL, type RackState, type RackSummary } from "../rack-data";
 import { RackList } from "../rack-list";
 import { sheetRackHref, sheetShipmentHref, type SheetShipment } from "./data";
+import { DownloadAudit } from "./download-audit";
 
 /**
  * The "Dari file WMS" tab: load the day's file, then audit rack by rack
@@ -37,6 +38,7 @@ export function FileView({ date, shipments, racks, view, source }: {
           {tile(shipments.filter((x) => x.ok === x.lines).length, "Shipment selesai")}
         </div>
       )}
+      {shipments.length > 0 && <DownloadAudit date={date} />}
       {source && (
         <p className="text-sm text-steel-500">Baris dari {source}.{" "}
           {view === "rak" ? "Checker menghitung sisa di bin yang dipick, rak demi rak." : "Checker mencatat isi palet tanpa melihat angka di file."}{" "}
