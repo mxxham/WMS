@@ -24,7 +24,7 @@ export function ShipmentList({ rows, empty, showDate }: { rows: ShipmentRow[]; e
   return (
     <Card>
       <CardContent>
-        <Table>
+        <Table sticky>
           <thead><tr>
             <Th>Shipment</Th>{showDate && <Th>Tanggal</Th>}<Th>NO</Th><Th>Truk</Th><Th>Lolos audit</Th><Th>Status</Th><Th>Dimuat</Th>
           </tr></thead>

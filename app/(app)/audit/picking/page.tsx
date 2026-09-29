@@ -7,6 +7,7 @@ import { AuditHeader, auditDate } from "../audit-header";
 import { AccuracyView } from "./accuracy-view";
 import { sheetRackBins, sheetShipments, type SheetLineRow } from "./file/data";
 import { FileView } from "./file/file-view";
+import { DownloadPickAudit } from "./download-pick-audit";
 import { rackBins, rackSummary, RACK_STATE_LABEL, type RackState } from "./rack-data";
 import { RackList } from "./rack-list";
 import { ShipmentList, type ShipmentRow } from "./shipment-list";
@@ -43,6 +44,7 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
     const count = (s: RackState) => racks.filter((r) => r.state === s).length;
     body = (
       <div className="space-y-4">
+        <DownloadPickAudit date={date} />
         <div className="grid grid-cols-3 gap-3">
           {(["TODO", "MISMATCH", "DONE"] as RackState[]).map((s) => (
             <div key={s} className="rounded-lg border-l-4 border-ckb bg-white p-3">
@@ -67,6 +69,7 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
     const count = (s: ShipmentState) => rows.filter((r) => r.state === s).length;
     body = (
       <div className="space-y-4">
+        <DownloadPickAudit date={date} />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {(["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD", "LOADED", "PICKING"] as ShipmentState[]).map((s) => (
             <div key={s} className="rounded-lg border-l-4 border-ckb bg-white p-3">

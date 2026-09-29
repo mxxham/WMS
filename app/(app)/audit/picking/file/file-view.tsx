@@ -52,7 +52,7 @@ export function FileView({ date, shipments, racks, view, source }: {
       ) : (
         <Card>
           <CardContent>
-            <Table>
+            <Table sticky>
               <thead><tr><Th>Shipment</Th><Th>NO</Th><Th>Lolos audit</Th><Th>Status</Th></tr></thead>
               <tbody>{shipments.map((s) => (
                 <tr key={s.shipment_number} className={cn(s.mismatch > 0 && "bg-bad/5")}>

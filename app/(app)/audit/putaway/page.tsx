@@ -7,6 +7,7 @@ import { AuditHeader, auditDate } from "../audit-header";
 import { RACK_STATE_LABEL, type RackState } from "../picking/rack-data";
 import { RackList } from "../picking/rack-list";
 import { putawayRows, putawaySummary } from "./rack-data";
+import { DownloadPutawayAudit } from "./download-putaway-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,7 @@ export default async function PutawayAuditPage({ searchParams }: { searchParams:
     <main>
       <AuditHeader title="Audit putaway" date={date} active="putaway" />
       {supervisor && <TabsNav base="/audit/putaway" active={tab} tabs={[{ key: "rak", label: "Per rak" }, { key: "daftar", label: "Daftar" }]} />}
-      <div className="p-4 lg:p-8">{body}</div>
+      <div className="space-y-4 p-4 lg:p-8">{data.length > 0 && <DownloadPutawayAudit date={date} />}{body}</div>
     </main>
   );
 }
