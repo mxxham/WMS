@@ -133,7 +133,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
         </CardContent>
       </Card>
 
-      {audit && <AuditDialog key={audit.line.task_id} line={audit.line} flash={audit.flash} next={nextTodo}
+      {audit && <AuditDialog key={audit.line.task_id} line={audit.line} rpc="record_pick_audit" target={{ p_task_id: audit.line.task_id }}
+        flash={audit.flash} next={nextTodo}
         onOpen={(line, flash) => setAudit({ line, flash })} onClose={() => setAudit(null)} />}
       {resolve && <ResolveDialog {...resolve} onClose={() => setResolve(null)} />}
       {loading && <LoadDialog shipment={s} onClose={() => setLoading(false)} />}
@@ -141,7 +142,7 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
   );
 }
 
-function AttemptLine({ a }: { a: AttemptView }) {
+export function AttemptLine({ a }: { a: AttemptView }) {
   return (
     <div className="rounded border border-steel-100 p-1.5">
       <p>
@@ -164,10 +165,18 @@ function AttemptLine({ a }: { a: AttemptView }) {
  * audit (checker name kept, cursor on the scan field); a mismatch stops and
  * shows the difference, with a button to carry on.
  */
-function AuditDialog({ line, flash, next, onOpen, onClose }: {
-  line: LineView; flash?: string;
-  next: (from: LineView) => { line: LineView; left: number } | null;
-  onOpen: (line: LineView, flash: string) => void; onClose: () => void;
+/** What the dialog needs of a line, from pick_tasks (0024) or from the WMS file (0029). */
+export type AuditLine = { seq: number; sku: string; description: string; from_bin: string };
+
+export function AuditDialog<L extends AuditLine>({ line, rpc, target, expectedLabel = "Dilaporkan picker", flash, next, onOpen, onClose }: {
+  line: L;
+  /** the function that records the attempt, and the argument naming the line */
+  rpc: "record_pick_audit" | "record_sheet_pick_audit"; target: Record<string, string>;
+  /** heading of the expected column in the result */
+  expectedLabel?: string;
+  flash?: string;
+  next: (from: L) => { line: L; left: number } | null;
+  onOpen: (line: L, flash: string) => void; onClose: () => void;
 }) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
@@ -181,7 +190,7 @@ function AuditDialog({ line, flash, next, onOpen, onClose }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SaveResult | null>(null);
-  const [upNext, setUpNext] = useState<{ line: LineView; left: number } | null>(null);
+  const [upNext, setUpNext] = useState<{ line: L; left: number } | null>(null);
   const batchRef = useRef<HTMLInputElement>(null);
   const countRef = useRef<HTMLInputElement>(null);
 
@@ -193,8 +202,8 @@ function AuditDialog({ line, flash, next, onOpen, onClose }: {
     e.preventDefault();
     if (!valid) return setError("Isi nama checker, scan karton / SKU dan jumlah karton.");
     setBusy(true); setError(null);
-    const { data, error } = await createClient().rpc("record_pick_audit", {
-      p_task_id: line.task_id, p_checker_name: checker, p_found: found!.code, p_counted: n,
+    const { data, error } = await createClient().rpc(rpc, {
+      ...target, p_checker_name: checker, p_found: found!.code, p_counted: n,
       p_batch: batch, p_expiry: expiry || null, p_damaged: damaged, p_note: note,
     });
     setBusy(false);
@@ -212,7 +221,7 @@ function AuditDialog({ line, flash, next, onOpen, onClose }: {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={`Audit #${line.seq} · ${line.sku}`} description={`${line.description} · dari ${line.from_bin}`}>
-        {saved ? <SavedResult r={saved} onClose={onClose}
+        {saved ? <SavedResult r={saved} onClose={onClose} expectedLabel={expectedLabel} resolvable={rpc === "record_pick_audit"}
           next={upNext && { label: `#${upNext.line.seq} ${upNext.line.sku}`, go: () => onOpen(upNext.line, "") }} /> : (
           <form onSubmit={save} className="space-y-4">
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
@@ -255,7 +264,9 @@ function AuditDialog({ line, flash, next, onOpen, onClose }: {
   );
 }
 
-function SavedResult({ r, onClose, next }: { r: SaveResult; onClose: () => void; next: { label: string; go: () => void } | null }) {
+function SavedResult({ r, onClose, next, expectedLabel, resolvable }: {
+  r: SaveResult; onClose: () => void; next: { label: string; go: () => void } | null; expectedLabel: string; resolvable: boolean;
+}) {
   const rows: [string, string, string][] = [
     ["SKU", r.found.sku, r.expected.sku],
     ["Batch", r.found.batch || "–", r.expected.batch || "–"],
@@ -268,7 +279,7 @@ function SavedResult({ r, onClose, next }: { r: SaveResult; onClose: () => void;
         {r.result === "OK" ? "Sesuai. Baris lolos audit." : `Selisih: ${r.errors.map((e) => PICK_ERROR_LABEL[e]).join(", ")}`}
       </p>
       <Table>
-        <thead><tr><Th /><Th>Di palet</Th><Th>Dilaporkan picker</Th></tr></thead>
+        <thead><tr><Th /><Th>Di palet</Th><Th>{expectedLabel}</Th></tr></thead>
         <tbody>{rows.map(([k, f, x]) => (
           <tr key={k} className={cn(f !== x && k !== "Expired" && "text-bad")}><Td>{k}</Td><Td className="font-semibold">{f}</Td><Td>{x}</Td></tr>
         ))}</tbody>
@@ -276,7 +287,7 @@ function SavedResult({ r, onClose, next }: { r: SaveResult; onClose: () => void;
       {r.found.damaged && <p className="text-sm text-bad">Ada karton rusak: ganti dengan karton baik.</p>}
       {r.result === "MISMATCH" && (
         <p className="text-sm">Perbaiki di lantai: ambil yang kurang, kembalikan yang lebih, tukar barang atau batch yang salah. Setelah itu audit ulang.
-          Supervisor bisa menerima kurang atau batch lain bila memang itu yang dikirim.</p>
+          {resolvable && " Supervisor bisa menerima kurang atau batch lain bila memang itu yang dikirim."}</p>
       )}
       {next && <Button size="lg" className="w-full" onClick={next.go}>Lanjut: {next.label}</Button>}
       <Button size="lg" variant={next ? "outline" : "default"} className="w-full" onClick={onClose}>Tutup</Button>
