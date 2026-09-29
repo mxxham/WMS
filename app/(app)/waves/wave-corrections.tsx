@@ -105,3 +105,19 @@ export function OrderQtyButton({ waveId, shipment, sku, description, requested, 
     </CorrectionDialog>
   );
 }
+
+/** "Batalkan posting" of a pick + its pallet move (0035): both go back in one step. */
+export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: TaskRow }) {
+  const picked = Number(p.actual_quantity ?? p.quantity), moved = Number(m.actual_quantity ?? m.quantity);
+  return (
+    <CorrectionDialog title={`Batalkan posting #${p.seq}`} confirmLabel="Batalkan posting"
+      trigger={<Button size="sm" variant="ghost" className="underline"><Undo2 className="h-4 w-4" />Batalkan posting</Button>}
+      run={async (person, reason) => {
+        const { error } = await createClient().rpc("unpost_pick_with_move", { p_pick_id: p.id, p_move_id: m.id, p_by_name: person, p_reason: reason });
+        return error?.message ?? null;
+      }}>
+      <p className="rounded-md bg-plate/30 p-3 text-base">Posting dibatalkan: {fmtNum(moved)} dari {m.to_bin} dan {fmtNum(picked)} dari truk kembali ke {p.actual_from_bin ?? p.from_bin} (barang fisik juga dikembalikan). Baris jadi belum dikerjakan; posting lagi dengan jumlah yang benar.</p>
+      <p className="text-xs text-steel-500">Posting lama dan pembatalannya tetap tercatat di riwayat stok.</p>
+    </CorrectionDialog>
+  );
+}

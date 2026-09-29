@@ -110,4 +110,41 @@ set role authenticated;
 select pg_temp.check('operator cannot undo a posting',
   pg_temp.fails(format($q$select unpost_task(%L, 'Budi', 'x')$q$, (pg_temp.t13(1)).id), 'Hanya supervisor%'));
 
+-- ---- Pick + its pallet's move as one line (0035) ----------------------------
+reset role;
+update profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111111';
+reset request.jwt.claim.sub;
+drop table if exists _replace, _wave_ids;
+delete from inventory where bin_id in (select id from bins where bin_code in ('CF38C01', 'CF38C02'));
+insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
+select 'adjustment', (select id from items where sku = '550044709'), 'I18', q, (select id from bins where bin_code = b), '2030-09-18', 'fixture'
+from (values ('CF38C01', 36), ('CF38C02', 0.0001)) v(b, q) where q >= 1;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select save_plan('2026-10-14', '{
+  "waves":[{"wave_no":"11","shipment_numbers":["S55"]}],
+  "tasks":[
+    {"wave_no":"11","shipment_number":"S55","task_type":"PICK","sku":"550044709","from_bin":"CF38C01","batch_lot":"I18","expiry_date":"2030-09-18","quantity":30,"seq":2},
+    {"wave_no":"11","task_type":"REPLENISH","sku":"550044709","from_bin":"CF38C01","to_bin":"CF38C02","batch_lot":"I18","expiry_date":"2030-09-18","quantity":6,"seq":3}],
+  "outbound":[{"wave_no":"11","shipment_number":"S55","sku":"550044709","quantity_requested":30,"quantity_allocated":30}]}'::jsonb);
+create or replace function pg_temp.t14(p_seq int) returns pick_tasks language sql as $$
+  select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-14' and t.seq = p_seq $$;
+
+select pg_temp.check('pair: not a pair refused',
+  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, null, null, null, 'Budi')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(2)).id), '%bukan pasangan%'));
+select pg_temp.check('pair: a difference needs a reason, nothing posted',
+  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, 30, 0, null, 'Budi')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(3)).id), '%Alasan wajib%'));
+select pg_temp.check('pair: still both open after the refusal',
+  (pg_temp.t14(2)).status = 'PLANNED' and (pg_temp.t14(3)).status = 'PLANNED');
+select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, 0, 'sisa tetap di bin', 'Budi');
+select pg_temp.check('pair: pick 30 to the truck, move 0: 6 stay in the pallet bin',
+  pg_temp.qty('CF38C01') = 6 and pg_temp.qty('CF38C02') = 0
+  and (pg_temp.t14(2)).actual_quantity = 30 and (pg_temp.t14(3)).actual_quantity = 0);
+select unpost_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, 'Budi', 'salah, sisa dipindah');
+select pg_temp.check('pair undone: pallet whole again, both open',
+  pg_temp.qty('CF38C01') = 36 and (pg_temp.t14(2)).status = 'PLANNED' and (pg_temp.t14(3)).status = 'PLANNED');
+select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, null, null, 'Budi');
+select pg_temp.check('pair as planned: 30 out, 6 to the pickface, pallet bin empty',
+  pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 6);
+
 rollback;
