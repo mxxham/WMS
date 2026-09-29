@@ -46,7 +46,7 @@ export function sheetRackBins(rows: SheetLineRow[]): RackBin[] {
     const k = `${l.bin_code}|${l.sku}`;
     const g = by.get(k) ?? {
       bin: { bin_code: l.bin_code, zone: sheetZone(l.bin_code), sku: l.sku, description: l.description, uom: l.uom, lines: 0,
-             shipments: [], pickers: [], state: "OK" as BinState, bin_qty: null, countable: false, last: null },
+             shipments: [], pickers: [], state: "OK" as BinState, bin_qty: null, countable: false, correctable: false, last: null },
       states: [],
     };
     g.bin.lines += 1;
@@ -62,6 +62,7 @@ export function sheetRackBins(rows: SheetLineRow[]): RackBin[] {
   return [...by.values()].map(({ bin, states }): RackBin => ({
     ...bin,
     countable: bin.bin_qty !== null && states.some((s) => s !== "OK"),
+    correctable: bin.bin_qty !== null && states.some((s) => s !== "TODO"),
     state: states.includes("MISMATCH") ? "MISMATCH" : states.includes("TODO") ? "TODO" : "OK",
   })).sort((a, b) => walkKey(a.bin_code).localeCompare(walkKey(b.bin_code)) || a.sku.localeCompare(b.sku));
 }

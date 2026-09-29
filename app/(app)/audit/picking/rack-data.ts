@@ -20,6 +20,8 @@ export type RackBin = {
   bin_qty: number | null;
   /** open to a count: still has lines to audit on a shipment that is not loaded */
   countable: boolean;
+  /** already counted and still open to a supervisor's correction (Ubah, 0032) */
+  correctable: boolean;
   last: { checker: string; system: number | null; counted: number | null; at: string } | null;
 };
 export type RackSummary = { zone: string; bins: number; lines: number; todo: number; mismatch: number; done: number; state: RackState };
@@ -49,19 +51,20 @@ export async function rackBins(supabase: Awaited<ReturnType<typeof createClient>
     .select("task_id, checker_name, rack_system, rack_counted, created_at, pick_tasks!inner(waves!inner(planned_date))")
     .eq("method", "RACK").eq("pick_tasks.waves.planned_date", date).order("created_at");
 
-  const byBin = new Map<string, { bin: RackBin; states: LineState[]; open: boolean }>();
+  const byBin = new Map<string, { bin: RackBin; states: LineState[]; open: boolean; fixable: boolean }>();
   for (const l of lines) {
     const k = `${l.from_bin}|${l.sku}`;
     const g = byBin.get(k) ?? {
       bin: { bin_code: l.from_bin, zone: l.zone, sku: l.sku, description: l.description, uom: l.uom, lines: 0,
-             shipments: [], pickers: [], state: "OK" as BinState, bin_qty: null, countable: false, last: null },
-      states: [], open: false,
+             shipments: [], pickers: [], state: "OK" as BinState, bin_qty: null, countable: false, correctable: false, last: null },
+      states: [], open: false, fixable: false,
     };
     g.bin.lines += 1;
     if (!g.bin.shipments.includes(l.shipment_number)) g.bin.shipments.push(l.shipment_number);
     if (l.picked_by_name && !g.bin.pickers.includes(l.picked_by_name)) g.bin.pickers.push(l.picked_by_name);
     g.states.push(l.line_state);
     if (!l.loaded && (l.line_state === "TODO" || l.line_state === "MISMATCH")) g.open = true;
+    if (!l.loaded && (l.line_state === "OK" || l.line_state === "MISMATCH")) g.fixable = true;
     byBin.set(k, g);
   }
   if (zone) {
@@ -78,9 +81,10 @@ export async function rackBins(supabase: Awaited<ReturnType<typeof createClient>
     const g = byBin.get(binOf.get(c.task_id) ?? "");
     if (g) g.bin.last = { checker: c.checker_name, system: c.rack_system, counted: c.rack_counted, at: c.created_at };
   }
-  return [...byBin.values()].map(({ bin, states, open }): RackBin => ({
+  return [...byBin.values()].map(({ bin, states, open, fixable }): RackBin => ({
     ...bin,
     countable: open,
+    correctable: fixable,
     state: states.includes("MISMATCH") ? "MISMATCH" : states.includes("TODO") ? "TODO" : states.includes("RESOLVED") ? "RESOLVED" : "OK",
   })).sort((a, b) => walkKey(a.bin_code).localeCompare(walkKey(b.bin_code)) || a.sku.localeCompare(b.sku));
 }

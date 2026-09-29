@@ -56,7 +56,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
     found_batch: a.found_batch, found_expiry: a.found_expiry, counted_qty: Number(a.counted_qty), damaged: a.damaged,
     expected_sku: a.expected_sku, expected_batch: a.expected_batch, expected_expiry: a.expected_expiry, expected_qty: Number(a.expected_qty),
     errors: a.errors, result: a.result, note: a.note, resolution: a.resolution, resolved_by_name: a.resolved_by_name,
-    resolved_at: a.resolved_at, resolution_note: a.resolution_note, created_at: a.created_at, legacy: a.legacy,
+    resolved_at: a.resolved_at, resolution_note: a.resolution_note, created_at: a.created_at, legacy: a.legacy, correction: a.correction,
   }));
 
   return (

@@ -25,12 +25,14 @@ const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
 type RackRpc = "record_rack_audit" | "record_sheet_rack_audit";
 
 /** `rpc`: the count against the system (0025) or against the WMS file (0030). */
-export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit", backHref = `/audit/picking?date=${date}` }: {
+export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit", backHref = `/audit/picking?date=${date}`, canCorrect = false }: {
   zone: string; date: string; bins: RackBin[]; summary: RackSummary; rpc?: RackRpc; backHref?: string;
+  /** supervisor / admin: a counted bin can be counted again (Ubah, 0032) */
+  canCorrect?: boolean;
 }) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
-  const [open, setOpen] = useState<{ bin: RackBin; flash?: string } | null>(null);
+  const [open, setOpen] = useState<{ bin: RackBin; flash?: string; correct?: boolean } | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
@@ -114,20 +116,26 @@ export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit"
                   )}
                   {rowError[key(b)] && <p role="alert" className="mt-1 text-xs text-bad">{rowError[key(b)]}</p>}
                   {saved.has(key(b)) && <span className="text-xs font-semibold text-ok">✓ tersimpan</span>}
+                  {canCorrect && (b.correctable || saved.has(key(b))) && (!b.countable || saved.has(key(b))) && (
+                    <Button size="sm" variant="ghost" className="ml-1 underline" onClick={() => setOpen({ bin: b, correct: true })}>Ubah</Button>
+                  )}
                 </Td>
               </tr>
             ))}</tbody>
           </Table>
         </CardContent>
       </Card>
-      {open && <CountDialog key={key(open.bin)} bin={open.bin} date={date} rpc={rpc} flash={open.flash} next={next}
+      {open && <CountDialog key={`${key(open.bin)}|${open.correct ? "ubah" : ""}`} bin={open.bin} date={date} rpc={rpc} flash={open.flash}
+        correct={!!open.correct} next={open.correct ? () => null : next}
         onOpen={(bin, flash) => setOpen({ bin, flash })} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
+function CountDialog({ bin, date, rpc, flash, correct, next, onOpen, onClose }: {
   bin: RackBin; date: string; rpc: RackRpc; flash?: string;
+  /** Ubah: count a bin that was already counted again, with a reason */
+  correct: boolean;
   next: (from: RackBin) => { bin: RackBin; left: number } | null;
   onOpen: (bin: RackBin, flash: string) => void; onClose: () => void;
 }) {
@@ -151,12 +159,13 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
     if (checker.trim().length < 2 || counted.trim() === "" || !Number.isFinite(n) || n < 0) {
       return setError("Isi nama checker dan jumlah sisa di bin.");
     }
+    if (correct && !note.trim()) { noteRef.current?.focus(); return setError("Isi alasan ubah di catatan."); }
     if (wrongItem && !found) return setError("Scan karton / ketik SKU barang yang ada di bin.");
     if (wrongItem && found?.sku === bin.sku) return setError(`Itu ${bin.sku}, barang yang benar: hapus centang barang salah.`);
     setBusy(true); setError(null);
     const { data, error } = await createClient().rpc(rpc, {
       p_date: date, p_bin: bin.bin_code, p_sku: bin.sku, p_checker_name: checker, p_counted: n, p_note: note,
-      p_found_sku: wrongItem ? found!.code : null,
+      p_found_sku: wrongItem ? found!.code : null, p_correct: correct,
     });
     setBusy(false);
     if (error) {
@@ -175,7 +184,7 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={`${bin.bin_code} · ${bin.sku}`} description={`${bin.description} · SH ${bin.shipments.join(", ")}`}>
+      <DialogContent title={`${correct ? "Ubah hitungan · " : ""}${bin.bin_code} · ${bin.sku}`} description={`${bin.description} · SH ${bin.shipments.join(", ")}`}>
         {saved ? (
           <div className="space-y-4">
             <p className={cn("rounded-md p-3 text-base font-semibold", saved.result === "OK" ? "bg-ok/10 text-ok" : "bg-bad/10 text-bad")}>
@@ -200,6 +209,10 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
         ) : (
           <form onSubmit={save} className="space-y-4">
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
+            {correct && (
+              <p className="rounded-md bg-warn/10 p-2 text-sm">Hitungan sebelumnya tetap tersimpan sebagai riwayat. Isi hitungan yang benar dan alasan ubah.
+                {bin.last && <> Terakhir: sisa {fmtNum(bin.last.counted ?? 0)} oleh {bin.last.checker}.</>}</p>
+            )}
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan picker)" id="checker" />
             <label className="flex items-center gap-2 rounded-md border border-steel-200 p-2 text-sm">
               <input type="checkbox" checked={wrongItem} onChange={(e) => { setWrongItem(e.target.checked); if (!e.target.checked) { setFound(null); setSkuInput(""); } }} />
@@ -220,7 +233,7 @@ function CountDialog({ bin, date, rpc, flash, next, onOpen, onClose }: {
                 onChange={(e) => setCounted(e.target.value)} className="h-12 text-lg" required />
             </div>
             <div>
-              <Label htmlFor="rnote">Catatan (wajib bila tidak sesuai / barang salah)</Label>
+              <Label htmlFor="rnote">{correct ? "Alasan ubah (wajib)" : "Catatan (wajib bila tidak sesuai / barang salah)"}</Label>
               <Input id="rnote" ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. sisa 2 karton lebih" />
             </div>
             {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}

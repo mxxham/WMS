@@ -122,6 +122,19 @@ select pg_temp.check('the attempt keeps the scanned code and the SKU it resolved
 select pg_temp.check('a passed line cannot be audited again',
   pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 9, 'A7', null, false, null)$q$, pg_temp.task('PA1', 1)),
     'Baris ini sudah lolos audit%'));
+-- Ubah (0032), undone after
+savepoint ubah;
+select pg_temp.check('Ubah: operator may not correct',
+  pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 9, 'A7', null, false, 'salah klik', true)$q$, pg_temp.task('PA1', 1)),
+    'Hanya supervisor atau admin%'));
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.check('Ubah: supervisor re-records a passed line, flagged as correction',
+  record_pick_audit(pg_temp.task('PA1', 1), 'Sari', '550044709', 9, 'A7', null, false, 'salah klik, isi 9', true)->>'attempt' = '2');
+select pg_temp.check('Ubah: line now MISMATCH, attempt 2 is the correction',
+  (pg_temp.line('PA1', 1)).line_state = 'MISMATCH'
+  and (select correction from pick_audits where task_id = pg_temp.task('PA1', 1) and attempt_no = 2));
+rollback to savepoint ubah;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select pg_temp.check('expected = what the picker reported (4), not the plan (5)',
   record_pick_audit(pg_temp.task('PA1', 2), 'Sari', '550024919', 4, 'C1', '2031-07-07', false, null)->>'result' = 'OK');
 
@@ -193,7 +206,7 @@ select pg_temp.check('a decided attempt cannot be decided again',
     'Audit ini tidak perlu diputuskan%'));
 select pg_temp.check('a resolved line cannot be audited again',
   pg_temp.fails(format($q$select record_pick_audit(%L, 'Sari', '550044709', 6, 'B8', null, false, null)$q$, pg_temp.task('PA2', 3)),
-    'Baris ini sudah lolos audit%'));
+    'Baris ini sudah diterima supervisor%'));
 
 select pg_temp.check('PA3 re-audited after replacing the damaged cartons: 3 of 4 -> SHORT',
   record_pick_audit(pg_temp.task('PA3', 1), 'Sari', '550044709', 3, 'A7', null, false, null)->'errors' = '["SHORT"]'::jsonb);
