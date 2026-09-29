@@ -16,7 +16,9 @@ import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
-import { OrderQtyButton, UnpostButton } from "./wave-corrections";
+import { OrderQtyButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
+import { PairPostDialog } from "./pair-post-dialog";
+import { pairMoves } from "@/lib/allocator/pair-moves";
 
 // jsPDF is ~380 kB: load it only when someone actually prints.
 // Sisa is replayed from the stock of the touched bins right now, over all of the day's waves (allWaves).
@@ -154,6 +156,8 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
   const live = tasks.filter((t) => t.status !== "CANCELLED").length;
   const pending = w.status === "PENDING";
   const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
+  // A broken pallet's pick and its leftover move are one picklist line: one row, posted together (0035).
+  const rows = pairMoves(tasks);
 
   return (
     <Card>
@@ -216,7 +220,23 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
 
       {/* Mobile: one card per task, big tap target. Desktop: table. */}
       <ul className="divide-y divide-steel-100 lg:hidden">
-        {tasks.map((t) => (
+        {rows.map((it) => it.kind === "pair" ? (
+          <li key={it.pick.id} className={cn("space-y-2 p-4", it.pick.status !== "PLANNED" && "opacity-60", (short.has(it.pick.id) || short.has(it.move.id)) && "bg-bad/10")}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-steel-500">#{it.pick.seq} · Pick {it.pick.shipment_number} + pindah sisa palet</span>
+              <StatusTag status={it.pick.status} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href={`/bin/${it.pick.from_bin}`}><BinChip code={it.pick.from_bin} /></Link>
+              <ArrowRight className="h-4 w-4" /><span className="text-sm font-semibold">Truk {fmtNum(Number(it.pick.quantity))}</span>
+              <span className="text-sm">· sisa {fmtNum(Number(it.move.quantity))} →</span><Link href={`/bin/${it.move.to_bin}`}><BinChip code={it.move.to_bin ?? ""} /></Link>
+            </div>
+            <p className="text-sm"><b>{fmtNum(Number(it.pick.quantity))} {it.pick.uom}</b> · {it.pick.sku} {it.pick.description}</p>
+            <p className="text-xs text-steel-500">Batch {it.pick.batch_lot || "–"} · exp {fmtDate(it.pick.expiry_date)} · CASE* (buka palet)</p>
+            <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
+            <PairAction pick={it.pick} move={it.move} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} />
+          </li>
+        ) : ((t) => (
           <li key={t.id} className={cn("space-y-2 p-4", t.status !== "PLANNED" && "opacity-60", short.has(t.id) && "bg-bad/10")}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-steel-500">#{t.seq} · {t.task_type === "PICK" ? `Pick ${t.shipment_number}` : "Relokasi ke pickface"}</span>
@@ -232,12 +252,29 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
             <Actual task={t} />
             <TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
           </li>
-        ))}
+        ))(it.task))}
       </ul>
       <div className="hidden lg:block">
         <Table>
           <thead><tr>{["#", "Jenis", "Dari", "Ke", "SKU", "Batch", "Exp", "Qty", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
-          <tbody>{tasks.map((t) => (
+          <tbody>{rows.map((it) => it.kind === "pair" ? (
+            <tr key={it.pick.id} className={cn(it.pick.status !== "PLANNED" && "text-steel-500", (short.has(it.pick.id) || short.has(it.move.id)) && "bg-bad/10")}>
+              <Td>{it.pick.seq}</Td>
+              <Td>Pick {it.pick.shipment_number}<span className="block text-xs">+ pindah sisa palet</span></Td>
+              <Td><Link href={`/bin/${it.pick.from_bin}`} className="font-semibold underline-offset-2 hover:underline">{it.pick.from_bin}</Link></Td>
+              <Td>Truk<span className="block text-xs">sisa → <Link href={`/bin/${it.move.to_bin}`} className="font-semibold underline-offset-2 hover:underline">{it.move.to_bin}</Link></span></Td>
+              <Td title={it.pick.description}>{it.pick.sku}</Td>
+              <Td>{it.pick.batch_lot || "–"}</Td>
+              <Td className="whitespace-nowrap">{fmtDate(it.pick.expiry_date)}</Td>
+              <Td className="whitespace-nowrap text-right">{fmtNum(Number(it.pick.quantity))} {it.pick.uom} *<span className="block text-xs">sisa {fmtNum(Number(it.move.quantity))}</span></Td>
+              <Td>
+                <StatusTag status={it.pick.status} />{(short.has(it.pick.id) || short.has(it.move.id)) && <span className="ml-1 text-xs font-semibold text-bad">stok kurang</span>}
+                {it.pick.completed_at && <span className="block text-xs">{it.pick.completed_by_name} · {fmtDateTime(it.pick.completed_at)}</span>}
+                <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
+              </Td>
+              <Td><PairAction pick={it.pick} move={it.move} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} onDone={onDone} /></Td>
+            </tr>
+          ) : ((t) => (
             <tr key={t.id} className={cn(t.status !== "PLANNED" && "text-steel-500", short.has(t.id) && "bg-bad/10")}>
               <Td>{t.seq}</Td>
               <Td>{t.task_type === "PICK" ? `Pick ${t.shipment_number}` : "Relokasi"}</Td>
@@ -254,7 +291,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
               </Td>
               <Td><TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
             </tr>
-          ))}</tbody>
+          ))(it.task))}</tbody>
         </Table>
       </div>
 
@@ -290,13 +327,21 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
 }
 
 /** What really happened, when it differs from the plan. */
-function Actual({ task: t }: { task: TaskRow }) {
+function Actual({ task: t, label = "Aktual" }: { task: TaskRow; label?: string }) {
   if (!t.deviation_reason) return null;
   return (
     <span className="mt-1 block text-xs font-semibold text-steel-700">
-      Aktual {fmtNum(Number(t.actual_quantity))}{t.actual_from_bin && t.actual_from_bin !== t.from_bin ? ` dari ${t.actual_from_bin}` : ""}: {t.deviation_reason}
+      {label} {fmtNum(Number(t.actual_quantity))}{t.actual_from_bin && t.actual_from_bin !== t.from_bin ? ` dari ${t.actual_from_bin}` : ""}: {t.deviation_reason}
     </span>
   );
+}
+
+function PairAction({ pick, move, canPost, canUndo, supervisor, onDone }: {
+  pick: TaskRow; move: TaskRow; canPost: boolean; canUndo: boolean; supervisor: boolean; onDone: () => void;
+}) {
+  if (pick.status === "COMPLETED") return supervisor && canUndo ? <UnpostPairButton pick={pick} move={move} /> : null;
+  if (pick.status !== "PLANNED" || !canPost) return null;
+  return <PairPostDialog pick={pick} move={move} onDone={onDone} />;
 }
 
 function TaskAction({ task: t, canPost, canUndo, supervisor, rpc, onDone }: {
