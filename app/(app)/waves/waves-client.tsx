@@ -16,6 +16,7 @@ import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
+import { OrderQtyButton, UnpostButton } from "./wave-corrections";
 
 // jsPDF is ~380 kB: load it only when someone actually prints.
 // Sisa is replayed from the stock of the touched bins right now, over all of the day's waves (allWaves).
@@ -229,7 +230,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
             <p className="text-xs text-steel-500">Batch {t.batch_lot || "–"} · exp {fmtDate(t.expiry_date)} · {t.breaks_pallet ? "CASE* (buka palet)" : t.pick_type}</p>
             {short.has(t.id) && <p className="text-xs font-semibold text-bad">Stok bin ini tidak cukup lagi untuk tugas ini</p>}
             <Actual task={t} />
-            <TaskAction task={t} canPost={pending} supervisor={supervisor} rpc={rpc} onDone={onDone} />
+            <TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
           </li>
         ))}
       </ul>
@@ -251,7 +252,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
                 {t.completed_at && <span className="block text-xs">{t.completed_by_name} · {fmtDateTime(t.completed_at)}</span>}
                 <Actual task={t} />
               </Td>
-              <Td><TaskAction task={t} canPost={pending} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
+              <Td><TaskAction task={t} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
             </tr>
           ))}</tbody>
         </Table>
@@ -264,7 +265,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
       </div>
       {showOrders && (
         <Table>
-          <thead><tr>{["Shipment", "SKU", "Deskripsi", "Diminta", "Teralokasi", "Terambil", "Kekurangan", "Status"].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
+          <thead><tr>{["Shipment", "SKU", "Deskripsi", "Diminta", "Teralokasi", "Terambil", "Kekurangan", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
           <tbody>{outbound.map((o, i) => {
             const gap = Number(o.quantity_requested) - Number(o.quantity_allocated);
             return (
@@ -275,6 +276,10 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, onD
                 <Td className={cn("text-right", o.status === "COMPLETED" && Number(o.quantity_picked) < Number(o.quantity_allocated) && "font-semibold text-bad")}>{fmtNum(Number(o.quantity_picked))}</Td>
                 <Td className={cn(gap > 0 && "font-semibold text-bad")}>{gap > 0 ? `${fmtNum(gap)} · ${REASON[o.shortage_reason ?? ""] ?? o.shortage_reason ?? ""}` : "–"}</Td>
                 <Td><StatusTag status={o.status} /></Td>
+                <Td>{supervisor && w.status !== "CANCELLED" && (
+                  <OrderQtyButton waveId={w.id} shipment={o.shipment_number} sku={o.sku} description={o.description}
+                    requested={Number(o.quantity_requested)} picked={Number(o.quantity_picked)} />
+                )}</Td>
               </tr>
             );
           })}</tbody>
@@ -294,10 +299,12 @@ function Actual({ task: t }: { task: TaskRow }) {
   );
 }
 
-function TaskAction({ task: t, canPost, supervisor, rpc, onDone }: {
-  task: TaskRow; canPost: boolean; supervisor: boolean;
+function TaskAction({ task: t, canPost, canUndo, supervisor, rpc, onDone }: {
+  task: TaskRow; canPost: boolean; canUndo: boolean; supervisor: boolean;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>; onDone: () => void;
 }) {
+  // A posted task can be undone and posted again (0034).
+  if (t.status === "COMPLETED") return supervisor && canUndo ? <UnpostButton task={t} /> : null;
   if (t.status !== "PLANNED" || !canPost) return null;
   return (
     <div className="flex gap-2">
