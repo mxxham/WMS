@@ -46,6 +46,15 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [scanned, setScanned] = useState<string | null>(null);
   // Scan rules: whether this SKU has a barcode and whether the policy requires the scan.
   const [scanRule, setScanRule] = useState<{ hasEan: boolean; required: boolean } | null>(null);
+  // Relocation of a broken pallet's rest: what is really left of this batch in the bin now (0033).
+  const relocate = t.task_type !== "PICK";
+  const [left, setLeft] = useState<number | null>(null);
+  async function loadLeft() {
+    if (!relocate) return;
+    const { data } = await createClient().from("inventory_detail").select("quantity")
+      .eq("bin_code", t.from_bin).eq("sku", t.sku).eq("batch_lot", t.batch_lot);
+    setLeft((data ?? []).reduce((a, r) => a + Number(r.quantity), 0));
+  }
   async function loadScanRule() {
     const db = createClient();
     const [{ data: item }, { data: pol }] = await Promise.all([db.from("items").select("ean").eq("sku", t.sku).maybeSingle(), db.rpc("inventory_policy")]);
@@ -90,16 +99,29 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const picked = fefo[Number(source)];
 
   const n = Number(qty);
+  // A pick takes at most the planned cartons; a relocation at most what the chosen bin holds.
+  const maxQty = relocate ? Number(sources?.[Number(source)]?.quantity ?? left ?? t.quantity) : Number(t.quantity);
   const wrongItem = scanned !== null && scanned !== t.sku;
-  const invalid = (different && (!Number.isFinite(n) || n < 0 || n > Number(t.quantity) || !reason.trim()))
+  const invalid = (different && (!Number.isFinite(n) || n < 0 || n > maxQty || !reason.trim()))
     || person.trim().length < 2 || wrongItem || (!!scanRule?.required && scanned !== t.sku);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); loadScanRule(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); loadScanRule(); loadLeft(); } }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting tugas" description={`NO ${t.wave_no} · #${t.seq}`}>
         <div className="space-y-4">
           <p className="rounded-md bg-plate/30 p-3 text-base">{what}</p>
+          {relocate && left !== null && left !== Number(t.quantity) && (
+            <div className="space-y-2 rounded-md border-2 border-warn bg-warn/10 p-3 text-sm">
+              <p>Sisa batch ini di {t.from_bin} sekarang <b>{fmtNum(left)} {t.uom ?? ""}</b>, rencana pindah {fmtNum(Number(t.quantity))}.
+                {left > Number(t.quantity) ? " Pick sebelumnya mengambil kurang dari rencana: pindahkan semua sisa supaya bin kosong." : " Stok di bin kurang dari rencana."}</p>
+              {left > 0 && (
+                <Button size="sm" variant="plate" onClick={() => {
+                  setDifferent(true); setQty(String(left)); setReason("pindahkan semua sisa bin"); if (!sources) loadSources();
+                }}>Pindahkan semua sisa ({fmtNum(left)})</Button>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Hasil">
             <Button variant={different ? "outline" : "default"} onClick={() => setDifferent(false)} aria-pressed={!different}>Sesuai rencana</Button>
             <Button variant={different ? "default" : "outline"} aria-pressed={different}
@@ -108,8 +130,8 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
           {different && (
             <div className="space-y-3">
               <div>
-                <Label htmlFor="aq">Jumlah yang benar-benar diambil (0–{fmtNum(Number(t.quantity))})</Label>
-                <Input id="aq" type="number" inputMode="numeric" min={0} max={Number(t.quantity)} value={qty} onChange={(e) => setQty(e.target.value)} />
+                <Label htmlFor="aq">{relocate ? "Jumlah yang benar-benar dipindah" : "Jumlah yang benar-benar diambil"} (0–{fmtNum(maxQty)})</Label>
+                <Input id="aq" type="number" inputMode="numeric" min={0} max={maxQty} value={qty} onChange={(e) => setQty(e.target.value)} />
               </div>
               <div>
                 <Label htmlFor="as">Diambil dari</Label>
