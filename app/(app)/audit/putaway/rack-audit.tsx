@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ClipboardCheck } from "lucide-react";
@@ -20,6 +20,9 @@ type SaveResult = {
   expected: { sku: string; batch: string; qty: number }; found: { sku: string; batch: string; qty: number };
 };
 
+/** Rack number of a bin (CD03E01 -> CD03); anything else is its own group. */
+const rackOf = (bin: string) => (/^[A-Z]{2}\d{2}[A-Z]\d{2}$/.test(bin) ? bin.slice(0, 4) : bin);
+
 const STATE = {
   TODO: ["Belum diaudit", "bg-steel-100 text-steel-700"],
   OK: ["OK", "bg-ok/10 text-ok"],
@@ -31,10 +34,14 @@ const STATE = {
  * scans/types the SKU, types the batch and counts (0027); an OK goes straight
  * on to the next putaway still to audit.
  */
-export function PutawayRackAudit({ zone, date, rows, summary }: { zone: string; date: string; rows: PutawayRow[]; summary: RackSummary }) {
+export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false }: {
+  zone: string; date: string; rows: PutawayRow[]; summary: RackSummary;
+  /** supervisor / admin: an audited putaway can be audited again (Ubah), the earlier result stays in history */
+  canCorrect?: boolean;
+}) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
-  const [open, setOpen] = useState<{ row: PutawayRow; flash?: string } | null>(null);
+  const [open, setOpen] = useState<{ row: PutawayRow; flash?: string; correct?: boolean } | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
@@ -88,16 +95,21 @@ export function PutawayRackAudit({ zone, date, rows, summary }: { zone: string; 
           </div>
         </CardContent>
       </Card>
-      <p className="text-sm text-steel-500">SKU, batch dan jumlah di bin sama dengan putaway: tekan <b>✓ Sesuai</b>. Ada yang beda: <b>Tidak sesuai</b> lalu isi yang ditemukan.</p>
+      <p className="text-sm text-steel-500">SKU, batch dan jumlah di bin sama dengan putaway: tekan <b>✓ Sesuai</b> (kanan). Ada yang beda, termasuk barang lain di bin: <b>✗ Salah</b> (kiri) lalu isi yang ditemukan.</p>
 
       <Card>
         <CardContent>
-          <Table>
+          <Table sticky>
             <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Batch / exp</Th><Th>Qty</Th><Th>Putaway</Th><Th>Status</Th><Th>Audit terakhir</Th><Th /></tr></thead>
-            <tbody>{rows.map((r) => {
+            <tbody>{rows.map((r, i) => {
               const state = r.audit?.result ?? "TODO";
               return (
-                <tr key={r.movement_id} className={cn(state === "MISMATCH" && "bg-bad/5")}>
+                <Fragment key={r.movement_id}>
+                {rackOf(r.to_bin) !== rackOf(rows[i - 1]?.to_bin ?? "") && (
+                  <tr className="bg-steel-100"><td colSpan={8} className="px-3 py-1.5 font-cond text-base font-semibold">
+                    {rackOf(r.to_bin)} · {rows.filter((x) => rackOf(x.to_bin) === rackOf(r.to_bin)).length} putaway</td></tr>
+                )}
+                <tr className={cn(state === "MISMATCH" && "bg-bad/5")}>
                   <Td className="font-cond text-lg font-semibold">{r.to_bin}</Td>
                   <Td><span className="font-semibold">{r.sku}</span><br /><span className="text-xs text-steel-500">{r.description}</span></Td>
                   <Td className="text-xs">{r.batch_lot || "–"}<br /><span className="text-steel-500">{fmtDate(r.expiry_date)}</span></Td>
@@ -117,27 +129,34 @@ export function PutawayRackAudit({ zone, date, rows, summary }: { zone: string; 
                   <Td className="text-right">
                     {needs(r) && (
                       <div className="flex flex-wrap justify-end gap-1">
+                        <Button size="sm" variant="outline" className="border-bad text-bad" onClick={() => setOpen({ row: r })}>✗ Salah</Button>
                         <Button size="sm" disabled={busy === r.movement_id} onClick={() => confirm(r)}>{busy === r.movement_id ? "…" : "✓ Sesuai"}</Button>
-                        <Button size="sm" variant="outline" onClick={() => setOpen({ row: r })}>Tidak sesuai</Button>
                       </div>
                     )}
                     {rowError[r.movement_id] && <p role="alert" className="mt-1 text-xs text-bad">{rowError[r.movement_id]}</p>}
                     {saved.has(r.movement_id) && <span className="text-xs font-semibold text-ok">✓ tersimpan</span>}
+                    {canCorrect && (r.audit || saved.has(r.movement_id)) && !needs(r) && (
+                      <Button size="sm" variant="ghost" className="ml-1 underline" onClick={() => setOpen({ row: r, correct: true })}>Ubah</Button>
+                    )}
                   </Td>
                 </tr>
+                </Fragment>
               );
             })}</tbody>
           </Table>
         </CardContent>
       </Card>
-      {open && <AuditDialog key={open.row.movement_id} row={open.row} flash={open.flash} next={next}
+      {open && <AuditDialog key={`${open.row.movement_id}|${open.correct ? "ubah" : ""}`} row={open.row} flash={open.flash}
+        correct={!!open.correct} next={open.correct ? () => null : next}
         onOpen={(row, flash) => setOpen({ row, flash })} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function AuditDialog({ row, flash, next, onOpen, onClose }: {
+function AuditDialog({ row, flash, correct, next, onOpen, onClose }: {
   row: PutawayRow; flash?: string;
+  /** Ubah: audit an already audited putaway again; the reason goes in the note, the old result stays in history */
+  correct: boolean;
   next: (from: PutawayRow) => { row: PutawayRow; left: number } | null;
   onOpen: (row: PutawayRow, flash: string) => void; onClose: () => void;
 }) {
@@ -162,9 +181,11 @@ function AuditDialog({ row, flash, next, onOpen, onClose }: {
     if (checker.trim().length < 2 || !found || counted.trim() === "" || !Number.isFinite(n) || n < 0) {
       return setError("Isi nama checker, scan karton / SKU dan jumlah.");
     }
+    if (correct && !note.trim()) { noteRef.current?.focus(); return setError("Isi alasan ubah di catatan."); }
     setBusy(true); setError(null);
     const { data, error } = await createClient().rpc("record_putaway_audit", {
-      p_movement_id: row.movement_id, p_checker_name: checker, p_found: found.code, p_batch: batch, p_counted: n, p_note: note,
+      p_movement_id: row.movement_id, p_checker_name: checker, p_found: found.code, p_batch: batch, p_counted: n,
+      p_note: correct ? `Ubah: ${note.trim()}` : note,
     });
     setBusy(false);
     if (error) {
@@ -183,7 +204,7 @@ function AuditDialog({ row, flash, next, onOpen, onClose }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={`${row.to_bin} · ${row.sku}`}
+      <DialogContent title={`${correct ? "Ubah audit · " : ""}${row.to_bin} · ${row.sku}`}
         description={`${row.description} · batch ${row.batch_lot || "–"} · ${fmtNum(row.quantity)} ${row.uom ?? ""}`}>
         {saved ? (
           <div className="space-y-4">
@@ -207,6 +228,10 @@ function AuditDialog({ row, flash, next, onOpen, onClose }: {
         ) : (
           <form onSubmit={save} className="space-y-4">
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
+            {correct && (
+              <p className="rounded-md bg-warn/10 p-2 text-sm">Audit sebelumnya tetap tersimpan sebagai riwayat. Isi yang benar dan alasan ubah.
+                {row.audit && <> Terakhir: {row.audit.result === "OK" ? "OK" : "selisih"}, dihitung {fmtNum(row.audit.counted)} oleh {row.audit.checker ?? "–"}.</>}</p>
+            )}
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan yang putaway)" id="checker" />
             <div>
               <Label htmlFor="found">Scan karton / ketik SKU yang ada di bin</Label>
@@ -228,7 +253,7 @@ function AuditDialog({ row, flash, next, onOpen, onClose }: {
               </div>
             </div>
             <div>
-              <Label htmlFor="pnote">Catatan (wajib bila tidak sesuai)</Label>
+              <Label htmlFor="pnote">{correct ? "Alasan ubah (wajib)" : "Catatan (wajib bila tidak sesuai)"}</Label>
               <Input id="pnote" ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. batch di karton beda" />
             </div>
             {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}

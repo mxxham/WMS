@@ -18,7 +18,7 @@ export function RackList({ rows, href, empty, head, unit }: {
   return (
     <Card>
       <CardContent>
-        <Table>
+        <Table sticky>
           <thead><tr><Th>Rak</Th><Th>{head[0]}</Th><Th>{head[1]}</Th><Th>{unit.doneHead}</Th><Th>Status</Th></tr></thead>
           <tbody>{rows.map((r) => {
             const total = unit.of === "bins" ? r.bins : r.lines;

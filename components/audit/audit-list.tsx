@@ -79,7 +79,7 @@ export function AuditList({ kind, rows }: { kind: AuditKind; rows: AuditRow[] })
           {shown.length === 0 ? (
             <p className="text-sm text-steel-500">{rows.length === 0 ? (kind === "PICK" ? "Belum ada pick yang selesai di tanggal ini." : "Belum ada putaway di tanggal ini.") : "Tidak ada baris untuk filter ini."}</p>
           ) : (
-            <Table>
+            <Table sticky>
               <thead><tr>
                 <Th>Waktu</Th><Th>{kind === "PICK" ? "Wave / shipment" : "Asal"}</Th><Th>Bin</Th><Th>SKU</Th><Th>Batch · Exp</Th>
                 <Th className="text-right">{kind === "PICK" ? "Dipick" : "Qty"}</Th><Th>Audit</Th><Th />
