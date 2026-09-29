@@ -67,9 +67,9 @@ select save_plan('2026-10-17', '{
   "waves":[{"wave_no":"5","shipment_numbers":["SX"]}],
   "tasks":[{"wave_no":"5","shipment_number":"SX","task_type":"PICK","sku":"550024919","from_bin":"CF37C01","batch_lot":"A1","expiry_date":"2031-01-01","quantity":4,"seq":1},
            {"wave_no":"5","shipment_number":"SX","task_type":"PICK","sku":"550024919","from_bin":"CF37C01","batch_lot":"A1","expiry_date":"2031-01-01","quantity":2,"seq":2}],
-  "outbound":[{"wave_no":"5","shipment_number":"SX","sku":"550024919","order_nos":["O1"],"quantity_requested":6,"quantity_allocated":6}]}'::jsonb);
+  "outbound":[{"wave_no":"5","shipment_number":"SX","sku":"550024919","order_nos":["O-0037-A"],"quantity_requested":6,"quantity_allocated":6}]}'::jsonb);
 create or replace function pg_temp.x() returns waves language sql as $$
-  select w.* from waves w join outbound o on o.wave_id = w.id where 'O1' = any(o.order_nos) $$;
+  select w.* from waves w join outbound o on o.wave_id = w.id where 'O-0037-A' = any(o.order_nos) $$;
 -- 4 already picked, 2 still open when the wave is parked.
 select post_task_by((select id from pick_tasks where wave_id = (pg_temp.x()).id and seq = 1), p_by_name => 'Budi');
 select set_wave_status((pg_temp.x()).id, 'RESCHEDULED', 'tunda');
@@ -85,7 +85,7 @@ select save_plan('2026-10-18', '{
   "tasks":[{"wave_no":"5","shipment_number":"SX","task_type":"PICK","sku":"550044709","from_bin":"CF37C02","batch_lot":"B1","expiry_date":"2031-01-01","quantity":3,"seq":1},
            {"wave_no":"5","task_type":"REPLENISH","sku":"550044709","from_bin":"CF37C02","to_bin":"CF38C02","batch_lot":"B1","expiry_date":"2031-01-01","quantity":7,"seq":2},
            {"wave_no":"5","shipment_number":"SY","task_type":"PICK","sku":"550044709","from_bin":"CF37C02","batch_lot":"B1","expiry_date":"2031-01-01","quantity":0.5,"seq":3}],
-  "outbound":[{"wave_no":"5","shipment_number":"SX","sku":"550044709","order_nos":["O2"],"quantity_requested":3,"quantity_allocated":3},
+  "outbound":[{"wave_no":"5","shipment_number":"SX","sku":"550044709","order_nos":["O-0037-B"],"quantity_requested":3,"quantity_allocated":3},
               {"wave_no":"5","shipment_number":"SY","sku":"550044709","quantity_requested":1,"quantity_allocated":1}]}'::jsonb);
 select carry_over_wave((pg_temp.x()).id, '2026-10-18', '{}', 'lanjut');
 select pg_temp.check('merge: the new item and its pallet move join the carried wave',
