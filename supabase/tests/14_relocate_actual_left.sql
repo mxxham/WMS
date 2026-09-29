@@ -43,4 +43,71 @@ select pg_temp.check('relocation posts everything left (29, planned 12)',
   (post_task_by(pg_temp.task('REPLENISH'), 29, null, null, null, 'sisa setelah pick 15', 'Budi')->>'quantity')::numeric = 29);
 select pg_temp.check('pallet bin empty, pickface 1 + 29 = 30', pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 30);
 
+-- ---- Ubah jumlah order + Batalkan posting (0034) ------------------------------
+-- Same pallet of 44 (32 pick + 12 relocation) plus a full pallet of 44 in CF37C01: order 76.
+reset role;
+reset request.jwt.claim.sub;
+drop table if exists _replace, _wave_ids;  -- save_plan's temp tables, dropped only at commit
+delete from inventory where bin_id in (select id from bins where bin_code in ('CF38C01', 'CF38C02', 'CF37C01'));
+insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
+select 'adjustment', (select id from items where sku = '550044709'), 'H18', q, (select id from bins where bin_code = b), '2030-08-18', 'fixture'
+from (values ('CF38C01', 44), ('CF38C02', 1), ('CF37C01', 44)) v(b, q);
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select save_plan('2026-10-13', '{
+  "waves":[{"wave_no":"4","shipment_numbers":["S66"]}],
+  "tasks":[
+    {"wave_no":"4","shipment_number":"S66","task_type":"PICK","sku":"550044709","from_bin":"CF38C01","batch_lot":"H18","expiry_date":"2030-08-18","quantity":32,"seq":1},
+    {"wave_no":"4","task_type":"REPLENISH","sku":"550044709","from_bin":"CF38C01","to_bin":"CF38C02","batch_lot":"H18","expiry_date":"2030-08-18","quantity":12,"seq":2},
+    {"wave_no":"4","shipment_number":"S66","task_type":"PICK","sku":"550044709","from_bin":"CF37C01","batch_lot":"H18","expiry_date":"2030-08-18","quantity":44,"seq":3}],
+  "outbound":[{"wave_no":"4","shipment_number":"S66","sku":"550044709","quantity_requested":76,"quantity_allocated":76}]}'::jsonb);
+create or replace function pg_temp.t13(p_seq int) returns pick_tasks language sql as $$
+  select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-13' and t.seq = p_seq $$;
+create or replace function pg_temp.w13() returns uuid language sql as $$ select id from waves where planned_date = '2026-10-13' $$;
+
+select pg_temp.check('order: reason required',
+  pg_temp.fails($q$select set_order_quantity(pg_temp.w13(), 'S66', '550044709', 59, 'Budi', ' ')$q$, '%Alasan%'));
+select pg_temp.check('order 76 -> 59: 17 fewer',
+  set_order_quantity(pg_temp.w13(), 'S66', '550044709', 59, 'Budi', 'order asli 983') @> '{"old":76,"new":59,"tasks_changed":1}');
+select pg_temp.check('the broken-pallet pick shrinks (32 -> 15), the full pallet stays 44',
+  (pg_temp.t13(1)).quantity = 15 and (pg_temp.t13(3)).quantity = 44);
+select pg_temp.check('its relocation carries the rest (12 -> 29)', (pg_temp.t13(2)).quantity = 29);
+select pg_temp.check('order line now 59 requested and allocated',
+  (select quantity_requested = 59 and quantity_allocated = 59 from outbound where wave_id = pg_temp.w13()));
+
+select post_task_by((pg_temp.t13(1)).id, p_by_name => 'Budi');
+select pg_temp.check('pick posted as planned: 15 out, 29 left', pg_temp.qty('CF38C01') = 29);
+select pg_temp.check('undo: reason required',
+  pg_temp.fails(format($q$select unpost_task(%L, 'Budi', '')$q$, (pg_temp.t13(1)).id), '%Alasan%'));
+select pg_temp.check('undo: posting cancelled, 15 back in the bin',
+  unpost_task((pg_temp.t13(1)).id, 'Budi', 'salah posting') @> '{"result":"UNPOSTED","quantity":15}'
+  );
+select pg_temp.check('undo: bin back to 44, task open, order picked back to 0',
+  pg_temp.qty('CF38C01') = 44 and (pg_temp.t13(1)).status = 'PLANNED' and (pg_temp.t13(1)).actual_quantity is null
+  and (select quantity_picked from outbound where wave_id = pg_temp.w13()) = 0);
+select pg_temp.check('undo: an open task cannot be undone',
+  pg_temp.fails(format($q$select unpost_task(%L, 'Budi', 'x')$q$, (pg_temp.t13(1)).id), '%belum diposting%'));
+
+select post_task_by((pg_temp.t13(1)).id, 14, null, null, null, 'rusak 1', 'Budi');
+select post_task_by((pg_temp.t13(2)).id, 30, null, null, null, 'semua sisa', 'Budi');
+select pg_temp.check('relocation of 30 posted: pallet bin 0, pickface 31', pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 31);
+select pg_temp.check('undo relocation: 30 go back from the pickface',
+  unpost_task((pg_temp.t13(2)).id, 'Budi', 'salah qty') @> '{"result":"UNPOSTED"}');
+select pg_temp.check('undo relocation: bins back to 30 and 1',
+  pg_temp.qty('CF38C01') = 30 and pg_temp.qty('CF38C02') = 1);
+
+select complete_wave_by(pg_temp.w13(), 'Budi');
+select pg_temp.check('wave completed', (select status from waves where id = pg_temp.w13()) = 'COMPLETED');
+select pg_temp.check('undo in a completed wave reopens it',
+  (unpost_task((pg_temp.t13(3)).id, 'Budi', 'palet salah')->>'wave_reopened')::boolean);
+select pg_temp.check('reopened wave is PENDING, its order PLANNED again',
+  (select status from waves where id = pg_temp.w13()) = 'PENDING'
+  and (select status from outbound where wave_id = pg_temp.w13()) = 'PLANNED');
+
+reset role;
+update profiles set role = 'operator' where id = '11111111-1111-1111-1111-111111111111';
+set role authenticated;
+select pg_temp.check('operator cannot undo a posting',
+  pg_temp.fails(format($q$select unpost_task(%L, 'Budi', 'x')$q$, (pg_temp.t13(1)).id), 'Hanya supervisor%'));
+
 rollback;
