@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCheck, FileText, RefreshCw, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCheck, FileText, RefreshCw, Truck, Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -256,7 +256,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
             <p className="text-xs text-steel-500">Batch {t.batch_lot || "–"} · exp {fmtDate(t.expiry_date)} · {t.breaks_pallet ? "CASE* (buka palet)" : t.pick_type}</p>
             {short.has(t.id) && <p className="text-xs font-semibold text-bad">Stok bin ini tidak cukup lagi untuk tugas ini</p>}
             <Actual task={t} />
-            <TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
+            <TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
           </li>
         ))(it.task))}
       </ul>
@@ -295,7 +295,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
                 {t.completed_at && <span className="block text-xs">{t.completed_by_name} · {fmtDateTime(t.completed_at)}</span>}
                 <Actual task={t} />
               </Td>
-              <Td><TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
+              <Td><TaskAction task={t} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
             </tr>
           ))(it.task))}</tbody>
         </Table>
@@ -361,10 +361,17 @@ function PairAction({ pick, move, wait, canPost, canUndo, supervisor, onDone }: 
   return <PairPostDialog pick={pick} move={move} onDone={onDone} />;
 }
 
-function TaskAction({ task: t, wait, canPost, canUndo, supervisor, rpc, onDone }: {
-  task: TaskRow; wait?: TaskWait; canPost: boolean; canUndo: boolean; supervisor: boolean;
+function TaskAction({ task: t, wait, canPost, canUndo, canRestore, supervisor, rpc, onDone }: {
+  task: TaskRow; wait?: TaskWait; canPost: boolean; canUndo: boolean; canRestore: boolean; supervisor: boolean;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>; onDone: () => void;
 }) {
+  // A task cancelled by mistake goes back to the plan (set_task_status allows CANCELLED -> PLANNED).
+  if (t.status === "CANCELLED") return supervisor && canRestore ? (
+    <ConfirmButton size="sm" variant="ghost" className="underline" title={`Pulihkan tugas #${t.seq}`} confirmLabel="Pulihkan"
+      summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana dan bisa diposting lagi. Pakai hanya bila dibatalkan tidak sengaja: jika jumlah order sudah diubah, tugas ini bisa membuat pick lebih.`}
+      onConfirm={() => rpc("set_task_status", { p_task_id: t.id, p_status: "PLANNED", p_reason: "dipulihkan: dibatalkan tidak sengaja" })}>
+      <Undo2 className="h-4 w-4" />Pulihkan</ConfirmButton>
+  ) : null;
   // A posted task can be undone and posted again (0034).
   if (t.status === "COMPLETED") return supervisor && canUndo ? <UnpostButton task={t} /> : null;
   if (t.status !== "PLANNED" || !canPost) return null;
