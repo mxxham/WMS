@@ -95,6 +95,8 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
                 </div>
               </div>
               <Button size="sm" variant="outline" onClick={() => setMoveQty("0")}>Sisa tetap di {p.from_bin} (tidak dipindah)</Button>
+              <a href={`/inventory?tab=kosong&near=${p.from_bin}`} target="_blank" rel="noreferrer" className="ml-2 text-xs underline">
+                Cari bin kosong terdekat dari {p.from_bin}</a>
               {left !== null && <p className="text-xs text-steel-500">Tetap di {p.from_bin} setelah ini: {fmtNum(Math.max(left - pk - mv, 0))}</p>}
               <div>
                 <Label htmlFor="pp-reason">Alasan (wajib bila berbeda)</Label>
