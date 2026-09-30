@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Undo2 } from "lucide-react";
+import { ArrowRightLeft, Pencil, Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 import { fmtNum } from "@/lib/utils";
+import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
 
 /** A dialog with the person's name, a reason and an action; closes and refreshes on success. */
 function CorrectionDialog({ trigger, title, children, confirmLabel, run, ready = true }: {
@@ -118,6 +119,71 @@ export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: Ta
       }}>
       <p className="rounded-md bg-plate/30 p-3 text-base">Posting dibatalkan: {fmtNum(moved)} dari {m.to_bin} dan {fmtNum(picked)} dari truk kembali ke {p.actual_from_bin ?? p.from_bin} (barang fisik juga dikembalikan). Baris jadi belum dikerjakan; posting lagi dengan jumlah yang benar.</p>
       <p className="text-xs text-steel-500">Posting lama dan pembatalannya tetap tercatat di riwayat stok.</p>
+    </CorrectionDialog>
+  );
+}
+
+/**
+ * "Tambah Bin To Bin" (0045): a move for what a pick leaves in its bin, when
+ * the plan made none. Suggests the SKU's pickface and the nearest empty
+ * Level-A bins; the move lands right after the pick and posts with it.
+ */
+export function AddMoveButton({ task: t }: { task: TaskRow }) {
+  const from = t.actual_from_bin ?? t.from_bin;
+  const [have, setHave] = useState<number | null>(null);
+  const [suggest, setSuggest] = useState<{ bin: string; note: string }[]>([]);
+  const [to, setTo] = useState("");
+  const [qty, setQty] = useState("");
+  const rest = have === null ? null : Math.max(have - (t.status === "PLANNED" ? Number(t.quantity) : 0), 0);
+
+  async function load() {
+    const db = createClient();
+    const [{ data: inv }, { data: pf }, { data: empty }] = await Promise.all([
+      db.from("inventory_detail").select("quantity").eq("bin_code", from).eq("sku", t.sku).eq("batch_lot", t.actual_batch_lot ?? t.batch_lot),
+      db.from("pickface_detail").select("bin_code").eq("sku", t.sku),
+      db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
+    ]);
+    const h = (inv ?? []).reduce((a, r) => a + Number(r.quantity), 0);
+    setHave(h);
+    const r = Math.max(h - (t.status === "PLANNED" ? Number(t.quantity) : 0), 0);
+    setQty(String(r));
+    const src = parseBin(from);
+    const near = src ? ((empty ?? []) as BinParts[] & { bin_code: string }[])
+      .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
+      .map(({ b }) => ({ bin: (b as unknown as { bin_code: string }).bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
+    const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from).map((p) => ({ bin: p.bin_code, note: "pickface SKU ini" }));
+    setSuggest([...pfs, ...near]);
+    setTo(pfs[0]?.bin ?? near[0]?.bin ?? "");
+  }
+
+  const n = Number(qty);
+  const ready = /^[A-Z0-9_]{3,20}$/.test(to.trim().toUpperCase()) && Number.isFinite(n) && n > 0;
+  return (
+    <CorrectionDialog title={`Tambah Bin To Bin #${t.seq}`} confirmLabel="Tambah Bin To Bin" ready={ready}
+      trigger={<Button size="sm" variant="ghost" className="underline" onClick={() => { if (have === null) void load(); }}><ArrowRightLeft className="h-4 w-4" />Tambah Bin To Bin</Button>}
+      run={async (person, reason) => {
+        const { error } = await createClient().rpc("add_relocation", {
+          p_task_id: t.id, p_to_bin: to.trim().toUpperCase(), p_qty: n, p_by_name: person, p_reason: reason,
+        });
+        return error?.message ?? null;
+      }}>
+      <p className="rounded-md bg-plate/30 p-3 text-sm">
+        {from} · {t.sku} batch {t.actual_batch_lot ?? t.batch_lot}: {have === null ? "memuat…" : <>di bin sekarang <b>{fmtNum(have)}</b>
+        {t.status === "PLANNED" && <>, pick ini {fmtNum(Number(t.quantity))}</>}, sisa <b>{fmtNum(rest ?? 0)}</b></>}.
+        Sisa dipindah ke bin level A; pick dan pindahnya diposting bersama.
+      </p>
+      {suggest.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {suggest.map((s) => (
+            <Button key={s.bin} size="sm" variant={to === s.bin ? "default" : "outline"} onClick={() => setTo(s.bin)} title={s.note}>
+              {s.bin}<span className="ml-1 text-[10px] font-normal opacity-80">{s.note}</span></Button>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label htmlFor="mv-to">Ke bin</Label><Input id="mv-to" value={to} onChange={(e) => setTo(e.target.value.toUpperCase())} placeholder="mis. CB12A01" /></div>
+        <div><Label htmlFor="mv-qty">Jumlah</Label><Input id="mv-qty" type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} /></div>
+      </div>
     </CorrectionDialog>
   );
 }
