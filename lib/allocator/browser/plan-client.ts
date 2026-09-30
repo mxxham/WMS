@@ -4,6 +4,7 @@ import { withConfig, type AllocatorConfig } from '../config';
 import { inventoryToStock, type InventoryRow } from '../adapters/inventory-stock';
 import { runPipeline, type PipelineResult } from '../pipeline';
 import { buildPlan } from '../plan';
+import type { DbStockRow } from '../stock-check';
 import type { DemandLine } from '../types';
 
 /**
@@ -42,6 +43,17 @@ export async function loadPlanningStock(db: SupabaseClient, date: string, releas
     // keepAll (0044): an order added to the day keeps every reservation, also the day's untouched waves'.
     db.rpc('planning_stock', { p_date: date, p_release: release, p_keep_all: keepAll }).select(STOCK_COLUMNS)
       .order('bin_code').order('sku').order('batch_lot').order('expiry_date')
+      .range(from, to) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>);
+}
+
+/**
+ * The same planning_stock rows with physical / reserved / incoming / held, to
+ * check a plan made from the WMS file against the database (stock-check.ts).
+ */
+export async function loadStockCheckRows(db: SupabaseClient, date: string, release: string[] = []): Promise<DbStockRow[]> {
+  return fetchAll<DbStockRow>((from, to) =>
+    db.rpc('planning_stock', { p_date: date, p_release: release }).select('bin_code, sku, batch_lot, physical, reserved, incoming, held')
+      .order('bin_code').order('sku').order('batch_lot')
       .range(from, to) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>);
 }
 

@@ -12,7 +12,8 @@ import { cn, fmtNum } from "@/lib/utils";
 import { expiryText, withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
 import { inventoryToStock } from "@/lib/allocator/adapters/inventory-stock";
-import { keptShipments, loadDispatchRules, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, savePlan, type PlanContext } from "@/lib/allocator/browser/plan-client";
+import { keptShipments, loadDispatchRules, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, loadStockCheckRows, savePlan, type PlanContext } from "@/lib/allocator/browser/plan-client";
+import { checkPlanStock, type StockCheckRow, type StockProblem } from "@/lib/allocator/stock-check";
 import { runPipeline, type PipelineResult } from "@/lib/allocator/pipeline";
 import { buildPlan } from "@/lib/allocator/plan";
 import { binToBin, sisaPrinted, uomLabel } from "@/lib/allocator/picklist";
@@ -28,8 +29,10 @@ const todayIso = () => new Date().toLocaleDateString("sv-SE");
 /**
  * Upload the day's WMS workbook (for its "Schedule of the day" sheet), run the
  * FEFO allocator against live database stock, review, then save the plan as
- * waves + pick tasks. The workbook's own stock sheet can be used instead for a
- * what-if run; that plan cannot be saved because it is not the ledger's stock.
+ * waves + pick tasks. The workbook's own stock sheet can be used instead, so
+ * the waves are exactly the picklist the WMS file gives; that plan is saved
+ * only when the database holds the same stock in every bin it works in
+ * (stock-check.ts), else the differences are listed and Simpan stays locked.
  */
 export function AllocateClient() {
   const [file, setFile] = useState<{ name: string; buf: ArrayBuffer } | null>(null);
@@ -50,6 +53,8 @@ export function AllocateClient() {
   const [run, setRun] = useState<(PipelineResult & {
     source: Source; asOf: string; demand: ReturnType<typeof loadWorkbookFromBuffer>["demand"];
     ctx: PlanContext | null; skipped: string[];
+    /** file source: the plan's bins against the database; save only when ok */
+    check: { ok: boolean; rows: StockCheckRow[] } | null;
     /** parked (Tunda) orders of earlier days found again on this schedule: carried over on save (0036) */
     carry: CarryMatch[];
   }) | null>(null);
@@ -71,32 +76,33 @@ export function AllocateClient() {
       const wb = loadWorkbookFromBuffer(file.buf, config);
       if (wb.demand.length === 0) throw new Error('Sheet "Schedule of the day" kosong atau tidak ditemukan.');
       let stock = wb.stock, staged = wb.stagedBySku, warnings = wb.warnings, demand = wb.demand;
-      let ctx: PlanContext | null = null;
-      let skipped: string[] = [];
-      let carry: CarryMatch[] = [];
+      const supabase = createClient();
+      // Stock net of what open tasks of other waves will still take or bring in.
+      const ctx = await loadPlanContext(supabase, asOf);
+      // Shipments of waves already worked on / paused / cancelled are not planned again.
+      const kept = keptShipments(ctx);
+      const skipped = [...new Set(demand.filter((d) => kept.has(d.shipmentNumber)).map((d) => d.shipmentNumber))];
+      demand = demand.filter((d) => !kept.has(d.shipmentNumber));
+      // Orders parked on an earlier day, back on today's schedule (0036/0037). Nothing posted
+      // yet: planned fresh, whole shipment in one wave, with the parked stock counted as free.
+      // Something posted: the old wave is carried over and only the new items are planned.
+      const { data: parked, error: pe } = await supabase.rpc("parked_orders", { p_date: asOf });
+      if (pe) throw new Error(pe.message);
+      const found = matchParked(demand, ((parked ?? []) as ParkedOrder[]).filter((p) => p.planned_date < asOf));
+      const carry = found.matches;
+      demand = demand.filter((d) => !found.matchedDemand.has(d));
+      const release = carry.filter((m) => m.mode === "fresh").map((m) => m.wave_id);
       if (source === "db") {
-        const supabase = createClient();
-        // Stock net of what open tasks of other waves will still take or bring in.
-        ctx = await loadPlanContext(supabase, asOf);
-        // Shipments of waves already worked on / paused / cancelled are not planned again.
-        const kept = keptShipments(ctx);
-        skipped = [...new Set(demand.filter((d) => kept.has(d.shipmentNumber)).map((d) => d.shipmentNumber))];
-        demand = demand.filter((d) => !kept.has(d.shipmentNumber));
-        // Orders parked on an earlier day, back on today's schedule (0036/0037). Nothing posted
-        // yet: planned fresh, whole shipment in one wave, with the parked stock counted as free.
-        // Something posted: the old wave is carried over and only the new items are planned.
-        const { data: parked, error: pe } = await supabase.rpc("parked_orders", { p_date: asOf });
-        if (pe) throw new Error(pe.message);
-        const found = matchParked(demand, ((parked ?? []) as ParkedOrder[]).filter((p) => p.planned_date < asOf));
-        carry = found.matches;
-        demand = demand.filter((d) => !found.matchedDemand.has(d));
-        // Stock net of what open tasks of other waves will still take or bring in.
-        const release = carry.filter((m) => m.mode === "fresh").map((m) => m.wave_id);
         const db = inventoryToStock(await loadPlanningStock(supabase, asOf, release), config);
         // The workbook's warnings are all about its stock sheet, which is not used here.
         stock = db.stock; staged = db.stagedBySku; warnings = db.warnings;
       }
-      setRun({ ...runPipeline(stock, demand, staged, config, warnings), source, asOf, demand, ctx, skipped, carry });
+      const result = runPipeline(stock, demand, staged, config, warnings);
+      // The file's picklist becomes the waves only where the database holds the same stock.
+      const check = source === "file"
+        ? checkPlanStock(buildPlan(result.allocation, demand, result.pickfaces).tasks, wb.stock, await loadStockCheckRows(supabase, asOf, release))
+        : null;
+      setRun({ ...result, source, asOf, demand, ctx, skipped, carry, check });
       setTab("picklist");
     } catch (e) {
       setError((e as Error).message);
@@ -159,7 +165,7 @@ export function AllocateClient() {
             <Label htmlFor="src">Sumber stok</Label>
             <Select id="src" value={source} onChange={(e) => setSource(e.target.value as Source)}>
               <option value="db">Database (stok sistem, dikurangi tugas terbuka)</option>
-              <option value="file">Sheet WMS di file (simulasi, tidak bisa disimpan)</option>
+              <option value="file">Sheet WMS di file (disimpan bila stok sama dengan database)</option>
             </Select>
           </div>
           <div><Label htmlFor="msl" title="Standar dari aturan inventory; SKU dengan aturan sendiri di Master item memakai aturannya">Sisa umur minimum (hari){Object.keys(minBySku).length > 0 && ` · ${Object.keys(minBySku).length} SKU punya aturan sendiri`}</Label><Input id="msl" type="number" min={0} value={minShelfLife} onChange={(e) => setMinShelfLife(e.target.value)} /></div>
@@ -196,6 +202,7 @@ export function AllocateClient() {
               Stok yang dipakai sudah dikurangi tugas yang masih terbuka.
             </p>
           )}
+          {run.check && <StockCheckPanel check={run.check} />}
           {run.carry.length > 0 && (
             <CarryPanel matches={run.carry} asOf={run.asOf} />
           )}
@@ -212,15 +219,15 @@ export function AllocateClient() {
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadPicklistPdf(run.allocation.picklists, run.pickfaces, `picklist_${run.asOf}.pdf`)}><FileText className="h-4 w-4" />PDF picklist</Button>
                 <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadAllocationWorkbook(run.allocation, run.movement, run.pickfaces, `picklist_${run.asOf}.xlsx`)}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
-                {run.source === "db" ? (
+                {run.source === "db" || run.check?.ok ? (
                   <ConfirmButton size="sm" variant="plate" title="Simpan rencana"
-                    summary={`Simpan ${plan.waves.length} wave dan ${plan.tasks.length} tugas untuk ${run.asOf}.`
+                    summary={`Simpan ${plan.waves.length} wave dan ${plan.tasks.length} tugas untuk ${run.asOf}${run.source === "file" ? " (picklist dari file WMS; stok di semua bin-nya sama dengan database)" : ""}.`
                       + (run.ctx?.replaceable.length ? ` ${run.ctx.replaceable.length} wave tanggal ini yang belum dikerjakan akan diganti.` : "")
                       + (run.ctx?.kept.length ? ` ${run.ctx.kept.length} wave yang sudah berjalan tidak diubah.` : "")
                       + " Stok belum berubah sampai tugas diposting."}
                     onConfirm={save}><Save className="h-4 w-4" />Simpan rencana</ConfirmButton>
                 ) : (
-                  <span className="self-center text-xs text-steel-500">Simulasi dari file — pilih sumber stok Database untuk menyimpan.</span>
+                  <span className="self-center text-xs font-semibold text-bad">Simpan dikunci: stok file berbeda dengan database di {run.check?.rows.filter((r) => r.problem).length} baris (lihat Cek stok).</span>
                 )}
               </div>
             </CardHeader>
@@ -271,6 +278,35 @@ export function AllocateClient() {
         </>
       )}
     </div>
+  );
+}
+
+const PROBLEM: Record<StockProblem, string> = {
+  qty: "Jumlah beda",
+  claimed: "Dipakai wave lain yang sudah berjalan",
+  held: "Ditahan (hold) di database",
+};
+
+/** File plan vs database, bin by bin: Simpan only when every row agrees. */
+function StockCheckPanel({ check }: { check: { ok: boolean; rows: StockCheckRow[] } }) {
+  const bad = check.rows.filter((r) => r.problem);
+  return (
+    <Card className={cn(!check.ok && "border-2 border-bad")}>
+      <CardHeader>
+        <CardTitle>Cek stok: file WMS vs database</CardTitle>
+        <p className="text-sm">
+          {check.ok
+            ? `Sama di semua ${check.rows.length} bin/SKU/batch yang dipakai picklist ini: picklist dari file bisa disimpan jadi wave.`
+            : `${bad.length} dari ${check.rows.length} bin/SKU/batch yang dipakai picklist ini berbeda. Betulkan stoknya (hitung / adjust / posting yang terlewat), lalu jalankan alokasi lagi.`}
+        </p>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Rows empty="Picklist ini tidak mengambil stok."
+          head={["Bin", "SKU", "Batch", "File", "Database", "Masalah"]}
+          rows={[...bad, ...check.rows.filter((r) => !r.problem)].map((r) => [r.bin, r.sku, r.batch || "–", fmtNum(r.file), fmtNum(r.db),
+            r.problem ? `${PROBLEM[r.problem]}${r.problem === "claimed" ? ` (ambil ${fmtNum(r.reserved)}, masuk ${fmtNum(r.incoming)})` : r.problem === "held" ? ` (${fmtNum(r.held)})` : ""}` : "✓ sama"])} />
+      </CardContent>
+    </Card>
   );
 }
 
