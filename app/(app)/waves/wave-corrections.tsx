@@ -131,39 +131,30 @@ export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: Ta
 export function AddMoveButton({ task: t }: { task: TaskRow }) {
   const from = t.actual_from_bin ?? t.from_bin;
   const [have, setHave] = useState<number | null>(null);
-  const [suggest, setSuggest] = useState<{ bin: string; note: string }[]>([]);
+  const [suggest, setSuggest] = useState<Target[]>([]);
   const [to, setTo] = useState("");
   const [qty, setQty] = useState("");
   const rest = have === null ? null : Math.max(have - (t.status === "PLANNED" ? Number(t.quantity) : 0), 0);
 
   async function load() {
-    const db = createClient();
-    const [{ data: inv }, { data: pf }, { data: empty }] = await Promise.all([
-      db.from("inventory_detail").select("quantity").eq("bin_code", from).eq("sku", t.sku).eq("batch_lot", t.actual_batch_lot ?? t.batch_lot),
-      db.from("pickface_detail").select("bin_code").eq("sku", t.sku),
-      db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
+    const [{ data: inv }, targets] = await Promise.all([
+      createClient().from("inventory_detail").select("quantity").eq("bin_code", from).eq("sku", t.sku).eq("batch_lot", t.actual_batch_lot ?? t.batch_lot),
+      moveTargets(from, t.sku),
     ]);
     const h = (inv ?? []).reduce((a, r) => a + Number(r.quantity), 0);
     setHave(h);
-    const r = Math.max(h - (t.status === "PLANNED" ? Number(t.quantity) : 0), 0);
-    setQty(String(r));
-    const src = parseBin(from);
-    const near = src ? ((empty ?? []) as BinParts[] & { bin_code: string }[])
-      .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
-      .map(({ b }) => ({ bin: (b as unknown as { bin_code: string }).bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
-    const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from).map((p) => ({ bin: p.bin_code, note: "pickface SKU ini" }));
-    setSuggest([...pfs, ...near]);
-    setTo(pfs[0]?.bin ?? near[0]?.bin ?? "");
+    setQty(String(Math.max(h - (t.status === "PLANNED" ? Number(t.quantity) : 0), 0)));
+    setSuggest(targets);
+    setTo(targets[0]?.bin ?? "");
   }
 
-  const n = Number(qty);
-  const ready = /^[A-Z0-9_]{3,20}$/.test(to.trim().toUpperCase()) && Number.isFinite(n) && n > 0;
+  const ready = targetReady(to, qty);
   return (
     <CorrectionDialog title={`Tambah Bin To Bin #${t.seq}`} confirmLabel="Tambah Bin To Bin" ready={ready}
       trigger={<Button size="sm" variant="ghost" className="underline" onClick={() => { if (have === null) void load(); }}><ArrowRightLeft className="h-4 w-4" />Tambah Bin To Bin</Button>}
       run={async (person, reason) => {
         const { error } = await createClient().rpc("add_relocation", {
-          p_task_id: t.id, p_to_bin: to.trim().toUpperCase(), p_qty: n, p_by_name: person, p_reason: reason,
+          p_task_id: t.id, p_to_bin: to.trim().toUpperCase(), p_qty: Number(qty), p_by_name: person, p_reason: reason,
         });
         return error?.message ?? null;
       }}>
@@ -172,6 +163,70 @@ export function AddMoveButton({ task: t }: { task: TaskRow }) {
         {t.status === "PLANNED" && <>, pick ini {fmtNum(Number(t.quantity))}</>}, sisa <b>{fmtNum(rest ?? 0)}</b></>}.
         Sisa dipindah ke bin level A; pick dan pindahnya diposting bersama.
       </p>
+      <TargetFields suggest={suggest} to={to} setTo={setTo} qty={qty} setQty={setQty} />
+    </CorrectionDialog>
+  );
+}
+
+/**
+ * "Ubah Bin To Bin" (0047): another destination for a pallet's rest that is
+ * not moved yet, e.g. the planned pickface is full. Same suggestions as
+ * Tambah Bin To Bin; the move stays paired with its pick.
+ */
+export function ChangeMoveButton({ move: m }: { move: TaskRow }) {
+  const [suggest, setSuggest] = useState<Target[] | null>(null);
+  const [to, setTo] = useState("");
+  const [qty, setQty] = useState(String(m.quantity));
+
+  async function load() {
+    const targets = await moveTargets(m.from_bin, m.sku, m.to_bin);
+    setSuggest(targets);
+    setTo(targets[0]?.bin ?? "");
+  }
+
+  const ready = targetReady(to, qty) && to.trim().toUpperCase() !== m.to_bin;
+  return (
+    <CorrectionDialog title={`Ubah Bin To Bin #${m.seq}`} confirmLabel="Simpan Bin To Bin" ready={ready}
+      trigger={<Button size="sm" variant="ghost" className="underline" onClick={() => { if (suggest === null) void load(); }}><ArrowRightLeft className="h-4 w-4" />Ubah Bin To Bin</Button>}
+      run={async (person, reason) => {
+        const { error } = await createClient().rpc("change_relocation", {
+          p_move_id: m.id, p_to_bin: to.trim().toUpperCase(), p_qty: Number(qty), p_by_name: person, p_reason: reason,
+        });
+        return error?.message ?? null;
+      }}>
+      <p className="rounded-md bg-plate/30 p-3 text-sm">
+        Sisa palet {m.from_bin} · {m.sku} batch {m.batch_lot}: rencana <b>{fmtNum(Number(m.quantity))}</b> ke <b>{m.to_bin}</b>.
+        Pilih bin lain bila {m.to_bin} penuh atau tidak ada; pick dan pindahnya tetap diposting bersama.
+      </p>
+      <TargetFields suggest={suggest ?? []} to={to} setTo={setTo} qty={qty} setQty={setQty} />
+    </CorrectionDialog>
+  );
+}
+
+type Target = { bin: string; note: string };
+
+/** Where a pallet's rest can go: the SKU's pickface, then the nearest empty Level-A bins. */
+async function moveTargets(from: string, sku: string, except?: string | null): Promise<Target[]> {
+  const db = createClient();
+  const [{ data: pf }, { data: empty }] = await Promise.all([
+    db.from("pickface_detail").select("bin_code").eq("sku", sku),
+    db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
+  ]);
+  const src = parseBin(from);
+  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[])
+    .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
+    .map(({ b }) => ({ bin: b.bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
+  const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from).map((p) => ({ bin: p.bin_code, note: "pickface SKU ini" }));
+  return [...pfs, ...near].filter((t) => t.bin !== except);
+}
+
+const targetReady = (to: string, qty: string) => /^[A-Z0-9_]{3,20}$/.test(to.trim().toUpperCase()) && Number(qty) > 0;
+
+function TargetFields({ suggest, to, setTo, qty, setQty }: {
+  suggest: Target[]; to: string; setTo: (v: string) => void; qty: string; setQty: (v: string) => void;
+}) {
+  return (
+    <>
       {suggest.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {suggest.map((s) => (
@@ -184,7 +239,7 @@ export function AddMoveButton({ task: t }: { task: TaskRow }) {
         <div><Label htmlFor="mv-to">Ke bin</Label><Input id="mv-to" value={to} onChange={(e) => setTo(e.target.value.toUpperCase())} placeholder="mis. CB12A01" /></div>
         <div><Label htmlFor="mv-qty">Jumlah</Label><Input id="mv-qty" type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} /></div>
       </div>
-    </CorrectionDialog>
+    </>
   );
 }
 

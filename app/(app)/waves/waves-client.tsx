@@ -16,7 +16,7 @@ import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
-import { AddMoveButton, OrderQtyButton, SplitButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
+import { AddMoveButton, ChangeMoveButton, OrderQtyButton, SplitButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
 import { PairPostDialog } from "./pair-post-dialog";
 import { AddOrder } from "./add-order";
 import { pairMoves } from "@/lib/allocator/pair-moves";
@@ -360,8 +360,13 @@ function PairAction({ pick, move, wait, canPost, canUndo, supervisor, onDone }: 
 }) {
   if (pick.status === "COMPLETED") return supervisor && canUndo ? <UnpostPairButton pick={pick} move={move} /> : null;
   if (pick.status !== "PLANNED" || !canPost) return null;
-  if (wait) return <WaitNotice wait={wait} />;
-  return <PairPostDialog pick={pick} move={move} onDone={onDone} />;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {/* The planned pickface is full or missing: send the rest elsewhere (0047). */}
+      {supervisor && move.status === "PLANNED" && <ChangeMoveButton move={move} />}
+      {wait ? <WaitNotice wait={wait} /> : <PairPostDialog pick={pick} move={move} onDone={onDone} />}
+    </div>
+  );
 }
 
 function TaskAction({ task: t, wait, canPost, canUndo, canRestore, supervisor, rpc, onDone }: {
