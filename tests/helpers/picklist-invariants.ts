@@ -5,6 +5,7 @@
 import { strict as assert } from 'node:assert';
 import { daysBetween, hasExpiry, isStagingLocation, minShelfLifeDays, type AllocatorConfig } from '../../lib/allocator/config';
 import { allocate } from '../../lib/allocator/allocator';
+import { parseLocation } from '../../lib/allocator/pickpath';
 import { buildPlan } from '../../lib/allocator/plan';
 import { binToBin, sisaPrinted } from '../../lib/allocator/picklist';
 import type { PipelineResult } from '../../lib/allocator/pipeline';
@@ -60,10 +61,20 @@ export function checkPicklistRun(run: PipelineResult, stock: StockBin[], demand:
     if (l.breaksPallet) assert.ok(l.qtyPick < l.upp, `${row}: opens a pallet but picks ${l.qtyPick} of ${l.upp}`);
     if (l.moveTo) {
       assert.ok(l.breaksPallet, `${row}: Bin To Bin without opening a pallet`);
-      assert.equal(l.moveTo, pf?.location, `${row}: Bin To Bin goes to the pickface`);
       assert.notEqual(l.moveTo, l.location, `${row}: Bin To Bin to itself`);
       assert.equal(l.moveQty, left, `${row}: carries the whole leftover`);
       assert.equal(l.qtyRemainingInBin, 0, `${row}: nothing stays once moved`);
+      if (l.moveTo !== pf?.location) {
+        const parsed = parseLocation(l.moveTo);
+        assert.ok(parsed && config.pickfaceLevels.includes(parsed.level), `${row}: overflow Bin To Bin ${l.moveTo} is not a Level-A bin`);
+        const allPf = new Set([...run.pickfaces.values()].map((p) => p.location));
+        assert.ok(!allPf.has(l.moveTo), `${row}: overflow Bin To Bin ${l.moveTo} lands on a dedicated pickface`);
+        let held = 0;
+        for (const [bk, bq] of bal) if (bk.startsWith(`${l.moveTo}|`)) held += bq;
+        assert.equal(held, 0, `${row}: overflow Bin To Bin ${l.moveTo} lands on an occupied bin`);
+        const onPf = atLocation(pf!.location, l.sku);
+        assert.ok(onPf >= pf!.targetQtyCartons, `${row}: overflow while pickface ${pf!.location} below target (${onPf}/${pf!.targetQtyCartons})`);
+      }
     } else if (l.breaksPallet && left > 0 && pf && pf.location !== l.location) {
       const onPf = atLocation(pf.location, l.sku);
       assert.ok(onPf >= pf.targetQtyCartons, `${row}: opens a pallet, ${left} stay, pickface ${pf.location} has ${onPf}/${pf.targetQtyCartons}`);

@@ -111,7 +111,10 @@ The replay (`relocateByWaveOrder`, then `settleSisa` in `ledger.ts`) also decide
 - **Which row opens a sealed pallet**: the first one in execution order.
 - **The bin-to-bin move.** A row that breaks a pallet away from the SKU's
   pickface, while the pickface is below its target, carries the leftover to
-  the pickface right after the pick. The printed row shows the destination in
+  the pickface right after the pick. If the pickface is already at or above
+  its target and no later row needs that SKU, the leftover goes to the
+  nearest empty Level-A bin instead (one-time overflow, never registered as
+  a dedicated pickface); with no empty Level-A slot it stays (`tetap di bin`). The printed row shows the destination in
   *Bin To Bin* (`CB01A01`) and, as *Sisa*, the leftover to carry (34): what is
   in the bin right after the pick (`sisaPrinted` in picklist.ts). Internally
   `qtyRemainingInBin` is what stays once the move is done too (0). The plan's REPLENISH task, the
