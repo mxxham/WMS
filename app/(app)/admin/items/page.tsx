@@ -12,7 +12,7 @@ export default async function ItemsPage() {
   await requireRole(["supervisor", "admin"]);
   const supabase = await createClient();
   const [items, { data: policy }] = await Promise.all([
-    fetchAll<ItemRow>((a, b) => supabase.from("items").select("sku, description, uom, upp, abc_class, ean, shelf_life_months, min_dispatch_days").order("sku").range(a, b)),
+    fetchAll<ItemRow>((a, b) => supabase.from("items").select("sku, description, uom, upp, volume_l, abc_class, ean, shelf_life_months, min_dispatch_days").order("sku").range(a, b)),
     supabase.rpc("inventory_policy"),
   ]);
   const p = parsePolicy(policy);
