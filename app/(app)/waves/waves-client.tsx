@@ -18,7 +18,7 @@ import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@
 import { TaskPostDialog } from "./task-post-dialog";
 import { AddMoveButton, ChangeMoveButton, OrderQtyButton, SplitButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
 import { PairPostDialog } from "./pair-post-dialog";
-import { AddOrder } from "./add-order";
+import { AddItems, AddOrder } from "./add-order";
 import { pairMoves } from "@/lib/allocator/pair-moves";
 
 // jsPDF is ~380 kB: load it only when someone actually prints.
@@ -210,6 +210,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
               <CheckCheck className="h-4 w-4" />Tutup wave
             </ConfirmButton>
           )}
+          {supervisor && (pending || w.status === "RESCHEDULED") && <AddItems date={w.planned_date} wave={w} />}
           {supervisor && pending && (
             <ConfirmButton size="sm" variant="outline" title={`Jadwal ulang NO ${w.wave_no}`}
               summary="Wave ditahan (tidak bisa dikerjakan) sampai diaktifkan lagi. Tugas yang sudah diposting tetap tercatat."
