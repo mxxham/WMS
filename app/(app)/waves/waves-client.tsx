@@ -16,7 +16,7 @@ import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
-import { AddMoveButton, OrderQtyButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
+import { AddMoveButton, OrderQtyButton, SplitButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
 import { PairPostDialog } from "./pair-post-dialog";
 import { AddOrder } from "./add-order";
 import { pairMoves } from "@/lib/allocator/pair-moves";
@@ -383,6 +383,7 @@ function TaskAction({ task: t, wait, canPost, canUndo, canRestore, supervisor, r
   return (
     <div className="flex flex-wrap gap-2">
       {addMove}
+      {supervisor && t.task_type === "PICK" && Number(t.quantity) > 1 && <SplitButton task={t} />}
       {wait ? <WaitNotice wait={wait} /> : <TaskPostDialog task={t} onDone={onDone} />}
       {supervisor && (
         <ConfirmButton size="sm" variant="ghost" title="Batalkan tugas" confirmLabel="Batalkan tugas"

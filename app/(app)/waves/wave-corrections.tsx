@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, Pencil, Undo2 } from "lucide-react";
+import { ArrowRightLeft, Pencil, Scissors, Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -183,6 +183,32 @@ export function AddMoveButton({ task: t }: { task: TaskRow }) {
       <div className="grid grid-cols-2 gap-3">
         <div><Label htmlFor="mv-to">Ke bin</Label><Input id="mv-to" value={to} onChange={(e) => setTo(e.target.value.toUpperCase())} placeholder="mis. CB12A01" /></div>
         <div><Label htmlFor="mv-qty">Jumlah</Label><Input id="mv-qty" type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} /></div>
+      </div>
+    </CorrectionDialog>
+  );
+}
+
+/** "Pecah" (0046): split an open pick in two, so each part can be posted from its own bin. */
+export function SplitButton({ task: t }: { task: TaskRow }) {
+  const total = Number(t.quantity);
+  const [keep, setKeep] = useState("");
+  const k = Number(keep);
+  const ready = Number.isFinite(k) && k >= 1 && k < total;
+  return (
+    <CorrectionDialog title={`Pecah tugas #${t.seq}`} confirmLabel="Pecah" ready={ready}
+      trigger={<Button size="sm" variant="ghost" className="underline"><Scissors className="h-4 w-4" />Pecah</Button>}
+      run={async (person) => {
+        const { error } = await createClient().rpc("split_task", { p_task_id: t.id, p_keep: k, p_by_name: person });
+        return error?.message ?? null;
+      }}>
+      <p className="rounded-md bg-plate/30 p-3 text-sm">
+        #{t.seq}: {fmtNum(total)} {t.uom ?? ""} SKU {t.sku} dari {t.from_bin}. Dipecah jadi dua tugas untuk shipment yang sama;
+        tiap bagian bisa diposting dari bin berbeda (Berbeda).
+      </p>
+      <div>
+        <Label htmlFor="sp-keep">Tetap di tugas ini ({t.from_bin})</Label>
+        <Input id="sp-keep" type="number" min={1} max={total - 1} value={keep} onChange={(e) => setKeep(e.target.value)} placeholder={`1–${total - 1}`} />
+        {ready && <p className="mt-1 text-sm">Tugas baru: <b>{fmtNum(total - k)}</b>, tepat di bawahnya.</p>}
       </div>
     </CorrectionDialog>
   );
