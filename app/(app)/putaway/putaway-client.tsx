@@ -6,7 +6,7 @@ import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
 import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, parsePutawaySheet, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
@@ -42,6 +42,8 @@ export function PutawayClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  // "Pindah ke bin lain": the bin typed per line (0042).
+  const [moveTo, setMoveTo] = useState<Record<number, string>>({});
 
   async function call(apply: boolean, acts: typeof actions, sheetRows = rows): Promise<Result | null> {
     const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({ ...r, action: acts[r.line] ?? null }));
@@ -72,6 +74,22 @@ export function PutawayClient() {
     catch { return setError("File tidak bisa dibaca. Gunakan .xlsx atau .csv."); }
     setWb(book);
     await loadSheet(book, book.SheetNames.find((n) => PUTAWAY_SHEET.test(n)) ?? book.SheetNames[0]);
+  }
+
+  /** Send a line to another bin (the one the pallet really went to), or back to the sheet's bin; then check again. */
+  async function redirect(line: number, bin: string | null) {
+    const next = rows.map((r) => {
+      if (r.line !== line) return r;
+      if (bin === null) return { ...r, bin_code: r.sheet_bin ?? r.bin_code, sheet_bin: undefined };
+      return { ...r, bin_code: bin.trim().toUpperCase(), sheet_bin: r.sheet_bin ?? r.bin_code };
+    });
+    const acts = { ...actions, [line]: undefined };
+    setBusy(true); setError(null);
+    const res = await call(false, acts, next);
+    setBusy(false);
+    if (!res) return;
+    setRows(next); setActions(acts); setMoveTo((m) => ({ ...m, [line]: "" }));
+    setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
   }
 
   async function post() {
@@ -203,7 +221,8 @@ export function PutawayClient() {
                   const st = statusOf(r); const v = verdicts.get(r.line); const opts = v?.kind ? ACTIONS[v.kind] : [];
                   return (
                     <tr key={r.line} className={STATUS[st].row}>
-                      <Td>{r.line}</Td><Td className="font-semibold">{r.bin_code}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
+                      <Td>{r.line}</Td><Td className="font-semibold">{r.bin_code}
+                        {r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
                       <Td className="text-right tabular">{r.quantity ?? "–"}</Td>
                       <Td>{fmtDate(r.expiry_date)}{v?.expiry_expected && <div className="text-xs font-semibold text-warn" title="Expired menurut kode batch">batch → {fmtDate(v.expiry_expected)}</div>}</Td>
                       <Td className="text-xs">{problem(r) || (st === "same" ? "Isi bin sudah sama" : "")}</Td>
@@ -214,7 +233,16 @@ export function PutawayClient() {
                             <option value="">Lewati</option>
                             {opts.map((a) => <option key={a} value={a}>{actionLabel(v!.kind!, a)}</option>)}
                           </Select>
-                        ) : <span className="text-xs text-steel-500">Perbaiki di sheet / master</span>)}
+                        ) : v?.kind === "sku_unknown" ? <span className="text-xs text-steel-500">Tambahkan SKU ke master (di atas)</span> : null)}
+                        {step === "review" && (st === "conflict" || r.sheet_bin) && v?.kind !== "sku_unknown" && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <Input aria-label={`Bin sebenarnya baris ${r.line}`} className="h-8 w-28" placeholder="bin lain" value={moveTo[r.line] ?? ""}
+                              onChange={(e) => setMoveTo((m) => ({ ...m, [r.line]: e.target.value.toUpperCase() }))} />
+                            <Button size="sm" variant="outline" disabled={busy || !/^[A-Z0-9_]{3,20}$/.test((moveTo[r.line] ?? "").trim())}
+                              onClick={() => redirect(r.line, moveTo[r.line])}>Pindah ke bin ini</Button>
+                            {r.sheet_bin && <Button size="sm" variant="ghost" className="underline" disabled={busy} onClick={() => redirect(r.line, null)}>Kembali ke {r.sheet_bin}</Button>}
+                          </div>
+                        )}
                         {step === "done" && (v?.status === "new" || v?.action ? <span className="text-xs font-semibold text-ok">Diposting</span> : <span className="text-xs text-steel-500">Tidak diposting</span>)}
                       </Td>
                     </tr>
