@@ -10,6 +10,7 @@ import { Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
 import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, parsePutawaySheet, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
+import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 
 type Step = "upload" | "review" | "done";
@@ -90,6 +91,19 @@ export function PutawayClient() {
   // Unresolved qty/occupied conflicts become count tasks when posted (0010).
   const toCount = rows.filter((r) => { const v = verdicts.get(r.line); return v?.status === "conflict" && !actions[r.line] && (v.kind === "qty_differs" || v.kind === "bin_occupied"); }).length;
   const shown = filter === "all" ? rows : rows.filter((r) => statusOf(r) === filter);
+  // SKUs the item master does not have yet, with their data from this file's master sheets (0040).
+  const unknownSkus = [...new Set(rows.filter((r) => verdicts.get(r.line)?.kind === "sku_unknown").map((r) => r.sku))];
+  const fromFile = wb && unknownSkus.length ? masterFromWorkbook(wb, unknownSkus) : [];
+  const notInFile = unknownSkus.filter((u) => !fromFile.some((m) => m.sku === u));
+
+  async function addMissing() {
+    if (!wb) return;
+    setBusy(true); setError(null);
+    const { error } = await createClient().rpc("add_items", { p_items: fromFile });
+    setBusy(false);
+    if (error) return setError(error.message);
+    await loadSheet(wb, sheet); // the rows are checked again: they become new putaways
+  }
 
   function problem(r: PutawayRow) {
     if (r.error) return r.error;
@@ -147,6 +161,25 @@ export function PutawayClient() {
               {!!result.set_over_limit?.length && <p className="text-sm">Baris {result.set_over_limit.join(", ")}: &quot;samakan dengan sheet&quot; melebihi batas adjustment, jadi tidak diposting dan dihitung ulang dulu.</p>}
               {result.rows.some((v) => v.expiry_expected) && <p className="text-sm text-warn">{fmtNum(result.rows.filter((v) => v.expiry_expected).length)} baris punya expired yang tidak cocok dengan kode batch: cek label, lalu perbaiki di <Link className="underline" href="/data-quality#expiry_vs_batch">Kualitas data</Link>.</p>}
               <p className="text-sm text-steel-500">Stok berubah: rencana wave yang belum dikerjakan bisa dihitung ulang di halaman <Link className="underline" href="/waves">Wave</Link> (Hitung ulang wave tersisa).</p>
+            </CardContent></Card>
+          )}
+
+          {step === "review" && unknownSkus.length > 0 && (
+            <Card className="border-l-4 border-warn"><CardContent className="space-y-2 text-sm">
+              <p className="font-semibold">{fmtNum(unknownSkus.length)} SKU belum ada di master item, jadi barisnya belum bisa diposting.</p>
+              {fromFile.length > 0 && (
+                <>
+                  <p>Data dari sheet MASTER DATA / Master SKU file ini:</p>
+                  <ul className="list-disc pl-5">
+                    {fromFile.map((m) => (
+                      <li key={m.sku}><b>{m.sku}</b> · {m.description} · {m.uom ?? "UOM ?"} · UPP {m.upp ?? "?"} · {m.volume_l ?? "?"} L</li>
+                    ))}
+                  </ul>
+                  <Button onClick={addMissing} disabled={busy}>{busy ? "Menambahkan…" : `Tambahkan ${fmtNum(fromFile.length)} SKU ke master item`}</Button>
+                  <p className="text-xs text-steel-500">Setelah ditambahkan, sheet diperiksa ulang dan baris SKU ini jadi putaway baru. Item yang sudah ada tidak diubah.</p>
+                </>
+              )}
+              {notInFile.length > 0 && <p className="text-bad">Tidak ada di sheet master file ini: {notInFile.join(", ")}. Lengkapi MASTER DATA dulu.</p>}
             </CardContent></Card>
           )}
 
