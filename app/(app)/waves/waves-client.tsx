@@ -16,8 +16,9 @@ import { picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
 import { TaskPostDialog } from "./task-post-dialog";
-import { OrderQtyButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
+import { AddMoveButton, OrderQtyButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
 import { PairPostDialog } from "./pair-post-dialog";
+import { AddOrder } from "./add-order";
 import { pairMoves } from "@/lib/allocator/pair-moves";
 
 // jsPDF is ~380 kB: load it only when someone actually prints.
@@ -91,6 +92,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
       <Card><CardContent className="space-y-2 text-sm">
         <p>Belum ada rencana untuk {fmtDate(date)}.</p>
         {supervisor && <p><Link href="/allocate" className="font-semibold underline">Jalankan alokasi →</Link></p>}
+        {supervisor && <div className="pt-1"><AddOrder date={date} /></div>}
       </CardContent></Card>
     );
   }
@@ -132,6 +134,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-steel-500">{waves.length} wave · {fmtNum(done)}/{fmtNum(live)} tugas selesai · {untouched.length} wave belum dikerjakan</p>
         <div className="flex flex-wrap gap-2">
+          {supervisor && <AddOrder date={date} />}
           {supervisor && untouched.length > 0 && short.size === 0 && replanButton("outline")}
           <Button variant="outline" size="sm" onClick={() => printPicklists(waves, waves, tasks, outbound, `picklist_${date}.pdf`)}>
             <FileText className="h-4 w-4" />PDF semua picklist
@@ -372,11 +375,14 @@ function TaskAction({ task: t, wait, canPost, canUndo, canRestore, supervisor, r
       onConfirm={() => rpc("set_task_status", { p_task_id: t.id, p_status: "PLANNED", p_reason: "dipulihkan: dibatalkan tidak sengaja" })}>
       <Undo2 className="h-4 w-4" />Pulihkan</ConfirmButton>
   ) : null;
+  // A pick without a Bin To Bin can get one (0045); it then pairs with the pick.
+  const addMove = supervisor && t.task_type === "PICK" && canRestore && <AddMoveButton task={t} />;
   // A posted task can be undone and posted again (0034).
-  if (t.status === "COMPLETED") return supervisor && canUndo ? <UnpostButton task={t} /> : null;
+  if (t.status === "COMPLETED") return supervisor && canUndo ? <div className="flex flex-wrap gap-1"><UnpostButton task={t} />{addMove}</div> : null;
   if (t.status !== "PLANNED" || !canPost) return null;
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-wrap gap-2">
+      {addMove}
       {wait ? <WaitNotice wait={wait} /> : <TaskPostDialog task={t} onDone={onDone} />}
       {supervisor && (
         <ConfirmButton size="sm" variant="ghost" title="Batalkan tugas" confirmLabel="Batalkan tugas"
