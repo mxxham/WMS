@@ -2,7 +2,7 @@ import { daysBetween, hasExpiry, isStagingLocation, minShelfLifeDays, type Alloc
 import { selectNextBin, toLedger, type Ledger } from './binselect';
 import { derivePickfaces } from './pickface';
 import { stockIdentityKey } from './ledger';
-import { parseLocation, pickSequenceKey } from './pickpath';
+import { parseLocation, pickSequenceKey, walkPosition } from './pickpath';
 import type {
   AllocationLine,
   AllocationResult,
@@ -353,6 +353,11 @@ export function executionOrder(lines: AllocationLine[], config: AllocatorConfig)
  *   · The bin-to-bin move: when a line breaks a pallet away from the SKU's
  *     pickface and the pickface is below its target, the leftover goes to
  *     the pickface right after the pick (moveQty / moveTo).
+ *   · Overflow: when the pickface is already at/above target and this is the
+ *     last line for the SKU in the run, the leftover goes to the nearest
+ *     empty Level-A bin instead of stranding at the source (one-time move,
+ *     never registered as a dedicated pickface). Falls back to staying when
+ *     no empty Level-A slot exists.
  *   · Sisa (qtyRemainingInBin): what physically stays in the bin once the
  *     line, including its move, is done.
  *
@@ -384,6 +389,70 @@ export function relocateByWaveOrder(
   };
 
   const order = executionOrder(lines, config);
+
+  // ---- Overflow support: nearest empty Level-A when the pickface is full --
+  const overflowLevel = config.pickfaceLevels[0] ?? 'A';
+  const knownBays = new Map<string, { aisle: string; bay: number }>();
+  for (const b of stock) {
+    const p = parseLocation(b.location);
+    if (p && config.rackLocationPattern.test(b.location)) knownBays.set(`${p.aisle}${p.bay}`, { aisle: p.aisle, bay: p.bay });
+  }
+  const pickfaceLocs = new Set([...pickfaces.values()].map((p) => p.location.toUpperCase()));
+  const fixedLocs = new Set(Object.values(config.pickfaceOverrides).map((l) => String(l).toUpperCase()));
+  const blocked = new Set(config.blockedBins.map((l) => String(l).toUpperCase()));
+  const baseOccupied = new Set(
+    stock.filter((b) => b.qtyCartons > 0).map((b) => b.location.toUpperCase()),
+  );
+  const claimedOverflow = new Set<string>();
+  const totalBySku = new Map<string, number>();
+  for (const l of order) totalBySku.set(l.sku, (totalBySku.get(l.sku) ?? 0) + 1);
+  const doneBySku = new Map<string, number>();
+
+  const locHasLiveStock = (loc: string): boolean => {
+    const prefix = `${loc.toUpperCase()}|`;
+    for (const [k, q] of balance) {
+      if (q > 0 && k.toUpperCase().startsWith(prefix)) return true;
+    }
+    return false;
+  };
+
+  const findOverflowSlot = (sourceLoc: string): string | null => {
+    const src = parseLocation(sourceLoc);
+    const srcBayKey = src ? `${src.aisle}${src.bay}` : null;
+    const home = src ? walkPosition({ location: '', aisle: src.aisle, bay: src.bay, level: overflowLevel, position: 1 }, config) : null;
+    const cands: string[] = [];
+    for (const bay of knownBays.values()) {
+      for (let pos = 1; pos <= 2; pos++) {
+        const loc = `${bay.aisle}${String(bay.bay).padStart(2, '0')}${overflowLevel}${String(pos).padStart(2, '0')}`;
+        const up = loc.toUpperCase();
+        if (!config.rackLocationPattern.test(loc)) continue;
+        if (baseOccupied.has(up) || pickfaceLocs.has(up) || fixedLocs.has(up) || blocked.has(up) || claimedOverflow.has(up)) continue;
+        if (up === sourceLoc.toUpperCase()) continue;
+        if (locHasLiveStock(loc)) continue;
+        cands.push(loc);
+      }
+    }
+    if (cands.length === 0) return null;
+    const dist = (loc: string): number => {
+      if (!home) return 0;
+      const p = parseLocation(loc)!;
+      const w = walkPosition({ location: '', aisle: p.aisle, bay: p.bay, level: overflowLevel, position: 1 }, config);
+      return Math.abs(w.lane - home.lane) * 1_000 + Math.abs(w.along - home.along);
+    };
+    const seq = (loc: string): number => {
+      const p = parseLocation(loc)!;
+      return pickSequenceKey(p, config);
+    };
+    cands.sort((a, b) => {
+      const aBay = (() => { const p = parseLocation(a)!; return `${p.aisle}${p.bay}`; })();
+      const bBay = (() => { const p = parseLocation(b)!; return `${p.aisle}${p.bay}`; })();
+      const aHome = srcBayKey !== null && aBay === srcBayKey ? 0 : 1;
+      const bHome = srcBayKey !== null && bBay === srcBayKey ? 0 : 1;
+      return aHome - bHome || dist(a) - dist(b) || seq(a) - seq(b);
+    });
+    return cands[0];
+  };
+
   for (let i = 0; i < order.length;) {
     let j = i;
     while (j < order.length && order[j].shipmentNumber === order[i].shipmentNumber && order[j].waveNo === order[i].waveNo) j++;
@@ -418,6 +487,9 @@ export function relocateByWaveOrder(
     for (const line of rows) {
       const pf = pickfaces.get(line.sku);
       const key = stockIdentityKey(line.location, line.sku, line.batch, line.expiryDate);
+      const done = (doneBySku.get(line.sku) ?? 0) + 1;
+      doneBySku.set(line.sku, done);
+      const isLastForSku = done >= (totalBySku.get(line.sku) ?? 1);
       const before = get(key);
       const sealed = !opened.has(key) && before === line.upp;
       line.breaksPallet = sealed && line.qtyPick < line.upp;
@@ -433,6 +505,20 @@ export function relocateByWaveOrder(
         balance.set(pfKey, get(pfKey) + line.moveQty);
         opened.add(pfKey);
         balance.set(key, 0);
+      } else if (line.breaksPallet && pf && pf.location !== line.location && get(key) > 0
+          && atLocation(pf.location, line.sku) >= pf.targetQtyCartons) {
+        if (isLastForSku) {
+          const slot = findOverflowSlot(line.location);
+          if (slot) {
+            const destKey = stockIdentityKey(slot, line.sku, line.batch, line.expiryDate);
+            line.moveQty = get(key);
+            line.moveTo = slot;
+            balance.set(destKey, get(destKey) + line.moveQty);
+            opened.add(destKey);
+            balance.set(key, 0);
+            claimedOverflow.add(slot.toUpperCase());
+          }
+        }
       }
       line.qtyRemainingInBin = get(key);
     }
