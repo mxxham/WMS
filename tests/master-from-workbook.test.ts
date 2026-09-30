@@ -1,7 +1,7 @@
 /** New SKUs read from the WMS file's master sheets (lib/master-from-workbook.ts). */
 import { strict as assert } from 'node:assert';
 import * as XLSX from 'xlsx';
-import { masterFromWorkbook } from '../lib/master-from-workbook';
+import { allMasterSkus, masterFromWorkbook } from '../lib/master-from-workbook';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -31,6 +31,10 @@ test('only in Master SKU: pallet size used as UPP', () => {
 });
 test('a SKU in neither sheet is left out', () => {
   assert.deepEqual(masterFromWorkbook(wb, ['550000000']), []);
+});
+
+test('all SKUs of both master sheets, once each', () => {
+  assert.deepEqual(allMasterSkus(wb), ['550027044', '550099999']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

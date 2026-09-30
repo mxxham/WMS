@@ -39,3 +39,12 @@ export function masterFromWorkbook(wb: XLSX.WorkBook, skus: string[]): MasterIte
   }
   return out.sort((a, b) => a.sku.localeCompare(b.sku));
 }
+
+/** Every SKU the workbook's MASTER DATA and Master SKU sheets list (SAP numbers only). */
+export function allMasterSkus(wb: XLSX.WorkBook): string[] {
+  const skus = new Set<string>();
+  for (const name of ["MASTER DATA", "Master SKU"]) {
+    for (const r of sheetRows(wb, name)) { const s = text(r["Material"]); if (/^\d{6,12}$/.test(s)) skus.add(s); }
+  }
+  return [...skus].sort();
+}
