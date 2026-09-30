@@ -21,7 +21,7 @@ psql -q -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null
 psql -q -f supabase/tests/01_rls_and_stock_rules.sql >/dev/null 2>&1 || true
 
 tests=("$@")
-[ ${#tests[@]} -eq 0 ] && tests=(supabase/tests/0[2-9]_*.sql supabase/tests/1[0-9]_*.sql)
+[ ${#tests[@]} -eq 0 ] && tests=(supabase/tests/0[2-9]_*.sql supabase/tests/[1-9][0-9]_*.sql)
 status=0
 for t in "${tests[@]}"; do
   if ! out=$(psql -v ON_ERROR_STOP=1 -f "$t" 2>&1); then
