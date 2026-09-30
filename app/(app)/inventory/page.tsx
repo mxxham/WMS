@@ -10,12 +10,14 @@ import { HoldsTab, type HoldRow } from "./tabs/holds-tab";
 import { AccuracyTab, type AccuracyRow, type AdjustmentRow } from "./tabs/accuracy-tab";
 import { ReconTab, type ReconLine, type ReconSummary } from "./tabs/recon-tab";
 import { ApprovalsTab, type RequestRow } from "./tabs/approvals-tab";
+import { EmptyTab, type EmptyBin } from "./tabs/empty-tab";
 
 export const dynamic = "force-dynamic";
 
 const TABS = [
   { key: "stok", label: "Stok" },
   { key: "fefo", label: "Expired & FEFO" },
+  { key: "kosong", label: "Bin kosong" },
   { key: "hold", label: "Hold & karantina" },
   { key: "akurasi", label: "Akurasi & adjustment" },
   { key: "rekonsiliasi", label: "Rekonsiliasi SAP" },
@@ -23,7 +25,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
-type Params = { tab?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string };
+type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string };
 
 /**
  * Inventory control in one place: the stock (with what is reserved and what
@@ -42,7 +44,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     supabase.rpc("inventory_policy"),
   ]);
   const policy = parsePolicy(policyRaw);
-  const tabs = TABS.filter((t) => supervisor || t.key === "stok" || t.key === "fefo")
+  const tabs = TABS.filter((t) => supervisor || t.key === "stok" || t.key === "fefo" || t.key === "kosong")
     .map((t) => ({ ...t, badge: t.key === "persetujuan" ? pending ?? 0 : t.key === "hold" ? holds ?? 0 : undefined }));
 
   return (
@@ -51,6 +53,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <TabsNav base="/inventory" tabs={tabs} active={tab} />
       {tab === "stok" && await stockTab(sp)}
       {tab === "fefo" && await fefoTab(sp, policy.near_expiry_days, policy.default_shelf_life_months)}
+      {tab === "kosong" && <EmptyTab bins={await fetchAll<EmptyBin>((a, b) => supabase.from("empty_bins").select("*").order("bin_code").range(a, b))}
+        near={(sp.near ?? "").trim().toUpperCase()} aisle={sp.aisle ?? ""} level={sp.level ?? ""} />}
       {tab === "hold" && supervisor && await holdTab()}
       {tab === "akurasi" && supervisor && await accuracyTab(policy.ira_target_pct)}
       {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon)}
