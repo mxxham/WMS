@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtNum } from "@/lib/utils";
+import { AddItems } from "./add-items";
 
 export type ItemRow = {
   sku: string; description: string; uom: string | null; upp: number | null; abc_class: string | null;
@@ -30,6 +31,7 @@ export function ItemsClient({ items, defaultShelfLife, defaultMinDispatch }: { i
         Barcode karton dipakai untuk memastikan barang yang benar saat penerimaan, cycle count dan picking. Umur simpan kosong = standar {defaultShelfLife} bulan;
         sisa umur minimum kosong = standar {defaultMinDispatch} hari (Pengaturan → Aturan inventory). {fmtNum(withEan)} dari {fmtNum(items.length)} SKU sudah punya barcode.
       </p>
+      <AddItems existing={items.map((i) => i.sku)} />
       <div className="flex flex-wrap items-end gap-3 rounded-lg bg-white p-4">
         <div className="min-w-64 flex-1"><Label htmlFor="q">Cari</Label><Input id="q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="SKU, deskripsi, barcode" /></div>
         <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />Belum punya barcode</label>
