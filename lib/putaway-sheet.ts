@@ -7,6 +7,8 @@ export type PutawayRow = {
   line: number; // Excel row number
   bin_code: string; sku: string; batch_lot: string; quantity: number | null; expiry_date: string | null;
   error: string | null; // set when the row cannot be sent at all
+  /** set when the row was sent to another bin than the sheet says ("Pindah ke bin lain", 0042) */
+  sheet_bin?: string;
 };
 
 /** Resolution of a conflict, chosen per row by the supervisor. */
