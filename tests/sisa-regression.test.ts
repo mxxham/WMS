@@ -200,7 +200,9 @@ describe('Ordinary single pick', () => {
     relocateByWaveOrder(result.lines, pickfaces, config, stock);
     eq(result.lines.length, 1, 'line count');
     eq(result.lines[0].qtyPick, 3, 'qtyPick');
-    eq(result.lines[0].qtyRemainingInBin, 7, 'sisa');
+    // The rest of a reserve bin comes down to Level A at its last pick (0 stays up, 7 move).
+    eq(result.lines[0].qtyRemainingInBin + result.lines[0].moveQty, 7, 'sisa incl. the move down');
+    eq(result.lines[0].qtyRemainingInBin, 0, 'nothing stays in the reserve bin');
   });
 });
 
@@ -310,7 +312,8 @@ describe('Multiple expiry at same location — independent identities', () => {
     eq(lA.qtyPick, 20, 'batch A pick');
     eq(lA.qtyRemainingInBin, 0, 'batch A sisa');
     eq(lB.qtyPick, 5, 'batch B pick');
-    eq(lB.qtyRemainingInBin, 15, 'batch B sisa');
+    eq(lB.qtyRemainingInBin + lB.moveQty, 15, 'batch B sisa incl. the move down');
+    eq(lB.qtyRemainingInBin, 0, 'batch B: nothing stays in the reserve bin');
   });
 });
 
@@ -676,7 +679,8 @@ describe('Multiple expiry identities at same pickface', () => {
     eq(pfA?.qtyPick, 20, 'B-A from pickface');
     eq(pfA?.qtyRemainingInBin, 0, 'pickface B-A sisa=0 (B-B balance not mixed in)');
     eq(rvA?.qtyPick, 5, 'rest of B-A from reserve');
-    eq(rvA?.qtyRemainingInBin, 15, 'reserve B-A sisa=15');
+    eq((rvA?.qtyRemainingInBin ?? 0) + (rvA?.moveQty ?? 0), 15, 'reserve B-A sisa=15 incl. the move down');
+    eq(rvA?.qtyRemainingInBin, 0, 'reserve B-A: nothing stays up');
   });
 });
 

@@ -353,11 +353,13 @@ export function executionOrder(lines: AllocationLine[], config: AllocatorConfig)
  *   · The bin-to-bin move: when a line breaks a pallet away from the SKU's
  *     pickface and the pickface is below its target, the leftover goes to
  *     the pickface right after the pick (moveQty / moveTo).
- *   · Overflow: when the pickface is already at/above target and this is the
- *     last line for the SKU in the run, the leftover goes to the nearest
- *     empty Level-A bin instead of stranding at the source (one-time move,
- *     never registered as a dedicated pickface). Falls back to staying when
- *     no empty Level-A slot exists.
+ *   · The rest of a reserve pallet (Level B-E) comes down to Level A at the
+ *     LAST pick from that pallet in the run, whether this run opened it or
+ *     it was opened before: to the SKU's pickface while it is below target,
+ *     otherwise (pickface full, or none) to the nearest empty Level-A bin, a
+ *     one-time move never registered as a dedicated pickface. Earlier picks
+ *     from the pallet keep using it. It stays only when no empty Level-A bin
+ *     exists.
  *   · Sisa (qtyRemainingInBin): what physically stays in the bin once the
  *     line, including its move, is done.
  *
@@ -404,9 +406,15 @@ export function relocateByWaveOrder(
     stock.filter((b) => b.qtyCartons > 0).map((b) => b.location.toUpperCase()),
   );
   const claimedOverflow = new Set<string>();
-  const totalBySku = new Map<string, number>();
-  for (const l of order) totalBySku.set(l.sku, (totalBySku.get(l.sku) ?? 0) + 1);
-  const doneBySku = new Map<string, number>();
+  // How many picks of the run still take from each pallet (bin + SKU + batch + expiry, as allocated).
+  const palletOf = new Map(order.map((l) => [l, stockIdentityKey(l.location, l.sku, l.batch, l.expiryDate)]));
+  const picksLeft = new Map<string, number>();
+  for (const k of palletOf.values()) picksLeft.set(k, (picksLeft.get(k) ?? 0) + 1);
+  // A reserve rack bin: a real rack location (not staging / floor) on a level above the pickface levels.
+  const isReserveRack = (loc: string) => {
+    const p = parseLocation(loc);
+    return !!p && config.rackLocationPattern.test(loc) && !config.pickfaceLevels.includes(p.level);
+  };
 
   const locHasLiveStock = (loc: string): boolean => {
     const prefix = `${loc.toUpperCase()}|`;
@@ -487,9 +495,9 @@ export function relocateByWaveOrder(
     for (const line of rows) {
       const pf = pickfaces.get(line.sku);
       const key = stockIdentityKey(line.location, line.sku, line.batch, line.expiryDate);
-      const done = (doneBySku.get(line.sku) ?? 0) + 1;
-      doneBySku.set(line.sku, done);
-      const isLastForSku = done >= (totalBySku.get(line.sku) ?? 1);
+      const pallet = palletOf.get(line)!;
+      picksLeft.set(pallet, (picksLeft.get(pallet) ?? 1) - 1);
+      const lastFromPallet = (picksLeft.get(pallet) ?? 0) <= 0;
       const before = get(key);
       const sealed = !opened.has(key) && before === line.upp;
       line.breaksPallet = sealed && line.qtyPick < line.upp;
@@ -505,19 +513,20 @@ export function relocateByWaveOrder(
         balance.set(pfKey, get(pfKey) + line.moveQty);
         opened.add(pfKey);
         balance.set(key, 0);
-      } else if (line.breaksPallet && pf && pf.location !== line.location && get(key) > 0
-          && atLocation(pf.location, line.sku) >= pf.targetQtyCartons) {
-        if (isLastForSku) {
-          const slot = findOverflowSlot(line.location);
-          if (slot) {
-            const destKey = stockIdentityKey(slot, line.sku, line.batch, line.expiryDate);
-            line.moveQty = get(key);
-            line.moveTo = slot;
-            balance.set(destKey, get(destKey) + line.moveQty);
-            opened.add(destKey);
-            balance.set(key, 0);
-            claimedOverflow.add(slot.toUpperCase());
-          }
+      } else if (lastFromPallet && get(key) > 0 && get(key) < line.upp && isReserveRack(line.location)
+          && !pickfaceLocs.has(line.location.toUpperCase()) && !fixedLocs.has(line.location.toUpperCase())) {
+        // (A pickface keeps its own stock, whatever level it is on.)
+        // Last pick from a reserve pallet: what is left comes down to Level A, never stays up.
+        const toPickface = pf && pf.location !== line.location && atLocation(pf.location, line.sku) < pf.targetQtyCartons;
+        const dest = toPickface ? pf!.location : findOverflowSlot(line.location);
+        if (dest) {
+          const destKey = stockIdentityKey(dest, line.sku, line.batch, line.expiryDate);
+          line.moveQty = get(key);
+          line.moveTo = dest;
+          balance.set(destKey, get(destKey) + line.moveQty);
+          opened.add(destKey);
+          balance.set(key, 0);
+          if (!toPickface) claimedOverflow.add(dest.toUpperCase());
         }
       }
       line.qtyRemainingInBin = get(key);

@@ -60,7 +60,10 @@ export function checkPicklistRun(run: PipelineResult, stock: StockBin[], demand:
     if (l.pickType === 'PALLET') assert.equal(l.qtyPick % l.upp, 0, `${row}: PALLET row of ${l.qtyPick} with UPP ${l.upp}`);
     if (l.breaksPallet) assert.ok(l.qtyPick < l.upp, `${row}: opens a pallet but picks ${l.qtyPick} of ${l.upp}`);
     if (l.moveTo) {
-      assert.ok(l.breaksPallet, `${row}: Bin To Bin without opening a pallet`);
+      // A move follows a pallet this row opens, or the last pick from an already-opened reserve pallet.
+      const from = parseLocation(l.location);
+      assert.ok(l.breaksPallet || (from && config.rackLocationPattern.test(l.location) && !config.pickfaceLevels.includes(from.level)),
+        `${row}: Bin To Bin from ${l.location}, not a reserve rack bin it opened`);
       assert.notEqual(l.moveTo, l.location, `${row}: Bin To Bin to itself`);
       assert.equal(l.moveQty, left, `${row}: carries the whole leftover`);
       assert.equal(l.qtyRemainingInBin, 0, `${row}: nothing stays once moved`);
@@ -72,8 +75,12 @@ export function checkPicklistRun(run: PipelineResult, stock: StockBin[], demand:
         let held = 0;
         for (const [bk, bq] of bal) if (bk.startsWith(`${l.moveTo}|`)) held += bq;
         assert.equal(held, 0, `${row}: overflow Bin To Bin ${l.moveTo} lands on an occupied bin`);
-        const onPf = atLocation(pf!.location, l.sku);
-        assert.ok(onPf >= pf!.targetQtyCartons, `${row}: overflow while pickface ${pf!.location} below target (${onPf}/${pf!.targetQtyCartons})`);
+        const src = parseLocation(l.location);
+        assert.ok(src && !config.pickfaceLevels.includes(src.level), `${row}: overflow from ${l.location}, already a Level-A bin`);
+        if (pf) {
+          const onPf = atLocation(pf.location, l.sku);
+          assert.ok(onPf >= pf.targetQtyCartons, `${row}: overflow while pickface ${pf.location} below target (${onPf}/${pf.targetQtyCartons})`);
+        }
       }
     } else if (l.breaksPallet && left > 0 && pf && pf.location !== l.location) {
       const onPf = atLocation(pf.location, l.sku);
