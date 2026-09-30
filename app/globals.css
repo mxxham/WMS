@@ -3,7 +3,10 @@
 @tailwind utilities;
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  /* The app is light only: tell the browser, so native parts (select lists, date pickers,
+     scrollbars) are not drawn dark on a phone in dark mode, with dark text on black. */
+  html { -webkit-text-size-adjust: 100%; color-scheme: light; }
+  select option, select optgroup { background-color: #fff; color: #1B2B25; }
   body { @apply bg-paper text-steel font-sans antialiased; }
   :focus-visible { @apply outline outline-2 outline-offset-2 outline-ckb; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
