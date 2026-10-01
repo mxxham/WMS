@@ -20,6 +20,12 @@
 
 <p align="center"><b>bin labels · scan · 3D · FEFO allocation · picklist · waves</b></p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/docs/screenshots/warehouse-3d.png" alt="The Gudang 3D page: the warehouse drawn as rows of racks, each rack stacked with five levels of bins, colour-coded by stock state, with the navigation and the colour legend in view" />
+</p>
+
+<p align="center"><sub><b><code>Gudang 3D</code></b> — the whole warehouse in one instanced mesh, drawn only while the camera moves. The legend switches the colour mode: ABC class, stock utilisation, or expiry state. Click a box for its bin detail.</sub></p>
+
 ---
 
 > Bin location barcode labels, scanning, 3D stock visualisation, **FEFO allocation, picklists, and wave execution** for the Shell lubricant warehouse — one application, one database, one stock ledger.
@@ -455,8 +461,8 @@ Test: `supabase/tests/14`–`22`, plus `tests/carry-over.test.ts`, `tests/pair-m
 
 **Not yet:**
 
-- [ ] Testing against the production Supabase project (already tested on local Supabase) and the UI in a real browser.
-- [ ] The 3D view in a browser (WebGL is not available in the sandbox).
+- [ ] Testing against the production Supabase project (already tested on local Supabase).
+- [ ] The 3D view on a real GPU and on an operator's phone or tablet. It does render in a browser — the screenshot above was captured from a real Chromium against local Supabase, using software WebGL — but not yet on physical hardware.
 - [ ] Physical printing on the warehouse printer and scanning with an operator's phone.
 
 ---
