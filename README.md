@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/public/k-one-logo.png" width="88" alt="CKB Warehouse logo" />
-</p>
+
 
 <h1 align="center">WMS — CKB Warehouse</h1>
 
