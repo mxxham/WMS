@@ -1,83 +1,97 @@
+<div align="center">
 
+<img src="public/k-one-logo.png" width="120" alt="K-one logo" />
 
-<h1 align="center">WMS — CKB Warehouse</h1>
+# K-one · CKB Warehouse WMS
 
-<p align="center"><b>PT Cipta Krida Bahari · WSM SUB 2 Surabaya</b><br />Shell lubricant warehouse</p>
+**PT Cipta Krida Bahari · WSM SUB 2 Surabaya** — Shell lubricant warehouse
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Next.js-15-000000" alt="Next.js 15" />
-  <img src="https://img.shields.io/badge/React-19-087ea4" alt="React 19" />
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6" alt="TypeScript 5" />
-  <img src="https://img.shields.io/badge/Tailwind-3-38BDF8" alt="Tailwind CSS 3" />
-  <img src="https://img.shields.io/badge/Supabase-3FCF8E" alt="Supabase" />
-  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1" alt="PostgreSQL 16" />
-  <img src="https://img.shields.io/badge/Three.js-0.186-black" alt="Three.js" />
-  <img src="https://img.shields.io/badge/Lucide-F565B3" alt="Lucide" />
-  <img src="https://img.shields.io/badge/version-2.0.0-orange" alt="v2.0.0" />
-</p>
+Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · audits<br />
+<sub>One application, one database, one stock ledger.</sub>
 
-<p align="center"><b>bin labels · scan · 3D · FEFO allocation · picklist · waves</b></p>
+<br />
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/docs/screenshots/warehouse-3d.png" alt="The Gudang 3D page: the warehouse drawn as rows of racks, each rack stacked with five levels of bins, colour-coded by stock state, with the navigation and the colour legend in view" />
-</p>
+![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-19-087EA4?style=flat-square&logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_16-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-0.186-000000?style=flat-square&logo=threedotjs&logoColor=white)
+![Version](https://img.shields.io/badge/version-2.0.0-F97316?style=flat-square)
 
-<p align="center"><sub><b><code>Gudang 3D</code></b> — the whole warehouse in one instanced mesh, drawn only while the camera moves. The legend switches the colour mode: ABC class, stock utilisation, or expiry state. Click a box for its bin detail.</sub></p>
-
----
-
-> Bin location barcode labels, scanning, 3D stock visualisation, **FEFO allocation, picklists, and wave execution** for the Shell lubricant warehouse — one application, one database, one stock ledger.
-
-**The application UI is in Indonesian.** Page, menu, and button names are quoted verbatim in `backticks` so the instructions below match what is on screen. Everything around them is English.
-
-<p align="center">
-
-[![Features](https://img.shields.io/badge/Features-2563EB?style=for-the-badge)](#features)
-[![Key numbers](https://img.shields.io/badge/Key_numbers-0F766E?style=for-the-badge)](#key-numbers)
-[![Test status](https://img.shields.io/badge/Test_status-16A34A?style=for-the-badge)](#5-tested--not-yet-tested)
+[![Features](https://img.shields.io/badge/Features-0F172A?style=for-the-badge)](#features)
+[![Daily routine](https://img.shields.io/badge/Daily_routine-0F766E?style=for-the-badge)](#daily-routine)
 [![Setup](https://img.shields.io/badge/Setup-B45309?style=for-the-badge)](#2-setup)
 [![Phases](https://img.shields.io/badge/Phases-6D28D9?style=for-the-badge)](#3-phase-by-phase-files-commands-how-to-test)
 [![Design decisions](https://img.shields.io/badge/Design_decisions-9333EA?style=for-the-badge)](#4-design-decisions-for-the-internship-report)
-[![Notes](https://img.shields.io/badge/Notes-475569?style=for-the-badge)](#6-technical-notes)
+[![Test status](https://img.shields.io/badge/Test_status-16A34A?style=for-the-badge)](#5-tested--not-yet-tested)
 
-</p>
+<br />
 
-## Key numbers
+<img src="docs/screenshots/warehouse-3d.png" alt="The Gudang 3D page: the warehouse drawn as rows of racks, each rack stacked with five levels of bins, colour-coded by stock state, with the navigation and the colour legend in view" />
 
-<p align="center">
+<sub><b><code>Gudang 3D</code></b> — the whole warehouse in one instanced mesh, drawn only while the camera moves. The legend switches the colour mode: ABC class, stock utilisation, or expiry state. Click a box for its bin detail.</sub>
 
-| Bins | SKUs | Stock rows | Total cartons | Allocated | Waves |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| **2,570** | **106** | **1,790** | **52,078** | **1,293** | **8** / 51 tasks |
+</div>
 
-</p>
+---
+
+> [!NOTE]
+> **The application UI is in Indonesian.** Page, menu, and button names are quoted verbatim in `backticks` so the instructions below match what is on screen. Everything around them is English.
+
+## At a glance
+
+<div align="center">
+
+| Bins | SKUs | Stock rows | Cartons | Migrations | SQL tests | TS test files |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **2,570** | **106** | **1,790** | **52,078** | **55** | **31** | **33** |
+
+<sub>Stock figures are the seed (24 Sep 2026 WMS file). Aisles CA–CF; aisle CG does not exist.</sub>
+
+</div>
 
 ## Features
 
-| Feature | What it does |
-|---|---|
-| **Labels** | Rack column strips A–E, 80 × 85 mm cells, vector QR + Code 128 |
-| **Scan** | Camera or USB/Bluetooth scanner, auto-focus, submits on Enter |
-| **3D** | 2,570 bins in one draw call, render on demand |
-| **FEFO** | `planning_stock`, reservation, safe re-plan |
-| **Waves** | Idempotent posting, `movements` ledger |
-| **Putaway** | Sheet import, per-row conflict decisions, safe to re-upload |
-| **Pickface** | One fixed pick bin per SKU, auto-suggested and then locked |
-| **Cycle count** | Blind counts, recount by a second person, accuracy tracking |
-| **Inventory control** | Stock holds, reason codes, four-eyes approval, receiving, SAP reconciliation, FEFO compliance |
-| **Audits** | Blind picking audit in staging and at the rack, putaway audit, WMS-file audit |
-| **Corrections** | Undo a posting, split a pick, redirect a move, add items to an open wave |
+<table>
+<tr><th align="left">Area</th><th align="left">What it does</th></tr>
+<tr><td><b>Labels</b></td><td>Rack column strips A–E, 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
+<tr><td><b>Scan</b></td><td>Phone camera or USB/Bluetooth scanner, always focused, submits on Enter</td></tr>
+<tr><td><b>3D warehouse</b></td><td>2,570 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
+<tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>
+<tr><td><b>Waves</b></td><td>Idempotent posting into the <code>movements</code> ledger; pick and its Bin To Bin as one line; the rest of an opened pallet named on both rows (<code>CF40A01 (dipindah NO 6)</code>)</td></tr>
+<tr><td><b>Corrections</b></td><td><code>Ubah baris</code>, <code>Perbaiki</code> (one-tap fix for a <code>stok kurang</code> row), <code>Pecah</code>, <code>Batalkan posting</code> (also pick only), <code>Posting Bin To Bin saja</code>, <code>Tambah item</code> / <code>Tambah order</code></td></tr>
+<tr><td><b>Putaway & pickfaces</b></td><td>Sheet import with per-row conflict decisions; one fixed pick bin per SKU</td></tr>
+<tr><td><b>Inventory control</b></td><td>Holds, reason codes, four-eyes approval, blind cycle counts, receiving, SAP reconciliation, FEFO compliance, <code>Laporan WMS harian</code> (on hand and remain per day)</td></tr>
+<tr><td><b>Audits</b></td><td>Blind picking audit in staging and at the rack, putaway audit, WMS-file audit; a shipment loads only when every line passes</td></tr>
+</table>
 
-Full allocation rules: **`docs/ALLOCATOR.md`** · Inventory control: **`docs/INVENTORY_CONTROL.md`** · Verification status: section [5](#5-tested--not-yet-tested) · Data issues: **`docs/DATA_ISSUES.md`** · Column mapping: **`docs/DATA_MAPPING.md`**
+Full allocation rules: **`docs/ALLOCATOR.md`** · Inventory control: **`docs/INVENTORY_CONTROL.md`** · Data issues: **`docs/DATA_ISSUES.md`** · Column mapping: **`docs/DATA_MAPPING.md`**
 
 <details>
 <summary><b>Label sample — 203 dpi print output</b></summary>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mxxham/WMS/integrate-bin-system/docs/label-samples/contoh-strip-203dpi.png" width="260" alt="Sample A–E rack label strip, 203 dpi" />
+  <img src="docs/label-samples/contoh-strip-203dpi.png" width="260" alt="Sample A–E rack label strip, 203 dpi" />
 </p>
 
 </details>
+
+## Daily routine
+
+The order matters: an open wave of an earlier day still reserves stock and brings in Bin To Bin moves, and a database plan made around it does not match the floor.
+
+| When | Do | Where |
+|---|---|---|
+| **1. Morning, before anything** | Close every wave of an earlier date: `Selesaikan wave` if it shipped, `Batalkan` if not. `Tunda` only for an order that really comes back. | `Wave` (Alokasi warns and lists them) |
+| **2. After inbound / putaway** | Import the day's WMS file with **`Ganti seluruh stok`** | `Import` |
+| **3. Plan** | Run the day from the database or from the WMS file, review, save | `Alokasi` |
+| **4. Pick** | Post what physically happened, when it happened. A row that differs: `Berbeda`. A row in `stok kurang`: `Perbaiki`. | `Wave` |
+| **5. Count** | Finish the count tasks opened by short picks the same day | `Cycle count` |
+| **6. End of day** | Download on hand and remain for SAP | `Inventory` → `Stok` → `Laporan WMS harian` |
+
+> [!IMPORTANT]
+> **Post only what happened.** `Posting Bin To Bin saja` records that the pallet rest is now in the pickface; pressing it to unblock another wave while the pallet stays put makes the system disagree with the floor.
 
 ---
 
@@ -95,7 +109,7 @@ The values below are **assumptions**. Change each one in the single file or menu
 | 3 | 1 rack bin = 1 pallet (capacity 1) | `bins.capacity` |
 | 4 | Rack dimensions for 3D (bay 2.7 m, level 1.6 m, depth 1.2 m, aisle 3.2 m) are **placeholders**. The rack layout itself is confirmed: back-to-back blocks, racks 01–20 on the left face, 21–40 on the right face (21 directly behind 01), with a walking lane between one block's right face and the next block's left face | `Pengaturan` (`Rak per sisi` = 20); pick route: `lib/allocator/config.ts` → `baysPerSide` |
 | 5 | ABC classes derived from 91 K_ONE picking rows: **provisional** | `Pengaturan` → `Hitung ulang` (after at least 1 month of picking data) |
-| 6 | Aisle **CG** is missing from the `warehouse mapping` status table and was imported as active | `Pengaturan` → `Status & kelas bin` |
+| 6 | ~~Aisle **CG** is missing from the `warehouse mapping` status table and was imported as active~~ **Settled 5 Oct 2026:** CG does not exist (racks stop at CF); its 400 template bins are blocked (`0054`) and the engine ignores CG | `0054_block_aisle_cg.sql`, `rackLocationPattern` in `lib/allocator/config.ts` |
 | 7 | Racks CC19, CC20, CE33 are missing from the data (columns or pillars?) | check on site |
 | 8 | "Near expiry" threshold = 90 days | `config/warehouse.ts` → `NEAR_EXPIRY_DAYS` |
 | 9 | Shell lubricant shelf life = **48 months** from the production date encoded in the batch code (matches 97% of the 24 Sep batches); SKUs with a different shelf life are entered by hand | `Pengaturan` → `Aturan inventory`; per SKU in `Master item` |
@@ -118,7 +132,7 @@ The values below are **assumptions**. Change each one in the single file or menu
 ### 2.1 Supabase
 
 1. Create a project at supabase.com (Singapore region).
-2. Apply the migrations in filename order. The set is 48 files, `supabase/migrations/0001_schema.sql` through `supabase/migrations/0048_add_wave_items.sql`; use the CLI rather than the SQL Editor so nothing is skipped or run twice:
+2. Apply the migrations in filename order. The set is 55 files, `supabase/migrations/0001_schema.sql` through `supabase/migrations/0055_wms_day_report.sql`; use the CLI rather than the SQL Editor so nothing is skipped or run twice:
    ```bash
    supabase link --project-ref <ref>
    supabase db push
@@ -167,6 +181,14 @@ psql -f supabase/tests/19_add_relocation.sql             # add relocation (0045)
 psql -f supabase/tests/20_split_task.sql                 # split task (0046), same
 psql -f supabase/tests/21_change_relocation.sql          # change relocation (0047), same
 psql -f supabase/tests/22_add_wave_items.sql             # add wave items (0048), same
+psql -f supabase/tests/23_change_pick_bin.sql            # change pick bin (0049), same
+psql -f supabase/tests/24_change_pick_bin_batch.sql      # pick bin follows batch/expiry (0050), same
+psql -f supabase/tests/25_add_wave_items_edits.sql       # Tambah item follows the printed picklist (0051), same
+psql -f supabase/tests/26_edit_pick_row.sql              # Ubah baris (0052), same
+psql -f supabase/tests/27_unpost_pick_keep_move.sql      # Batalkan posting, pick only (0034/0035), same
+psql -f supabase/tests/28_post_move_early.sql            # Posting Bin To Bin saja (0053), same
+psql -f supabase/tests/29_block_aisle_cg.sql             # aisle CG blocked (0054), same
+psql -f supabase/tests/30_wms_day_report.sql             # Laporan WMS harian (0055), same
 ```
 Or all of them at once against a temporary local database: `scripts/sql-test.sh`.
 
@@ -305,7 +327,7 @@ Pages: **`Audit picking`** (per shipment, per rack, per WMS file, plus an accura
 
 Test: `supabase/tests/10`–`13`, `tests/pick-audit.test.ts`, `tests/sheet-audit-export.test.ts`, `tests/putaway-audit-export.test.ts`.
 
-### Phase 12 — Wave corrections and floor exceptions (`0033`–`0048`)
+### Phase 12 — Wave corrections, floor exceptions and daily reporting (`0033`–`0055`)
 
 Everything here exists because of something that happened on the floor; each migration header records the real case.
 
@@ -322,8 +344,17 @@ Everything here exists because of something that happened on the floor; each mig
 - `0045` **`Tambah Bin To Bin`** adds a move for what a pick leaves behind when the plan had none; `0047` **`Ubah Bin To Bin`** sends an open move to a different destination.
 - `0046` **`Pecah`** splits an open pick in two so each part can be posted from its own bin.
 - `0048` **`Tambah item`** allocates more cartons of a SKU, or a new SKU, onto a wave that already exists.
+- `0049` **`Ubah Bin Pick`** lets a supervisor re-point an open pick to a different source bin, and the paired `Bin To Bin` takes the same source while the move's destination and the pick's batch, expiry and quantity are never changed.
+- `0050` the re-point follows batch and expiry: the suggestion lists every bin + batch + expiry row with its free stock, and a target bin that does not hold the resulting identity is refused instead of landing in `stok kurang`.
+- `0051` **`Tambah item`** rows can follow the printed picklist before saving: any source bin (a later expiry is a warning, not a block), any `Bin To Bin` destination and sisa, also on a line the engine planned none. A changed source recomputes the sisa from that bin. Every changed row needs a name and a reason and is logged planned → saved; a source bin that does not hold the batch + expiry, or a blocked bin, is refused.
+- `0052` **`Ubah baris`** replaces `Ubah Bin Pick`, `Tambah Bin To Bin` and `Ubah Bin To Bin` on open rows: one dialog sets the pick's source (any bin, any batch; a later expiry is warned) and its `Bin To Bin` (change, add or remove) in one transaction with one name, reason and log line. An open row shows only `Posting` and `⋯`; `Ubah baris`, `Pecah` and `Batal` sit behind `⋯`, and `Batal` no longer asks for confirmation (`Pulihkan` undoes it).
+- `0053` **`Posting Bin To Bin saja`** posts one open move without its pick, also on a wave in `Tunda`, so a later wave waiting on that pickface (`Tunggu relokasi`) can go on while the delayed wave keeps its pick open. The button sits in the waiting row's notice and in the pick + Bin To Bin row's `⋯` menu. `Batalkan posting` on such a row can also undo the pick alone (`Pick saja`) when the rest in the pickface is already used by other waves.
+- `0054` aisle **CG** does not exist: its 400 template bins from the WMS sheet are blocked, so they leave `Bin kosong` and are refused as targets; a later import keeps them blocked.
+- `0055` **`Laporan WMS harian`** rebuilds, for any date, the WMS sheet's on hand (after inbound and putaway, before picking) and remain (after picking, the next day's on hand) per bin from the movements ledger: `Remain = On hand − PICK − b out + b in` on every row, an undone pick counted as un-picking. Downloads as Excel with a per-SKU sheet for SAP.
 
-Test: `supabase/tests/14`–`22`, plus `tests/carry-over.test.ts`, `tests/pair-moves.test.ts`, `tests/pickpath.test.ts`.
+Page-level tools in the same phase, no migration of their own: **`Perbaiki`** on a `stok kurang` row proposes the smallest fix in one sentence (shrink the Bin To Bin, or the bin the engine's own `selectNextBin` picks from current free stock) and saves it through `Ubah baris`; the Bin To Bin column names where an opened pallet's rest goes when another wave moves it; cancelled rows hide behind `Tampilkan dibatalkan`; `Alokasi` and `Import` warn about open waves of earlier dates.
+
+Test: `supabase/tests/14`–`30`, plus `tests/carry-over.test.ts`, `tests/wave-edits.test.ts`, `tests/wave-fix.test.ts`, `tests/pair-moves.test.ts`, `tests/pickpath.test.ts`.
 
 ---
 
@@ -427,8 +458,8 @@ Test: `supabase/tests/14`–`22`, plus `tests/carry-over.test.ts`, `tests/pair-m
 <details>
 <summary><b>Corrections instead of new plans</b></summary>
 
-- **The floor is right more often than the plan.** Every correction in `0033`–`0048` exists because a picker found something the plan had not foreseen: short picks, stock in the wrong bin, a full destination, a growing order.
-- **Corrections are separate, named actions** — `Batalkan posting`, `Pecah`, `Tambah Bin To Bin`, `Ubah Bin To Bin`, `Tambah item` — rather than hidden parameters, so the reason is obvious at the moment it is used.
+- **The floor is right more often than the plan.** Every correction in `0033`–`0055` exists because a picker found something the plan had not foreseen: short picks, stock in the wrong bin, a full destination, a growing order.
+- **Corrections are separate, named actions** — `Batalkan posting`, `Pecah`, `Tambah Bin To Bin`, `Ubah baris`, `Tambah item` — rather than hidden parameters, so the reason is obvious at the moment it is used.
 - **Nothing is silently rewritten.** An undone posting puts the stock back exactly as the posting took it, and both rows stay in the ledger.
 
 </details>
@@ -453,8 +484,8 @@ Test: `supabase/tests/14`–`22`, plus `tests/carry-over.test.ts`, `tests/pair-m
 - [x] Import of the real WMS file: 2,614 rows in, re-import after the seed gives 0 movements.
 - [x] Labels: exact page sizes (80 × 85 mm and 80 × 469 mm); QR and Code 128 read by zbar from the 203 dpi render.
 - [x] `tsc`, ESLint, and `next build` pass.
-- [x] SQL test suite: `supabase/tests/00_local_auth_stub.sql`–`supabase/tests/22_add_wave_items.sql` (23 files), covering the stock rules and RLS, the allocation flow, rolling execution, putaway import, pickfaces, counts and corrections, audits, stock fixes, inventory control, picking, rack and putaway audits, the WMS-file audit, relocations, parked-wave carry-over, the pick order guard, picks found in another bin, putaway redirect, and add/change relocation.
-- [x] TypeScript suite: `npm test` runs 31 test files (515 tests, 0 failures), including the FEFO engine, leftover and FEFO regression, the daily workflow, pickface behaviour, pick path, stress runs on the real workbooks, database-versus-workbook stock parity, batch-code decoding, minimum shelf life, SAP stock, and the audit exports.
+- [x] SQL test suite: `supabase/tests/00_local_auth_stub.sql`–`supabase/tests/30_wms_day_report.sql` (31 files), covering the stock rules and RLS, the allocation flow, rolling execution, putaway import, pickfaces, counts and corrections, audits, stock fixes, inventory control, picking, rack and putaway audits, the WMS-file audit, relocations, parked-wave carry-over, the pick order guard, picks found in another bin, putaway redirect, add/change relocation and pick bin, batch/expiry-aware pick-bin changes, Tambah item edits, Ubah baris, pick-only undo, Posting Bin To Bin saja, the aisle-CG block, and the daily WMS report.
+- [x] TypeScript suite: `npm test` runs 33 test files, 0 failures, including the FEFO engine, leftover and FEFO regression, the daily workflow, pickface behaviour, pick path, stress runs on the real workbooks, database-versus-workbook stock parity, batch-code decoding, minimum shelf life, SAP stock, and the audit exports, Tambah item edits, and Perbaiki proposals.
 - [x] End-to-end on local Supabase (Auth + PostgREST, supervisor and operator accounts): the 24 Sep file → 1,790 stock rows → allocation of 1,293 cartons → 8 waves / 51 tasks → all waves completed by the operator → stock 52,078 → 50,785, with every ledger row in the operator's name.
 
 **Not yet:**
@@ -472,4 +503,4 @@ Test: `supabase/tests/14`–`22`, plus `tests/carry-over.test.ts`, `tests/pair-m
 - Movement filter dates use WIB (UTC+7).
 - **Explicit grants (`0005`).** New Supabase projects no longer grant SELECT/INSERT/EXECUTE to `authenticated` by default; without `0005` every query fails with "permission denied". Safe to run on an existing project.
 - Old allocator audit documents live in `docs/archive/allocator/` and refer to code that has since been replaced.
-- The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0048_add_wave_items.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).
+- The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0055_wms_day_report.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).
