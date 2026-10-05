@@ -55,6 +55,7 @@ for (const [file, asOf] of [
   const db = inventoryToStock(wb.stock.map(toRow), config);
 
   await test(`${asOf}: every workbook bin survives the round trip`, () => {
+    // Phantom racks (blockedBins) hold no stock in these fixtures, so all bins must survive.
     assert.equal(db.stock.length, wb.stock.length);
     assert.deepEqual(db.stock.map((b) => b.binId).sort(), wb.stock.map((b) => b.binId).sort());
   });

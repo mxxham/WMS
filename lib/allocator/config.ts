@@ -111,13 +111,25 @@ export const DEFAULT_CONFIG: AllocatorConfig = {
   preferOpenPalletForRemainder: true,
   bestFitOpenPallets: true,
 
-  // CA01A01 → aisle CA, bay 01, level A, position 01
-  rackLocationPattern: /^C[A-G]\d{2}[A-E]\d{2}$/,
+  // CA01A01 → aisle CA, bay 01, level A, position 01. Racks stop at CF: aisle CG
+  // is only template rows in the WMS sheet (400, all empty), confirmed 5 Oct 2026.
+  rackLocationPattern: /^C[A-F]\d{2}[A-E]\d{2}$/,
   excludedLocations: ['STAGING', 'STAGING_INB', 'STAGING_OUT', 'Quarantine', 'QUARANTINE'],
   stagingLocations: ['STAGING', 'STAGING_OUT'],
   stagingLanePattern: /^STG_\d{2}$/,
   pickableStatuses: ['Aktif', 'AKTIF', 'ACTIVE'],
-  blockedBins: [],
+  /**
+   * Phantom racks confirmed non-existent on the floor (tiang/pilar):
+   * full CE33 row + CE32 position 02 + CE34 position 01.
+   * DB rows deleted; listed here so the engine never picks from
+   * nor relocates (bin-to-bin) into these codes, whatever the stock source.
+   */
+  blockedBins: [
+    'CE33A01', 'CE33A02', 'CE33B01', 'CE33B02', 'CE33C01',
+    'CE33C02', 'CE33D01', 'CE33D02', 'CE33E01', 'CE33E02',
+    'CE32A02', 'CE32B02', 'CE32C02', 'CE32D02', 'CE32E02',
+    'CE34A01', 'CE34B01', 'CE34C01', 'CE34D01', 'CE34E01',
+  ],
 
   aisleSequence: ['CA', 'CB', 'CC', 'CD', 'CE', 'CF', 'CG'],
   baysPerSide: 20,
