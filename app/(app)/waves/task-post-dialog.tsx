@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -7,6 +7,8 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { ItemScanInput } from "@/components/app/item-scan-input";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
+import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
+import { DEFAULT_CONFIG } from "@/lib/allocator/config";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 
 type Source = { bin_code: string; batch_lot: string; expiry_date: string | null; quantity: number };
@@ -29,6 +31,31 @@ const GROUPS: { key: Fefo; label: string }[] = [
   { key: "later", label: "Expired lebih lama (melanggar FEFO)" },
   { key: "none", label: "Tanpa tanggal expired" },
 ];
+
+type Target = { bin: string; note: string };
+
+/** Where a pick's leftover can go: the SKU's pickface, then the nearest empty Level-A bins (0045). */
+async function moveTargets(from: string, sku: string): Promise<Target[]> {
+  const db = createClient();
+  const [{ data: pf }, { data: empty }] = await Promise.all([
+    db.from("pickface_detail").select("bin_code").eq("sku", sku),
+    db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
+  ]);
+  const src = parseBin(from);
+  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[]).filter((b) => !DEFAULT_CONFIG.blockedBins.includes(b.bin_code))
+    .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
+    .map(({ b }) => ({ bin: b.bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
+  const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from)
+    .map((p) => ({ bin: p.bin_code, note: "pickface SKU ini" }));
+  return [...pfs, ...near].filter((t) => t.bin !== from);
+}
+
+/** The move qty while typing: a number inside 0..max. Empty (or 0) means "no move". */
+function clampQty(v: string, max: number): string {
+  if (v.trim() === "") return "";
+  const q = Number(v);
+  return Number.isFinite(q) ? String(Math.min(Math.max(q, 0), max)) : "";
+}
 
 /**
  * Confirms one task. Default: done exactly as planned. "Berbeda" records
@@ -61,6 +88,12 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [scanned, setScanned] = useState<string | null>(null);
   // Scan rules: whether this SKU has a barcode and whether the policy requires the scan.
   const [scanRule, setScanRule] = useState<{ hasEan: boolean; required: boolean } | null>(null);
+  // Optional Bin To Bin (0045) offered with the pick: where what the chosen source keeps goes.
+  const [moveTo, setMoveTo] = useState("");
+  const [moveQty, setMoveQty] = useState("");
+  const [moveSuggest, setMoveSuggest] = useState<Target[]>([]);
+  const [moveLoaded, setMoveLoaded] = useState(false);
+  const moveTouched = useRef(false);
   // Relocation of a broken pallet's rest: what is really left of this batch in the bin now (0033).
   const relocate = t.task_type !== "PICK";
   const [left, setLeft] = useState<number | null>(null);
@@ -111,14 +144,30 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
 
   async function submit() {
     setBusy(true); setError(null);
+    // The optional Bin To Bin runs only after the pick itself posted: the pick is
+    // never rolled back for it, and a failure here is reported, never swallowed.
+    const dest = moveTo.trim().toUpperCase();
+    const moveQtyN = Math.min(Math.max(Number(moveQty) || 0, 0), leftover);
+    const doMove = showMove && moveQtyN > 0 && /^[A-Z0-9_]{3,20}$/.test(dest) && dest !== srcBin;
+    async function afterPost() {
+      if (!doMove) { setBusy(false); setOpen(false); onDone(); return; }
+      const { error: moveErr } = await createClient().rpc("add_relocation", {
+        p_task_id: t.id, p_to_bin: dest, p_qty: moveQtyN, p_by_name: person, p_reason: reason.trim(),
+      });
+      setBusy(false);
+      if (moveErr) {
+        setError(`Pick sudah diposting, Bin To Bin gagal: ${moveErr.message}`);
+        onDone();
+        return;
+      }
+      setOpen(false); onDone();
+    }
     if (different && source === "other") {
       const { error } = await createClient().rpc("post_task_found_elsewhere", {
         p_task_id: t.id, p_bin: otherBin.trim().toUpperCase(), p_qty: Number(qty), p_reason: reason.trim(), p_by_name: person, p_scanned: scanned,
       });
-      setBusy(false);
-      if (error) return setError(error.message);
-      setOpen(false); onDone();
-      return;
+      if (error) { setBusy(false); return setError(error.message); }
+      return afterPost();
     }
     const args: Record<string, unknown> = { p_task_id: t.id, p_by_name: person, p_scanned: scanned };
     if (different) {
@@ -128,9 +177,8 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
       args.p_reason = reason.trim();
     }
     const { error } = await createClient().rpc("post_task_by", args);
-    setBusy(false);
-    if (error) return setError(error.message);
-    setOpen(false); onDone();
+    if (error) { setBusy(false); return setError(error.message); }
+    return afterPost();
   }
 
   const fefo = (sources ?? []).map((s, i) => fefoOf(s, t.expiry_date, i === 0));
@@ -144,12 +192,42 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   // A pick takes at most the planned cartons; a relocation at most what the chosen bin holds.
   const maxQty = relocate ? Number(sources?.[Number(source)]?.quantity ?? left ?? t.quantity) : Number(t.quantity);
   const wrongItem = scanned !== null && scanned !== t.sku;
+  // Optional Bin To Bin: only a PICK, only when the chosen source keeps something after this pick.
+  const srcBin = source === "other" ? otherBin.trim().toUpperCase() : (chosen?.bin_code ?? "");
+  const haveLeft = source === "other" ? otherHave : (chosen ? Number(chosen.quantity) : null);
+  const leftover = haveLeft === null || !Number.isFinite(n) ? 0 : Math.max(haveLeft - n, 0);
+  const showMove = !relocate && different && n > 0 && leftover > 0;
+  const moveDest = moveTo.trim().toUpperCase();
+  const moveN = Number(moveQty);
+  const wantsMove = showMove && Number.isFinite(moveN) && moveN > 0;
+  const moveDestErr = !wantsMove ? null
+    : !moveDest ? "Isi bin tujuan, atau kosongkan jumlah sisa."
+    : moveDest === srcBin ? `Bin tujuan sama dengan bin asal ${srcBin}.`
+    : !/^[A-Z0-9_]{3,20}$/.test(moveDest) ? "Format bin tujuan tidak valid (huruf, angka, atau _)." : null;
   const invalid = (different && (!Number.isFinite(n) || n < 0 || n > maxQty || !reason.trim()))
     || (different && source === "other" && (otherHave === null || n <= 0))
-    || person.trim().length < 2 || wrongItem || (!!scanRule?.required && scanned !== t.sku);
+    || person.trim().length < 2 || wrongItem || (!!scanRule?.required && scanned !== t.sku)
+    || moveDestErr !== null
+    || (showMove && moveQty.trim() !== "" && !Number.isFinite(moveN))
+    || (wantsMove && moveN > leftover);
+
+  // The move qty follows the leftover, and clears itself when there is nothing left to move.
+  useEffect(() => { setMoveQty(showMove ? String(leftover) : ""); }, [showMove, leftover]);
+  // Suggestions follow the chosen source: its rank decides which empty bin is "nearest".
+  useEffect(() => {
+    if (!showMove || !srcBin) return;
+    let live = true;
+    void moveTargets(srcBin, t.sku).then((targets) => {
+      if (!live) return;
+      setMoveSuggest(targets);
+      setMoveLoaded(true);
+      if (!moveTouched.current) setMoveTo(targets[0]?.bin ?? "");
+    });
+    return () => { live = false; };
+  }, [showMove, srcBin, t.sku]);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); setOtherBin(""); setOtherHave(null); setSource("0"); loadScanRule(); loadLeft(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); setOtherBin(""); setOtherHave(null); setSource("0"); setMoveTo(""); setMoveQty(""); setMoveSuggest([]); setMoveLoaded(false); moveTouched.current = false; loadScanRule(); loadLeft(); } }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting tugas" description={`NO ${t.wave_no} · #${t.seq}`}>
         <div className="space-y-4">
@@ -219,6 +297,38 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
                 {picked === "later" && <p className="mt-1 rounded-md bg-warn/10 p-2 text-xs text-warn">Expired lebih lama dari rencana ({fmtDate(t.expiry_date)}): melanggar FEFO. Pakai hanya jika stok yang lebih awal memang tidak ada, dan tulis alasannya.</p>}
                 {picked === "none" && <p className="mt-1 rounded-md bg-warn/10 p-2 text-xs text-warn">Stok ini tidak punya tanggal expired: FEFO tidak bisa dicek.</p>}
               </div>
+              {showMove && (
+                <div className="space-y-2 rounded-md bg-plate/30 p-3 text-sm">
+                  <p>
+                    Sisa di <b>{srcBin}</b> setelah ambil {fmtNum(n)} {t.uom ?? ""}: <b>{fmtNum(leftover)}</b>.
+                    Opsional — tentukan ke mana sisa ini dipindah (Bin To Bin): pick diposting dulu, lalu sisa dipindahkan.
+                  </p>
+                  {moveSuggest.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {moveSuggest.map((s) => (
+                        <Button key={s.bin} size="sm" variant={moveDest === s.bin ? "default" : "outline"} title={s.note}
+                          onClick={() => { moveTouched.current = true; setMoveTo(s.bin); }}>
+                          {s.bin}<span className="ml-1 text-[10px] font-normal opacity-80">{s.note}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="mv-to">Ke bin (opsional)</Label>
+                      <Input id="mv-to" value={moveTo} autoCapitalize="characters" placeholder={moveLoaded ? "mis. CB12A01" : "memuat saran bin…"}
+                        onChange={(e) => { moveTouched.current = true; setMoveTo(e.target.value.toUpperCase()); }} />
+                    </div>
+                    <div>
+                      <Label htmlFor="mv-qty">Jumlah sisa (0–{fmtNum(leftover)})</Label>
+                      <Input id="mv-qty" type="number" inputMode="numeric" min={0} max={leftover} value={moveQty}
+                        onChange={(e) => setMoveQty(clampQty(e.target.value, leftover))} />
+                    </div>
+                  </div>
+                  {moveDestErr && <p className="rounded-md bg-bad/10 p-2 text-xs text-bad">{moveDestErr}</p>}
+                  <p className="text-xs text-steel-500">Kosongkan tujuan atau isi jumlah 0 kalau sisa tidak dipindah.</p>
+                </div>
+              )}
               <div>
                 <Label htmlFor="ar">Alasan (wajib)</Label>
                 <Input id="ar" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="mis. karton rusak, palet terhalang" />
