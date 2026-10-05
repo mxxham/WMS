@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,25 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
 import type { BinSummary } from "@/lib/warehouse-types";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { unstable_cache } from "next/cache";
 import { jakartaDate, locType } from "@/lib/inventory-view";
+
+// fefo_exceptions takes ~8s on the live data set; cache the counts for 15 min
+// so dashboard loads don't wait on it. A cached function may not read cookies
+// (5 Oct: every /dashboard load crashed, digest 2046118177), so it uses the
+// server-only client: two read-only, warehouse-wide counts with no per-user
+// rule, and the page has already required a signed-in supervisor.
+const getFefoCompliance = unstable_cache(async () => {
+  const supabase = createServiceClient();
+  const accSince = new Date(Date.now() - ACCURACY_DAYS * 86_400_000).toISOString();
+  const to = new Date(Date.now() + 60_000).toISOString();
+  const [exc, picks] = await Promise.all([
+    supabase.rpc("fefo_exceptions", { p_from: accSince, p_to: to }),
+    supabase.rpc("fefo_pick_count", { p_from: accSince, p_to: to }),
+  ]);
+  if (exc.error || picks.error) throw new Error(exc.error?.message ?? picks.error?.message);
+  return { bad: ((exc.data ?? []) as unknown[]).length, n: Number(picks.data ?? 0) };
+}, ["dashboard-fefo-compliance"], { revalidate: 900 });
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +60,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const todayStart = new Date(`${today}T00:00:00+07:00`);
   const accSince = new Date(Date.now() - ACCURACY_DAYS * 86_400_000).toISOString();
   const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
-    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }] = await Promise.all([
+    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }, fefo] = await Promise.all([
     fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
@@ -60,13 +78,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     fetchAll<{ result: string }>((a, b) => supabase.from("pick_audit_first").select("result").gte("audited_at", accSince).order("task_id").range(a, b)),
     supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).in("state", ["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD"]),
     supabase.rpc("inventory_policy"),
+    // A slow or failing count must never take the dashboard down: the tile shows "–" instead.
+    getFefoCompliance().catch(() => null),
   ]);
   const cycleOk = cycleApplied.filter((c) => Number(c.variance_qty ?? 0) <= Number(c.tolerance)).length;
   const qtyIra = quantityAccuracy(cycleApplied);
 
   const occupied = bins.filter((b) => Number(b.total_qty) > 0).length;
   const blocked = bins.filter((b) => b.status === "blocked").length;
-  const rackBins = bins.filter((b) => b.rack);
+  // CG is not in the warehouse mapping table — exclude it from occupancy.
+  const rackBins = bins.filter((b) => b.rack && b.zone !== "CG");
 
   // Per-aisle occupancy: occupied positions / total positions (rack bins only).
   const zones = [...new Set(rackBins.map((b) => b.zone))].sort().map((z) => {
@@ -124,6 +145,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   };
   const pickAcc = { n: pickFirsts.length, ok: pickFirsts.filter((x) => x.result === "OK").length };
   const putAcc = acc("PUTAWAY");
+  const fefoN = fefo?.n ?? 0;
+  const fefoBad = fefo?.bad ?? 0;
+  const fefoOk = fefoN - fefoBad;
   const pickTarget = parsePolicy(policyRaw).pick_accuracy_target_pct;
   const pct = (x: { n: number; ok: number }) => (x.n ? `${Math.round((x.ok / x.n) * 1000) / 10}%` : "–");
   const recentPicks = recentTasks.filter((t) => t.task_type === "PICK");
@@ -202,6 +226,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <h2 id="acc" className="font-cond text-lg font-semibold">Akurasi · {ACCURACY_DAYS} hari terakhir</h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Kpi label="Akurasi picking (audit)" value={pct(pickAcc)} note={`percobaan pertama · ${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} · target ≥ ${fmtNum(pickTarget, 1)}%`} href="/audit/picking?tab=akurasi" tone={pickAcc.n && (pickAcc.ok / pickAcc.n) * 100 < pickTarget ? "warn" : undefined} />
+            <Kpi label="FEFO compliance" value={fefoN ? `${Math.round((fefoOk / fefoN) * 1000) / 10}%` : "–"}
+              note={!fefo ? "tidak terbaca, coba muat ulang" : fefoN ? `${fmtNum(fefoBad)} pelanggaran dari ${fmtNum(fefoN)} pick rak` : "belum ada pick rak"} href="/inventory?tab=fefo"
+              tone={fefoBad ? "warn" : undefined} />
             <Kpi label="Shipment menunggu audit / muat" value={fmtNum(shipmentsWaiting ?? 0)} note="semua baris harus lolos audit sebelum dimuat" href="/audit/picking" tone={shipmentsWaiting ? "warn" : undefined} />
             <Kpi label="Akurasi putaway (audit)" value={pct(putAcc)} note={`${fmtNum(putAcc.ok)} OK dari ${fmtNum(putAcc.n)} diaudit · target ≥ 99,5%`} href="/audit/putaway" tone={putAcc.n && putAcc.ok / putAcc.n < 0.995 ? "warn" : undefined} />
             <Kpi label="Picker lapor beda" value={recentPicks.length ? `${Math.round((deviated / recentPicks.length) * 1000) / 10}%` : "–"} note={`${fmtNum(deviated)} dari ${fmtNum(recentPicks.length)} pick selesai`} />
