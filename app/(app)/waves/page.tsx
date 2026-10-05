@@ -26,7 +26,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     supabase.from("waves").select("planned_date").order("planned_date", { ascending: false }).limit(200),
     supabase.from("task_shortfalls").select("task_id").eq("planned_date", date),
     supabase.from("pick_audit_shipment").select("wave_id, shipment_number, state").eq("planned_date", date),
-    supabase.from("task_waits").select("task_id, have, wait_wave_no, wait_seq, wait_from, wait_to, wait_qty").eq("planned_date", date),
+    supabase.from("task_waits").select("task_id, have, wait_wave_no, wait_seq, wait_from, wait_to, wait_qty, wait_task_id, wait_wave_status").eq("planned_date", date),
   ]);
   const dates = [...new Set((recent ?? []).map((r) => r.planned_date as string))].slice(0, 7);
 
