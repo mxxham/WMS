@@ -6,17 +6,20 @@ import { TabsNav } from "@/components/app/tabs-nav";
 import { parsePolicy } from "@/lib/inventory-control";
 import { InventoryClient, type InvLine, type OpenTask } from "./inventory-client";
 import { FefoTab, type FefoException } from "./tabs/fefo-tab";
+import { StayTab } from "./tabs/stay-tab";
 import { HoldsTab, type HoldRow } from "./tabs/holds-tab";
 import { AccuracyTab, type AccuracyRow, type AdjustmentRow } from "./tabs/accuracy-tab";
 import { ReconTab, type ReconLine, type ReconSummary } from "./tabs/recon-tab";
 import { ApprovalsTab, type RequestRow } from "./tabs/approvals-tab";
 import { EmptyTab, type EmptyBin } from "./tabs/empty-tab";
+import { WmsDayDownload } from "./wms-day-download";
 
 export const dynamic = "force-dynamic";
 
 const TABS = [
   { key: "stok", label: "Stok" },
   { key: "fefo", label: "Expired & FEFO" },
+  { key: "inap", label: "Lama di gudang" },
   { key: "kosong", label: "Bin kosong" },
   { key: "hold", label: "Hold & karantina" },
   { key: "akurasi", label: "Akurasi & adjustment" },
@@ -44,15 +47,17 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     supabase.rpc("inventory_policy"),
   ]);
   const policy = parsePolicy(policyRaw);
-  const tabs = TABS.filter((t) => supervisor || t.key === "stok" || t.key === "fefo" || t.key === "kosong")
+  const tabs = TABS.filter((t) => supervisor || t.key === "stok" || t.key === "fefo" || t.key === "inap" || t.key === "kosong")
     .map((t) => ({ ...t, badge: t.key === "persetujuan" ? pending ?? 0 : t.key === "hold" ? holds ?? 0 : undefined }));
 
   return (
     <main>
       <PageHeader title="Inventory" live={["movements", "pick_tasks", "count_tasks", "stock_holds", "adjustment_requests", "stock_recon_lines", "stock_recons"]} liveDebounceMs={2000} />
       <TabsNav base="/inventory" tabs={tabs} active={tab} />
+      {tab === "stok" && <WmsDayDownload />}
       {tab === "stok" && await stockTab(sp)}
       {tab === "fefo" && await fefoTab(sp, policy.near_expiry_days, policy.default_shelf_life_months)}
+      {tab === "inap" && await stayTab()}
       {tab === "kosong" && <EmptyTab bins={await fetchAll<EmptyBin>((a, b) => supabase.from("empty_bins").select("*").order("bin_code").range(a, b))}
         near={(sp.near ?? "").trim().toUpperCase()} aisle={sp.aisle ?? ""} level={sp.level ?? ""} />}
       {tab === "hold" && supervisor && await holdTab()}
@@ -106,6 +111,13 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         error={e1?.message ?? null} shelfLife={Object.fromEntries((items ?? []).map((i) => [i.sku as string, Number(i.shelf_life_months)]))}
         defaultShelfLife={defaultShelfLife} />
     );
+  }
+
+  async function stayTab() {
+    const lines = await fetchAll<FefoLine>((a, b) => supabase.from("inventory_detail")
+      .select("bin_code, zone, rack, bin_status, sku, description, uom, batch_lot, quantity, expiry_date, received_date, days_remaining, held")
+      .order("received_date", { nullsFirst: false }).order("sku").order("id").range(a, b));
+    return <StayTab lines={lines} />;
   }
 
   async function holdTab() {
