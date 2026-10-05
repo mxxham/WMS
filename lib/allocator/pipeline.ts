@@ -4,7 +4,7 @@ import { detectDoubles, type DoubleEntry } from './double';
 import { settleSisa } from './ledger';
 import { buildMovementReport } from './movement';
 import { derivePickfaces } from './pickface';
-import { buildPicklists } from './picklist';
+import { annotateRestNotes, buildPicklists } from './picklist';
 import type { AllocationResult, DemandLine, MovementRow, PickfaceAssignment, StockBin, Warning } from './types';
 
 export interface PipelineResult {
@@ -33,6 +33,8 @@ export function runPipeline(
       message: `${l.location} ${l.sku} batch ${l.batch ?? '-'}: stok tidak cukup pada urutan picklist (shipment ${l.shipmentNumber})`,
       context: { location: l.location, sku: l.sku } });
   }
+  // An opened pallet without a move says where its rest goes later (after settleSisa: final moves).
+  annotateRestNotes(allocation.picklists.flatMap((p) => p.lines));
   return {
     allocation,
     pickfaces,

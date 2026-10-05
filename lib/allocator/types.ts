@@ -83,6 +83,12 @@ export interface AllocationLine {
    breaksPallet: boolean;
    /** slot time of the wave this line belongs to — used for execution-order anchoring */
    slotTime: string | null;
+   /**
+    * A pallet opened without a move: where its rest goes, read from the later
+    * lines on the same stock in printed order ("CC14A01 (dipindah NO 7)").
+    * Set by annotateRestNotes; absent → the plain "tetap di bin".
+    */
+   restNote?: string | null;
  }
 
 export interface Shortage {

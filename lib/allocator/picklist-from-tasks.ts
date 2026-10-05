@@ -1,6 +1,7 @@
 import { replaySteps, stockIdentityKey, type ReplayStep } from './ledger';
 import type { AllocationLine, Picklist, PickType } from './types';
 import { lookupUom } from './uom-master';
+import { restNoteAt, type RestStep } from './picklist';
 
 /** One row of the `pick_task_detail` view. */
 export interface TaskRow {
@@ -64,11 +65,44 @@ const idKey = (bin: string, sku: string, batch: string | null, exp: string | nul
  * planned. A pick's move (the REPLENISH next to it, from the same bin/batch) is
  * shown on the pick, and its Sisa is what stays after both.
  */
-export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: StockNow[]) {
+/** The day's live tasks in execution order: waves by slot then NO, tasks by seq (the Sisa replay order). */
+function executionOrder(waves: WaveRow[], tasks: TaskRow[]): TaskRow[] {
   const slot = new Map(waves.map((w) => [w.id, w.planned_slot ?? '99:99']));
   const waveNo = new Map(waves.map((w) => [w.id, Number(w.wave_no) || Number.MAX_SAFE_INTEGER]));
-  const live = tasks.filter((t) => t.status !== 'CANCELLED' && slot.has(t.wave_id)).sort((a, b) =>
+  return tasks.filter((t) => t.status !== 'CANCELLED' && slot.has(t.wave_id)).sort((a, b) =>
     slot.get(a.wave_id)!.localeCompare(slot.get(b.wave_id)!) || waveNo.get(a.wave_id)! - waveNo.get(b.wave_id)! || a.seq - b.seq);
+}
+
+/**
+ * The Wave page's version of the printed Bin To Bin note for an opened pallet
+ * without its own move ("CC14A01 (dipindah NO 7)"), from the plan alone (the
+ * page has no stock replay): a move counts when it carries cartons in the
+ * plan, or carried them when posted. Same order and wording as the reprint.
+ */
+export function restNotesFromTasks(waves: WaveRow[], tasks: TaskRow[]): Map<string, string> {
+  const live = executionOrder(waves, tasks);
+  const no = new Map(waves.map((w) => [w.id, w.wave_no]));
+  const done = (t: TaskRow) => t.status === 'COMPLETED';
+  const key = (t: TaskRow) => done(t)
+    ? idKey(t.actual_from_bin ?? t.from_bin, t.sku, t.actual_batch_lot ?? t.batch_lot, t.actual_expiry_date ?? t.expiry_date)
+    : idKey(t.from_bin, t.sku, t.batch_lot, t.expiry_date);
+  const carried = (t: TaskRow) => Number(done(t) ? t.actual_quantity ?? t.quantity : t.quantity) > 0;
+  const steps: RestStep[] = live.map((t) => ({ key: key(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
+    moveTo: t.task_type === 'REPLENISH' && carried(t) ? t.to_bin : null }));
+  const out = new Map<string, string>();
+  live.forEach((t, i) => {
+    if (t.task_type !== 'PICK' || !t.breaks_pallet) return;
+    // Its own move (right after, or right before in older plans) means it is not "tetap".
+    const own = [live[i + 1], live[i - 1]].some((x) => x && x.task_type === 'REPLENISH' && x.wave_id === t.wave_id
+      && x.from_bin === t.from_bin && x.sku === t.sku && x.batch_lot === t.batch_lot && x.expiry_date === t.expiry_date && carried(x));
+    const note = own ? null : restNoteAt(steps, i, t.from_bin);
+    if (note) out.set(t.id, note);
+  });
+  return out;
+}
+
+export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: StockNow[]) {
+  const live = executionOrder(waves, tasks);
 
   const done = (t: TaskRow) => t.status === 'COMPLETED';
   const qty = (t: TaskRow) => Number(done(t) ? t.actual_quantity ?? t.quantity : t.quantity);
@@ -89,7 +123,12 @@ export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: Stoc
     : { key: src(t), qty: qty(t) });
   const r = replaySteps(start, steps);
 
-  const out = new Map<string, { sisa: number; moveQty: number; moveTo: string | null }>();
+  // Where an opened pallet's rest goes when this pick does not move it (picklist.ts restNoteAt).
+  const no = new Map(waves.map((w) => [w.id, w.wave_no]));
+  // A move counts only when the replay really carried something (a drifted shelf can leave it empty).
+  const restSteps: RestStep[] = live.map((t, k) => ({ key: src(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
+    moveTo: t.task_type === 'REPLENISH' && r.moved[k] > 0 ? t.to_bin : null }));
+  const out = new Map<string, { sisa: number; moveQty: number; moveTo: string | null; restNote: string | null }>();
   live.forEach((t, i) => {
     if (t.task_type !== 'PICK') return;
     // Its move: the REPLENISH right after (new plans) or right before (older plans) from the same bin/batch.
@@ -99,7 +138,8 @@ export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: Stoc
     const j = Math.max(i, p);
     // What the replay really carried (less than planned when the shelf holds less now), so Sisa and Bin To Bin agree.
     const moveQty = p >= 0 ? r.moved[p] : 0;
-    out.set(t.id, { sisa: r.after[j], moveQty, moveTo: moveQty > 0 ? pair!.to_bin : null });
+    out.set(t.id, { sisa: r.after[j], moveQty, moveTo: moveQty > 0 ? pair!.to_bin : null,
+      restNote: t.breaks_pallet && moveQty <= 0 ? restNoteAt(restSteps, i, t.from_bin) : null });
   });
   return out;
 }
@@ -145,6 +185,7 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
         seq: i + 1,
         breaksPallet: t.breaks_pallet,
         slotTime: w.planned_slot,
+        restNote: sisa.get(t.id)?.restNote ?? null,
       }));
       const hasPallet = lines.some((l) => l.pickType === 'PALLET');
       const hasCase = lines.some((l) => l.pickType === 'CASE');

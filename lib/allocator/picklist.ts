@@ -1,6 +1,8 @@
 import { pickRowCompare, waveSlots } from './allocator';
 import type { AllocatorConfig } from './config';
 import type { AllocationLine, AllocationResult, DemandLine, Picklist, PickType } from './types';
+import { stockIdentityKey } from './ledger';
+import { parseLocation } from './pickpath';
 
 /**
  * Turn raw allocations into printable pick tasks.
@@ -110,8 +112,42 @@ function chunk<T>(items: T[], size: number): T[][] {
  */
 export function binToBin(l: AllocationLine): string {
   // A pallet opened without a move: its rest stays where it is (the pickface
-  // itself, or the pickface is already full). Say so instead of a blank.
-  return l.moveTo ?? (l.breaksPallet ? 'tetap di bin' : '');
+  // itself, or the pickface is already full). Say so instead of a blank, and
+  // where the rest goes later when a later line takes or moves it.
+  return l.moveTo ?? (l.breaksPallet ? l.restNote ?? 'tetap di bin' : '');
+}
+
+/** One step of the printed order on a stock identity: a pick, a move (moveTo), or both. */
+export interface RestStep { key: string; waveNo: string; picks: boolean; moveTo: string | null }
+
+/**
+ * What happens to the rest of the pallet opened at step i, so nobody has to
+ * look it up: the first later step on the same stock that moves it — the
+ * same destination as on that row, with who carries it, so this picker does
+ * not move it early and empty the bin under NO 7 ("CF40A01 (dipindah NO 7)") — else the waves that pick from it
+ * ("tetap, diambil NO 7, NO 9"), else it stays ("tetap di CB14E02"). None on
+ * level A (the pickface level), where the long list only cluttered the row.
+ */
+export function restNoteAt(steps: RestStep[], i: number, location: string): string | null {
+  // Level A is the pickface level: the rest simply stays for loose picks, no note needed (plain "tetap di bin").
+  if (parseLocation(location)?.level === 'A') return null;
+  const takers: string[] = [];
+  for (let j = i + 1; j < steps.length; j++) {
+    const s = steps[j];
+    if (s.key !== steps[i].key) continue;
+    if (s.moveTo) return `${s.moveTo} (dipindah NO ${s.waveNo})`;
+    if (s.picks && !takers.includes(s.waveNo)) takers.push(s.waveNo);
+  }
+  return takers.length ? `tetap, diambil ${takers.map((w) => `NO ${w}`).join(", ")}` : `tetap di ${location}`;
+}
+
+/** Sets restNote on every opened pallet without a move; `ordered` is the printed (Sisa) order. */
+export function annotateRestNotes(ordered: AllocationLine[]): void {
+  const steps: RestStep[] = ordered.map((l) => ({
+    key: stockIdentityKey(l.location, l.sku, l.batch, l.expiryDate), waveNo: l.waveNo, picks: true,
+    moveTo: l.moveQty > 0 ? l.moveTo : null,
+  }));
+  ordered.forEach((l, i) => { if (l.breaksPallet && !(l.moveQty > 0 && l.moveTo)) l.restNote = restNoteAt(steps, i, l.location); });
 }
 export function sisaPrinted(l: AllocationLine): number {
   return l.qtyRemainingInBin + l.moveQty;

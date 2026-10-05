@@ -15,7 +15,7 @@ import { loadWorkbookFromBuffer } from '../lib/allocator/browser/browser-input';
 import { runPipeline } from '../lib/allocator/pipeline';
 import { allocate } from '../lib/allocator/allocator';
 import { buildPlan } from '../lib/allocator/plan';
-import { picklistsFromTasks, type TaskRow, type WaveRow } from '../lib/allocator/picklist-from-tasks';
+import { picklistsFromTasks, restNotesFromTasks, type TaskRow, type WaveRow } from '../lib/allocator/picklist-from-tasks';
 import { binToBin, sisaPrinted } from '../lib/allocator/picklist';
 import type { AllocationLine } from '../lib/allocator/types';
 
@@ -98,12 +98,27 @@ for (const [day, date] of [['15', '2026-09-15'], ['18', '2026-09-18'], ['24', '2
     printed.forEach((l, i) => assert.equal(l.qtyRemainingInBin, sisa[i], `${l.shipmentNumber} ${l.location} ${l.sku}: printed ${l.qtyRemainingInBin}, replay ${sisa[i]}`));
   });
 
-  test(`${day} Sep: printed Bin To Bin = destination, 'tetap di bin' for a break without a move, Sisa = leftover right after the pick`, () => {
+  test(`${day} Sep: printed Bin To Bin = destination, where the rest goes for a break without a move, Sisa = leftover right after the pick`, () => {
     for (const l of printed) {
-      assert.equal(binToBin(l), l.moveTo ?? (l.breaksPallet ? 'tetap di bin' : ''));
+      assert.equal(binToBin(l), l.moveTo ?? (l.breaksPallet ? l.restNote ?? 'tetap di bin' : ''));
       if (l.moveTo) assert.equal(sisaPrinted(l), l.moveQty, `${l.location}: Sisa shows the cartons carried to ${l.moveTo}`);
       else assert.equal(sisaPrinted(l), l.qtyRemainingInBin);
     }
+  });
+
+  test(`${day} Sep: an opened pallet without a move names the later wave that carries its rest, and that wave really does`, () => {
+    printed.forEach((l, i) => {
+      if (!l.breaksPallet || l.moveQty > 0) return;
+      const m = /^(\S+) \(dipindah NO (\S+)\)$/.exec(l.restNote ?? '');
+      // Level A (pickface level) carries no note; everything else always says where the rest goes.
+      if (l.location[4] === 'A') { assert.equal(l.restNote, null, `${l.location}: level A gets no note`); return; }
+      assert.ok(m || /^tetap(, diambil NO .+| di \S+)$/.test(l.restNote ?? ''), `${l.location}: note "${l.restNote}"`);
+      if (!m) return;
+      const later = printed.slice(i + 1).find((x) => x.location === l.location && x.sku === l.sku && x.batch === l.batch
+        && x.expiryDate.getTime() === l.expiryDate.getTime() && x.moveQty > 0);
+      assert.ok(later, `${l.location}: "${l.restNote}" but no later move from that bin`);
+      assert.deepEqual([later!.moveTo, later!.waveNo], [m[1], m[2]], `${l.location}: note vs the move that happens`);
+    });
   });
 
   test(`${day} Sep: Wave-page reprint (whole day and wave by wave) = Alokasi printout`, () => {
@@ -115,6 +130,12 @@ for (const [day, date] of [['15', '2026-09-15'], ['18', '2026-09-18'], ['24', '2
     const expected = printed.map(sig).sort();
     assert.deepEqual(picklistsFromTasks(waves, tasks, [], stockNow).flatMap((p) => p.lines.map(sig)).sort(), expected);
     assert.deepEqual(waves.flatMap((w) => picklistsFromTasks([w], tasks, [], stockNow, waves).flatMap((p) => p.lines.map(sig))).sort(), expected);
+    // The Wave page shows the same note on those rows as the printout, from the plan alone.
+    const page = restNotesFromTasks(waves, tasks);
+    const pick = tasks.filter((t) => t.task_type === 'PICK');
+    const fromPage = pick.filter((t) => page.has(t.id)).map((t) => `${t.wave_no} ${t.from_bin} ${t.sku} ${t.quantity} ${page.get(t.id)}`).sort();
+    const fromPrint = printed.filter((l) => l.restNote).map((l) => `${l.waveNo} ${l.location} ${l.sku} ${l.qtyPick} ${l.restNote}`).sort();
+    assert.deepEqual(fromPage, fromPrint);
   });
 }
 
@@ -152,7 +173,7 @@ test('reprint after stock drift: Bin To Bin carries only what is really left, Si
   const [e] = picklistsFromTasks([w], tasks, [], [{ bin_code: 'CA01A01', sku: 'S', batch_lot: 'B1', expiry_date: '2031-01-01', quantity: 10 }]).flatMap((p) => p.lines);
   assert.equal(e.moveTo, null);
   assert.equal(e.moveQty, 0);
-  assert.equal(binToBin(e), 'tetap di bin');
+  assert.equal(binToBin(e), 'tetap di bin', 'level A (pickface level): the short text, no note');
   assert.equal(sisaPrinted(e), 0);
 });
 

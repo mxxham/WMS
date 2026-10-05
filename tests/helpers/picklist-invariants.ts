@@ -56,7 +56,7 @@ export function checkPicklistRun(run: PipelineResult, stock: StockBin[], demand:
     assert.ok(left >= 0, `${row}: picks ${l.qtyPick}, only ${left + l.qtyPick} in the bin`);
     assert.equal(sisaPrinted(l), left, `${row}: printed Sisa vs bin right after the pick`);
     assert.equal(!!l.moveTo, l.moveQty > 0, `${row}: Bin To Bin ${l.moveTo} with move ${l.moveQty}`);
-    assert.equal(binToBin(l), l.moveTo ?? (l.breaksPallet ? 'tetap di bin' : ''), `${row}: Bin To Bin text`);
+    assert.equal(binToBin(l), l.moveTo ?? (l.breaksPallet ? l.restNote ?? 'tetap di bin' : ''), `${row}: Bin To Bin text`);
     if (l.pickType === 'PALLET') assert.equal(l.qtyPick % l.upp, 0, `${row}: PALLET row of ${l.qtyPick} with UPP ${l.upp}`);
     if (l.breaksPallet) assert.ok(l.qtyPick < l.upp, `${row}: opens a pallet but picks ${l.qtyPick} of ${l.upp}`);
     if (l.moveTo) {
