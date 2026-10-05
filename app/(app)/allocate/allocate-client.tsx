@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { StaleWavesNotice, loadStaleWaves, type StaleWave } from "@/components/app/stale-waves";
 import { cn, fmtNum } from "@/lib/utils";
 import { expiryText, withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
@@ -45,6 +46,11 @@ export function AllocateClient() {
     loadDispatchRules(createClient()).then((r) => { setMinShelfLife(String(r.minRemainingShelfLifeDays)); setMinBySku(r.minRemainingShelfLifeDaysBySku); })
       .catch((e: Error) => setError(`Aturan sisa umur tidak terbaca (${e.message}); isi minimum secara manual.`));
   }, []);
+  // Open waves of earlier dates: a database run plans around their reservations and incoming moves.
+  const [stale, setStale] = useState<StaleWave[]>([]);
+  const [ackStale, setAckStale] = useState(false);
+  useEffect(() => { setAckStale(false); }, [asOf]);
+  const staleBlocks = source === "db" && stale.length > 0 && !ackStale;
   const [target, setTarget] = useState("upp");
   const [split, setSplit] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -64,6 +70,12 @@ export function AllocateClient() {
     if (!file) return;
     setBusy(true); setError(null); setSaved(null);
     try {
+      // Checked again at run time: the list on screen may be minutes old.
+      if (source === "db" && !ackStale) {
+        const now = (await loadStaleWaves(createClient(), asOf)).filter((w) => w.status === "PENDING");
+        setStale(now);
+        if (now.length) throw new Error(`${now.length} wave dari tanggal sebelumnya masih terbuka. Selesaikan atau batalkan dulu, atau centang "jalankan tetap".`);
+      }
       const config = withConfig({
         asOf: new Date(`${asOf}T00:00:00Z`),
         // Fixed pickfaces apply to both stock sources: they describe the warehouse, not the file.
@@ -180,8 +192,20 @@ export function AllocateClient() {
             <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
             Pisahkan picklist forklift (palet) & handpick (karton)
           </label>
+          <div className="md:col-span-3">
+            <StaleWavesNotice before={asOf} onChange={setStale}
+              intro={source === "db"
+                ? "Tugas terbuka wave ini masih menahan stok dan Bin To Bin-nya dihitung sebagai stok masuk, jadi picklist dari database akan menghindari stok yang sebenarnya ada dan memakai pickface yang sebenarnya kosong."
+                : "Picklist dari file tidak terpengaruh, tetapi cek stok terhadap database dan rencana yang disimpan tetap memperhitungkan tugas terbuka wave ini."} />
+            {source === "db" && stale.length > 0 && (
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={ackStale} onChange={(e) => setAckStale(e.target.checked)} />
+                Jalankan tetap: wave lama ini memang masih akan dikerjakan
+              </label>
+            )}
+          </div>
           <div className="self-end">
-            <Button onClick={execute} disabled={!file || busy} className="w-full"><Play className="h-4 w-4" />{busy ? "Menghitung…" : "Jalankan alokasi"}</Button>
+            <Button onClick={execute} disabled={!file || busy || staleBlocks} className="w-full"><Play className="h-4 w-4" />{busy ? "Menghitung…" : "Jalankan alokasi"}</Button>
           </div>
           {error && <p role="alert" className="text-sm text-bad md:col-span-3">{error}</p>}
         </CardContent>

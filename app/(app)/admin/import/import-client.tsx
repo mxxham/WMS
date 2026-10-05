@@ -5,6 +5,7 @@ import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { StaleWavesNotice } from "@/components/app/stale-waves";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
@@ -201,6 +202,10 @@ export function ImportClient() {
       {step === "done" && (
         <Card><CardContent className="space-y-3">
           <p className="font-cond text-xl font-semibold">Import selesai</p><p className="text-sm">{result}</p>
+          {mode === "replace" && (
+            <StaleWavesNotice before={new Date().toLocaleDateString("sv-SE")}
+              intro="Stok sekarang sama dengan file WMS, yang sudah memuat barang yang diambil. Tugas terbuka wave lama ini tetap menahan stok dan Bin To Bin-nya dihitung sebagai stok masuk, jadi rencana hari ini akan salah sampai wave ini diselesaikan atau dibatalkan." />
+          )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={downloadReport}>Unduh laporan masalah</Button>
             <Button onClick={() => { setStep("upload"); setRows([]); setResult(null); }}>Import file lain</Button>
