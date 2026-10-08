@@ -18,7 +18,6 @@ const SECTIONS: { title: string | null; links: NavLink[] }[] = [
     { href: "/scan", label: "Scan", icon: ScanLine, roles: ALL },
     { href: "/receiving", label: "Penerimaan", icon: Truck, roles: ALL },
     { href: "/waves", label: "Wave", icon: ListChecks, roles: ALL },
-    { href: "/check", label: "Check outbound", icon: ClipboardCheck, roles: ALL },
     { href: "/allocate", label: "Alokasi", icon: ClipboardList, roles: SUP },
     { href: "/putaway", label: "Putaway", icon: PackagePlus, roles: SUP },
     { href: "/pickfaces", label: "Pickface", icon: MapPin, roles: SUP },
