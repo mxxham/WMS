@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, type LucideIcon } from "lucide-react";
+import { ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/types";
 
@@ -38,6 +38,7 @@ const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   { title: "Admin", links: [
     { href: "/labels", label: "Label", icon: Printer, roles: SUP },
     { href: "/admin/items", label: "Master item", icon: Tags, roles: SUP },
+    { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, roles: SUP },
     { href: "/admin/import", label: "Import", icon: Upload, roles: ["admin"] },
     { href: "/admin/settings", label: "Pengaturan", icon: Settings, roles: ["admin"] },
   ] },
