@@ -114,7 +114,7 @@ begin
   select state into v_state from public.pick_audit_shipment
   where wave_id = p_wave_id and shipment_number = v_ship;
   if v_state is null then raise exception 'Shipment % tidak ada di wave ini', v_ship; end if;
-  if v_state = 'CANCELLED' then raise exception 'Wave dibatalkan: baris ini tidak diaudit'; end if;
+  if v_state = 'CANCELLED' then raise exception 'Wave dibatalkan: shipment % tidak diperiksa', v_ship; end if;
   if v_state = 'PICKING' then raise exception 'Tugas pick belum selesai atau tidak ditemukan'; end if;
   if v_state = 'LOADED' then raise exception 'Shipment % sudah dimuat', v_ship; end if;
 

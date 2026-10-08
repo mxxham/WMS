@@ -105,6 +105,9 @@ select pg_temp.check('finish drove record_pick_audit once (attempt 1 OK)',
   pg_temp.attempts('CK1', 1) = 1 and (select result = 'OK' from pick_audits where task_id = pg_temp.task('CK1', 1)));
 select pg_temp.check('finish reports the refused over-scan',
   (public.check_finish(current_setting('t.s1')::uuid))->'over_scans' @> '[{"sku":"550044709","n":1}]'::jsonb);
+select pg_temp.check('finish counts wrong-item and unknown scans',
+  (public.check_finish(current_setting('t.s1')::uuid))->>'wrong_items' = '1'
+  and (public.check_finish(current_setting('t.s1')::uuid))->>'unknown_barcodes' = '1');
 select pg_temp.check('finish is idempotent (no second audit)',
   (public.check_finish(current_setting('t.s1')::uuid))->>'already' = 'true' and pg_temp.attempts('CK1', 1) = 1);
 select pg_temp.check('check RPCs leave no app.* session state',
@@ -129,6 +132,15 @@ select pg_temp.check('the one-open-session index is the real lock (concurrent in
   pg_temp.fails($q$insert into check_sessions (wave_id, shipment_number, checker_name) values (pg_temp.wave('1'), 'CK2', 'X')$q$, '%check_sessions_open_uq%'));
 set role authenticated;
 
+-- ==== B2. client_scan_id idempotency =====================================
+select set_config('t.cid', gen_random_uuid()::text, false);
+select pg_temp.check('scan with a client id is accepted',
+  public.check_scan(current_setting('t.s2')::uuid, '550044709', current_setting('t.cid')::uuid)->>'outcome' = 'ACCEPTED');
+select pg_temp.check('a repeated client id replays and counts nothing',
+  public.check_scan(current_setting('t.s2')::uuid, '550044709', current_setting('t.cid')::uuid)->>'replayed' = 'true'
+  and (select count(*) from check_scans where session_id = current_setting('t.s2')::uuid and client_scan_id = current_setting('t.cid')::uuid) = 1
+  and (select count(*) from check_scans where session_id = current_setting('t.s2')::uuid and outcome = 'ACCEPTED') = 1);
+
 -- ==== C. release then reclaim starts at zero ============================
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select set_config('t.s3', pg_temp.claim('1', 'CK3', 'Checker Dua')::text, false);
@@ -142,6 +154,10 @@ select pg_temp.check('release closes the session as released',
   (select status = 'released' and released_by = '33333333-3333-3333-3333-333333333333' from check_sessions where id = current_setting('t.s3')::uuid));
 select pg_temp.check('a released session cannot be scanned',
   pg_temp.fails(format($q$select check_scan(%L, '550024919')$q$, current_setting('t.s3')::uuid), 'Sesi check sudah selesai%'));
+select pg_temp.check('finish on a released session is a no-op',
+  public.check_finish(current_setting('t.s3')::uuid)->>'status' = 'released'
+  and public.check_finish(current_setting('t.s3')::uuid)->>'already' = 'true'
+  and pg_temp.attempts('CK3', 1) = 0);
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select set_config('t.s3b', pg_temp.claim('1', 'CK3', 'Checker Dua')::text, false);
 select pg_temp.check('reclaim is a new session starting at zero',
@@ -194,7 +210,7 @@ set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select pg_temp.check('a shipment still PICKING is refused',
   pg_temp.fails($q$select check_claim(pg_temp.wave('2'), 'CK6', 'Checker Dua')$q$, 'Tugas pick belum selesai atau tidak ditemukan'));
 select pg_temp.check('a cancelled wave is refused',
-  pg_temp.fails($q$select check_claim(pg_temp.wave('3'), 'CK7', 'Checker Dua')$q$, 'Wave dibatalkan%'));
+  pg_temp.fails($q$select check_claim(pg_temp.wave('3'), 'CK7', 'Checker Dua')$q$, 'Wave dibatalkan: shipment CK7 tidak diperiksa%'));
 select pg_temp.check('the picker cannot check own line',
   pg_temp.fails($q$select check_claim(pg_temp.wave('1'), 'CK1', 'picker  satu')$q$, 'Checker tidak boleh picker%'));
 
@@ -202,7 +218,7 @@ select pg_temp.check('the picker cannot check own line',
 reset role;
 select pg_temp.check('anon denied check_claim/scan/finish/release',
   not has_function_privilege('anon','public.check_claim(uuid,text,text)','EXECUTE')
-  and not has_function_privilege('anon','public.check_scan(uuid,text)','EXECUTE')
+  and   not has_function_privilege('anon','public.check_scan(uuid,text,uuid)','EXECUTE')
   and not has_function_privilege('anon','public.check_finish(uuid,text)','EXECUTE')
   and not has_function_privilege('anon','public.check_release(uuid,text)','EXECUTE'));
 select pg_temp.check('anon denied the check tables and view',
