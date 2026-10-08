@@ -13,7 +13,7 @@ export default async function BarcodePage() {
   const items = await fetchAll<BindItem>((from, to) =>
     supabase
       .from("items")
-      .select("sku, description, uom, ean, shelf_life_months, min_dispatch_days")
+      .select("sku, description, uom, ean")
       .order("sku")
       .range(from, to),
   );
