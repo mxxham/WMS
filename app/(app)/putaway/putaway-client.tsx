@@ -26,6 +26,7 @@ const STATUS: Record<Status, { label: string; card: string; row: string }> = {
 
 function actionLabel(kind: PutawayKind, a: PutawayAction) {
   if (a === "set") return "Samakan qty bin dengan sheet";
+  if (kind === "moved_in") return "Palet baru: tetap posting";
   return kind === "bin_occupied" ? "Taruh di samping stok lain" : "Tambahkan qty sheet ke bin";
 }
 
@@ -107,7 +108,7 @@ export function PutawayClient() {
   const resolved = rows.filter((r) => statusOf(r) === "conflict" && actions[r.line]).length;
   const toPost = counts.new + resolved;
   // Unresolved qty/occupied conflicts become count tasks when posted (0010).
-  const toCount = rows.filter((r) => { const v = verdicts.get(r.line); return v?.status === "conflict" && !actions[r.line] && (v.kind === "qty_differs" || v.kind === "bin_occupied"); }).length;
+  const toCount = rows.filter((r) => { const v = verdicts.get(r.line); return v?.status === "conflict" && !actions[r.line] && (v.kind === "qty_differs" || v.kind === "bin_occupied" || v.kind === "moved_in"); }).length;
   const shown = filter === "all" ? rows : rows.filter((r) => statusOf(r) === filter);
   // SKUs the item master does not have yet, with their data from this file's master sheets (0040).
   const unknownSkus = [...new Set(rows.filter((r) => verdicts.get(r.line)?.kind === "sku_unknown").map((r) => r.sku))];
@@ -126,6 +127,10 @@ export function PutawayClient() {
   function problem(r: PutawayRow) {
     if (r.error) return r.error;
     const v = verdicts.get(r.line);
+    if (v?.kind === "moved_in" && v.moved_in) {
+      const m = v.moved_in;
+      return `${KIND_LABELS.moved_in}. Bin To Bin ${m.quantity} dari ${m.from_bin ?? "?"} (batch ${m.batch_lot || "–"}, ${new Date(m.at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "short", timeStyle: "short" })}).`;
+    }
     return v?.kind ? KIND_LABELS[v.kind] : "";
   }
 

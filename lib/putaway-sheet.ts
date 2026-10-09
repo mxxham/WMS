@@ -13,17 +13,19 @@ export type PutawayRow = {
 
 /** Resolution of a conflict, chosen per row by the supervisor. */
 export type PutawayAction = "add" | "set";
-export type PutawayKind = "qty_differs" | "bin_occupied" | "bin_unknown" | "bin_blocked" | "sku_unknown";
+export type PutawayKind = "qty_differs" | "bin_occupied" | "bin_unknown" | "bin_blocked" | "sku_unknown" | "moved_in";
 export type PutawayVerdict = {
   line: number; status: "new" | "same" | "conflict"; kind: PutawayKind | null; action: PutawayAction | null;
   current: { sku: string; batch_lot: string; expiry_date: string | null; quantity: number }[];
+  /** The Bin To Bin that brought this SKU into the bin in the last two days (0059). */
+  moved_in?: { quantity: number; from_bin: string | null; batch_lot: string; at: string; note: string | null } | null;
   /** Expiry the batch code implies, when the sheet's expiry differs (0018). */
   expiry_expected?: string | null;
 };
 
 /** Resolutions the database accepts for each conflict (see putaway_import in 0008). */
 export const ACTIONS: Record<PutawayKind, PutawayAction[]> = {
-  qty_differs: ["add", "set"], bin_occupied: ["add"], bin_unknown: [], bin_blocked: [], sku_unknown: [],
+  qty_differs: ["add", "set"], bin_occupied: ["add"], bin_unknown: [], bin_blocked: [], sku_unknown: [], moved_in: ["add"],
 };
 
 export const KIND_LABELS: Record<PutawayKind, string> = {
@@ -32,6 +34,7 @@ export const KIND_LABELS: Record<PutawayKind, string> = {
   bin_unknown: "Kode bin tidak ada di sistem",
   bin_blocked: "Bin diblokir",
   sku_unknown: "SKU belum ada di master data",
+  moved_in: "SKU ini baru masuk ke bin lewat Bin To Bin: kemungkinan sisa palet yang sama, jangan dihitung dua kali",
 };
 
 export const PUTAWAY_SHEET = /putaway/i;
