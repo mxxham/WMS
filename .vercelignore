@@ -4,6 +4,8 @@
 .vercel.bak-*
 
 # Local data and run output
+# A production build measured locally (next.config distDir via NEXT_DIST_DIR); Vercel builds its own.
+.next-prod/
 data/
 out/
 out-baseline/

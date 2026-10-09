@@ -40,3 +40,4 @@ picklist_*.xlsx
 next-env.d.ts
 *.tsbuildinfo
 backups/
+/.next-prod/
