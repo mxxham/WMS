@@ -1,5 +1,4 @@
 "use client";
-import * as XLSX from "xlsx";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -8,7 +7,9 @@ export type TraceExportData = { batch: string; summary: Rows; shipments: Rows; l
 
 /** One workbook, one sheet per section of the trace page. */
 export function TraceExport({ data }: { data: TraceExportData }) {
-  function download() {
+  async function download() {
+    // Loaded on click: the Excel library (~140 kB) is not part of the page.
+    const XLSX = await import("xlsx");
     const book = XLSX.utils.book_new();
     const add = (rows: Rows, name: string) => XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows.length ? rows : [{ Info: "Tidak ada data" }]), name);
     add(data.summary, "Ringkasan");

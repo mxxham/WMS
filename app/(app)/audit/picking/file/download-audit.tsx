@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import * as XLSX from "xlsx";
 import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -32,6 +31,7 @@ export function DownloadAudit({ date, zone }: { date: string; zone?: string }) {
         attempts.push(...((a ?? []) as ExportAttempt[]));
       }
       const rows = auditWorkbookRows(lines, attempts);
+      const XLSX = await import("xlsx");
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.bins), "Per bin");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.lines), "Per baris");

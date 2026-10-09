@@ -2,7 +2,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import { Plus, Trash2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ItemScanInput } from "@/components/app/item-scan-input";
@@ -12,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { RECEIPT_STATUS } from "@/lib/inventory-control";
-import { parseDeliveryDoc } from "@/lib/sap-stock";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 
 export type ReceiptSummary = {
@@ -75,6 +73,8 @@ function NewReceipt() {
     if (!f) return;
     setError(null);
     try {
+      // The Excel library and the delivery-doc parser load with the file, not with the page.
+      const [XLSX, { parseDeliveryDoc }] = await Promise.all([import("xlsx"), import("@/lib/sap-stock")]);
       const doc = parseDeliveryDoc(XLSX.read(await f.arrayBuffer()));
       setLines(doc.map((d) => ({ sku: d.sku, batch_lot: d.batch_lot, quantity: String(d.quantity) })));
     } catch (e) { setError(`${f.name}: ${(e as Error).message}`); }
