@@ -24,6 +24,7 @@
 - Never deploy or touch the `fefo-allocator-1` Vercel project; this plan does not deploy at all.
 
 **Spec amendments (agreed in chat 2026-09-28, apply them):**
+
 1. A `MISMATCH` attempt does **not** require a note (requiring one would tell a blind checker "wrong" before saving and allow trial-and-error). The resolver's note stays required.
 2. Completed picks of a **cancelled** wave stay visible: shipment state `CANCELLED`, not auditable, not loadable, with a warning to return the cartons.
 3. **Both** resolutions open a recount of the source bin.
@@ -43,40 +44,42 @@
 
 ## File map
 
-| File | Responsibility |
-|---|---|
-| `lib/pick-audit.ts` (new) | vocabulary, `normBatch`, `pickAuditErrors`, `allowedResolutions`, KPI helpers |
-| `tests/pick-audit.test.ts` (new) | unit tests for the above |
-| `scripts/sql-test.sh` (new) | rebuild scratch DB, run SQL tests |
-| `supabase/migrations/0024_pick_audit.sql` (new) | all schema, views, functions, backfill |
-| `supabase/tests/10_pick_audit.sql` (new) | SQL tests of 0024 |
-| `supabase/tests/06_audits.sql` | PICK part replaced by "refused" check |
-| `lib/inventory-control.ts` | `PICK_AUDIT` reason, `pick_accuracy_target_pct` policy |
-| `components/app/item-scan-input.tsx` | `onItem(item, code)` passes the raw code |
-| `components/app/live-refresh.tsx` | `pick_audits`, `shipment_loads` live tables |
-| `components/app/nav.tsx` | Audit picking for all roles |
-| `app/(app)/admin/settings/policy-form.tsx` | target field |
-| `app/(app)/counts/counts-client.tsx` | `PICK_AUDIT` source label |
-| `app/(app)/audit/audit-header.tsx` | `live`, `putaway` props |
-| `app/(app)/audit/picking/page.tsx` | tabs: shipments / accuracy |
-| `app/(app)/audit/picking/shipment-list.tsx` (new) | shipment table |
-| `app/(app)/audit/picking/accuracy-view.tsx` (new) | KPI tab |
-| `app/(app)/audit/picking/[wave]/[shipment]/page.tsx` (new) | shipment detail (server, blind mapping) |
-| `app/(app)/audit/picking/[wave]/[shipment]/shipment-audit-client.tsx` (new) | lines + audit / resolve / load dialogs |
-| `app/(app)/waves/page.tsx`, `waves-client.tsx` | shipment audit badges |
-| `app/(app)/dashboard/page.tsx` | pick accuracy from `pick_audit_first`, waiting tile |
-| `README.md`, `docs/INVENTORY_CONTROL.md` | test list, how it works |
+| File                                                                          | Responsibility                                                                     |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `lib/pick-audit.ts` (new)                                                   | vocabulary,`normBatch`, `pickAuditErrors`, `allowedResolutions`, KPI helpers |
+| `tests/pick-audit.test.ts` (new)                                            | unit tests for the above                                                           |
+| `scripts/sql-test.sh` (new)                                                 | rebuild scratch DB, run SQL tests                                                  |
+| `supabase/migrations/0024_pick_audit.sql` (new)                             | all schema, views, functions, backfill                                             |
+| `supabase/tests/10_pick_audit.sql` (new)                                    | SQL tests of 0024                                                                  |
+| `supabase/tests/06_audits.sql`                                              | PICK part replaced by "refused" check                                              |
+| `lib/inventory-control.ts`                                                  | `PICK_AUDIT` reason, `pick_accuracy_target_pct` policy                         |
+| `components/app/item-scan-input.tsx`                                        | `onItem(item, code)` passes the raw code                                         |
+| `components/app/live-refresh.tsx`                                           | `pick_audits`, `shipment_loads` live tables                                    |
+| `components/app/nav.tsx`                                                    | Audit picking for all roles                                                        |
+| `app/(app)/admin/settings/policy-form.tsx`                                  | target field                                                                       |
+| `app/(app)/counts/counts-client.tsx`                                        | `PICK_AUDIT` source label                                                        |
+| `app/(app)/audit/audit-header.tsx`                                          | `live`, `putaway` props                                                        |
+| `app/(app)/audit/picking/page.tsx`                                          | tabs: shipments / accuracy                                                         |
+| `app/(app)/audit/picking/shipment-list.tsx` (new)                           | shipment table                                                                     |
+| `app/(app)/audit/picking/accuracy-view.tsx` (new)                           | KPI tab                                                                            |
+| `app/(app)/audit/picking/[wave]/[shipment]/page.tsx` (new)                  | shipment detail (server, blind mapping)                                            |
+| `app/(app)/audit/picking/[wave]/[shipment]/shipment-audit-client.tsx` (new) | lines + audit / resolve / load dialogs                                             |
+| `app/(app)/waves/page.tsx`, `waves-client.tsx`                            | shipment audit badges                                                              |
+| `app/(app)/dashboard/page.tsx`                                              | pick accuracy from`pick_audit_first`, waiting tile                               |
+| `README.md`, `docs/INVENTORY_CONTROL.md`                                  | test list, how it works                                                            |
 
 ---
 
 ### Task 1: Pure picking-audit rules (`lib/pick-audit.ts`)
 
 **Files:**
+
 - Create: `lib/pick-audit.ts`
 - Create: `tests/pick-audit.test.ts`
 - Modify: `package.json` (`test` script)
 
 **Interfaces:**
+
 - Produces:
   - `PICK_ERRORS`, `type PickError`, `PICK_ERROR_LABEL`
   - `type LineState = "AUTO_PASS" | "TODO" | "OK" | "MISMATCH" | "RESOLVED"`, `LINE_STATE_LABEL`
@@ -385,11 +388,13 @@ git commit -m "feat(pick-audit): error rule and accuracy maths"
 ### Task 2: Schema, picker stamping, views, SQL test runner
 
 **Files:**
+
 - Create: `scripts/sql-test.sh`
 - Create: `supabase/migrations/0024_pick_audit.sql`
 - Create: `supabase/tests/10_pick_audit.sql`
 
 **Interfaces:**
+
 - Consumes: `person_name`, `same_person`, `item_by_barcode`, `inventory_policy` (0016), `post_task`, `complete_wave` (0007), `save_plan` (0004).
 - Produces (SQL):
   - `pick_tasks.picked_by_name text`, `.scanned_code text`, `.bulk_posted boolean`
@@ -884,10 +889,12 @@ git commit -m "feat(pick-audit): attempts, loads, views and picker stamping"
 ### Task 3: `record_pick_audit` — the blind audit
 
 **Files:**
+
 - Modify: `supabase/migrations/0024_pick_audit.sql` (append section 6 before the `Privileges` section)
 - Modify: `supabase/tests/10_pick_audit.sql` (insert section B before `rollback;`)
 
 **Interfaces:**
+
 - Consumes: Task 2 tables, views, `pick_audit_errors`, `norm_batch`.
 - Produces: `record_pick_audit(p_task_id uuid, p_checker_name text, p_found text, p_counted numeric, p_batch text, p_expiry date, p_damaged boolean, p_note text) → jsonb` returning `{result, errors[], attempt, expected:{sku,batch,expiry,qty}, found:{sku,code,batch,expiry,qty,damaged}}`.
 
@@ -1035,10 +1042,12 @@ git commit -m "feat(pick-audit): blind audit attempts with derived errors"
 ### Task 4: `resolve_pick_mismatch` — the two supervisor acceptances
 
 **Files:**
+
 - Modify: `supabase/migrations/0024_pick_audit.sql` (append section 7 before `Privileges`; grants in `Privileges`)
 - Modify: `supabase/tests/10_pick_audit.sql` (insert section C before `rollback;`)
 
 **Interfaces:**
+
 - Consumes: `pick_audits`, `held_qty` (0017), `open_pick_tasks` (0007), `create_count_task` (0019), adjustment guard settings `app.by_name`, `app.adjust_reason`, `app.adjust_approved` (0018).
 - Produces: `resolve_pick_mismatch(p_audit_id uuid, p_action text, p_by_name text, p_note text, p_bin text default null) → jsonb` `{result:'RESOLVED', action, count_task}`.
 
@@ -1255,11 +1264,13 @@ git commit -m "feat(pick-audit): supervisor accepts short or other batch with st
 ### Task 5: Loading gate, old PICK audits, legacy backfill, realtime
 
 **Files:**
+
 - Modify: `supabase/migrations/0024_pick_audit.sql` (sections 8–10 before `Privileges`; realtime + backfill call at the very end)
 - Modify: `supabase/tests/10_pick_audit.sql` (section D before `rollback;`)
 - Modify: `supabase/tests/06_audits.sql` (PICK part)
 
 **Interfaces:**
+
 - Produces:
   - `mark_shipment_loaded(p_wave_id uuid, p_shipment text, p_by_name text, p_truck text default null) → jsonb` `{result:'LOADED', shipment, lines}`
   - `record_audit(...)` now refuses `PICK` with `Pakai audit picking baru`
@@ -1552,6 +1563,7 @@ git commit -m "feat(pick-audit): loading gate, legacy backfill, old PICK audit r
 ### Task 6: Shared vocabulary and small UI plumbing
 
 **Files:**
+
 - Modify: `lib/inventory-control.ts`
 - Modify: `app/(app)/admin/settings/policy-form.tsx`
 - Modify: `app/(app)/counts/counts-client.tsx`
@@ -1561,6 +1573,7 @@ git commit -m "feat(pick-audit): loading gate, legacy backfill, old PICK audit r
 - Modify: `app/(app)/audit/audit-header.tsx`
 
 **Interfaces:**
+
 - Produces: `InventoryPolicy.pick_accuracy_target_pct: number`; `ItemScanInput` prop `onItem?: (item: ScannedItem | null, code: string) => void`; `LiveTable` includes `"pick_audits" | "shipment_loads"`; `AuditHeader` props `live?: LiveTable[]`, `putaway?: boolean`.
 
 - [ ] **Step 1: `lib/inventory-control.ts`**
@@ -1605,9 +1618,7 @@ const NUMBERS = ["default_shelf_life_months", "min_dispatch_days", "near_expiry_
 and give the number input decimals: in the `NUMBERS.map` input, add `step="any"` after `min={0}`.
 
 - [ ] **Step 3: `counts-client.tsx`** — in the `SOURCE` record add `, PICK_AUDIT: "Audit picking"` before the closing `}`.
-
 - [ ] **Step 4: `item-scan-input.tsx`** — change the `onItem` type in the props to `onItem?: (item: ScannedItem | null, code: string) => void;` and in `resolve` change `onItem?.(item);` to `onItem?.(item, c);`.
-
 - [ ] **Step 5: `live-refresh.tsx`** — extend the union:
 
 ```ts
@@ -1672,11 +1683,13 @@ git commit -m "feat(pick-audit): policy target, reason code, scan code and live 
 ### Task 7: `/audit/picking` — shipment list and accuracy tab
 
 **Files:**
+
 - Replace: `app/(app)/audit/picking/page.tsx`
 - Create: `app/(app)/audit/picking/shipment-list.tsx`
 - Create: `app/(app)/audit/picking/accuracy-view.tsx`
 
 **Interfaces:**
+
 - Consumes: views `pick_audit_shipment`, `pick_audit_first`, `pick_audit_line`; `lib/pick-audit.ts` (Task 1); `AuditHeader` (Task 6); `TabsNav`.
 - Produces: `ShipmentRow` type (exported from `shipment-list.tsx`), used again in Task 8.
 
@@ -1944,10 +1957,12 @@ git commit -m "feat(pick-audit): shipment list and accuracy tab"
 ### Task 8: Shipment detail — blind audit, resolve and load dialogs
 
 **Files:**
+
 - Create: `app/(app)/audit/picking/[wave]/[shipment]/page.tsx`
 - Create: `app/(app)/audit/picking/[wave]/[shipment]/shipment-audit-client.tsx`
 
 **Interfaces:**
+
 - Consumes: RPCs `record_pick_audit`, `resolve_pick_mismatch`, `mark_shipment_loaded` (Tasks 3–5, argument names exactly as there); `ShipmentRow`, `StateBadge` (Task 7); `ItemScanInput` with `onItem(item, code)` (Task 6); `lib/pick-audit.ts`.
 
 - [ ] **Step 1: Create the server page** — `[wave]/[shipment]/page.tsx`:
@@ -2370,15 +2385,18 @@ git commit -m "feat(pick-audit): shipment page with blind audit, acceptances and
 ### Task 9: Waves badges, dashboard, docs
 
 **Files:**
+
 - Modify: `app/(app)/waves/page.tsx`, `app/(app)/waves/waves-client.tsx`
 - Modify: `app/(app)/dashboard/page.tsx`
 - Modify: `README.md`, `docs/INVENTORY_CONTROL.md`
 
 **Interfaces:**
+
 - Consumes: `pick_audit_shipment`, `pick_audit_first`, `SHIPMENT_STATE_LABEL`, `SHIPMENT_STATE_TONE`, `ShipmentState`.
 - Produces: `WavesClient` prop `audit: Record<string, ShipmentState>` keyed `${wave_id}|${shipment_number}`.
 
 - [ ] **Step 1: Waves page** — in `app/(app)/waves/page.tsx`:
+
   - add `import type { ShipmentState } from "@/lib/pick-audit";`
   - extend the destructuring to `const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }] = await Promise.all([` and append to the array:
     ```ts
@@ -2389,8 +2407,8 @@ git commit -m "feat(pick-audit): shipment page with blind audit, acceptances and
     ```tsx
           audit={Object.fromEntries((auditStates ?? []).map((a) => [`${a.wave_id}|${a.shipment_number}`, a.state as ShipmentState]))}
     ```
-
 - [ ] **Step 2: Waves client** — in `waves-client.tsx`:
+
   - add `import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";`
   - `WavesClient` props: add `audit` to the destructuring and `/** audit / loading state per `${wave_id}|${shipment}` (0024) */ audit: Record<string, ShipmentState>;` to its type
   - pass `audit={audit}` on `<WaveCard …>`; add `audit` to `WaveCard`'s destructuring and `audit: Record<string, ShipmentState>;` to its prop type
@@ -2406,8 +2424,8 @@ git commit -m "feat(pick-audit): shipment page with blind audit, acceptances and
               );
             })}
     ```
-
 - [ ] **Step 3: Dashboard** — in `app/(app)/dashboard/page.tsx`:
+
   - extend the destructuring after `{ data: lastRecon }` with `, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }` and append to the `Promise.all` array:
     ```ts
         fetchAll<{ result: string }>((a, b) => supabase.from("pick_audit_first").select("result").gte("audited_at", accSince).order("task_id").range(a, b)),
@@ -2427,12 +2445,13 @@ git commit -m "feat(pick-audit): shipment page with blind audit, acceptances and
             <Kpi label="Shipment menunggu audit / muat" value={fmtNum(shipmentsWaiting ?? 0)} note="semua baris harus lolos audit sebelum dimuat" href="/audit/picking" tone={shipmentsWaiting ? "warn" : undefined} />
     ```
   - add `"pick_audits", "shipment_loads"` to the dashboard `PageHeader` `live` array.
-
 - [ ] **Step 4: Docs**
+
   - `README.md` §2.2: add after the `09_inventory_control.sql` line:
     ```
     psql -f supabase/tests/10_pick_audit.sql     # audit picking (0024), idem
     ```
+
     and under it: ``Atau semuanya sekaligus di database lokal sementara: `scripts/sql-test.sh`.``
   - `docs/INVENTORY_CONTROL.md`: add before `## 5. Mengukur`:
     ```markdown
@@ -2444,7 +2463,6 @@ git commit -m "feat(pick-audit): shipment page with blind audit, acceptances and
     - Shipment hanya bisa **dimuat** bila semua barisnya lolos. Setelah dimuat tidak bisa diubah.
     - Akurasi picking dihitung dari percobaan pertama (Audit picking → Akurasi picking): per picker, SKU, aisle dan jenis kesalahan, plus kepatuhan scan.
     ```
-
 - [ ] **Step 5: Verify**
 
 Run: `npm run typecheck && npm run lint && npm test`
@@ -2469,6 +2487,7 @@ Run: `scripts/sql-test.sh && npm run typecheck && npm run lint && npm test && np
 Expected: every SQL file 0 FAIL (10: 70 PASS), TS tests pass, build succeeds.
 
 - [ ] **Step 2: Walk the flow in the app** — apply 0024 to the **local** Supabase stack (`supabase_db_ckb-warehouse` container, `supabase migration up` or `psql` on its port) — never a hosted project — then `npm run dev` and, using the `run` skill if needed:
+
   1. `/waves`: post a pick with name "Budi" → shipment badge "Siap audit" (after all its picks are posted).
   2. `/audit/picking` → open the shipment: the line shows "disembunyikan sampai diaudit".
   3. Audit as "Budi" → refused (checker = picker). Audit as "Sari" with a short count → result shows "Selisih: Kurang" and the side-by-side table.
@@ -2476,5 +2495,4 @@ Expected: every SQL file 0 FAIL (10: 70 PASS), TS tests pass, build succeeds.
   5. "Muat shipment" as "Andi" → state "Dimuat"; the Audit buttons are gone.
   6. Accuracy tab shows 1 line, 0 % line accuracy, picker Budi; dashboard tile counts drop.
   7. `/counts` shows a new "Audit picking" recount for the source bin.
-
 - [ ] **Step 3: Report** — list anything that did not behave as above with the exact error text; do not claim done until Steps 1–2 pass.

@@ -45,7 +45,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 
 | Bins | SKUs | Stock rows | Cartons | Migrations | SQL tests | TS test files |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **2,570** | **106** | **1,790** | **52,078** | **55** | **31** | **33** |
+| **2,570** | **106** | **1,790** | **52,078** | **60** | **35** | **38** |
 
 <sub>Stock figures are the seed (24 Sep 2026 WMS file). Aisles CA–CF; aisle CG does not exist.</sub>
 
@@ -60,7 +60,8 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <tr><td><b>3D warehouse</b></td><td>2,570 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
 <tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>
 <tr><td><b>Waves</b></td><td>Idempotent posting into the <code>movements</code> ledger; pick and its Bin To Bin as one line; the rest of an opened pallet named on both rows (<code>CF40A01 (dipindah NO 6)</code>)</td></tr>
-<tr><td><b>Corrections</b></td><td><code>Ubah baris</code>, <code>Perbaiki</code> (one-tap fix for a <code>stok kurang</code> row), <code>Pecah</code>, <code>Batalkan posting</code> (also pick only), <code>Posting Bin To Bin saja</code>, <code>Tambah item</code> / <code>Tambah order</code></td></tr>
+<tr><td><b>Corrections</b></td><td><code>Isi dari picklist</code> (the whole wave from the paper, one posting), <code>Perlu ditangani</code> panel with <code>Perbaiki</code> / <code>Perbaiki semua</code>, <code>Posting sesuai lapangan</code>, <code>Ubah baris</code>, <code>Pecah</code>, <code>Batalkan posting</code> (also pick only), <code>Posting Bin To Bin saja</code>, <code>Tambah item</code> / <code>Tambah order</code>; every risky action lists the rows of other waves it would affect</td></tr>
+<tr><td><b>Finding things</b></td><td>Tap a bin for its stock, open rows and movements; <code>Riwayat</code> per row; filter by SKU or bin, only open, only problems; finished waves fold away</td></tr>
 <tr><td><b>Putaway & pickfaces</b></td><td>Sheet import with per-row conflict decisions; one fixed pick bin per SKU</td></tr>
 <tr><td><b>Inventory control</b></td><td>Holds, reason codes, four-eyes approval, blind cycle counts, receiving, SAP reconciliation, FEFO compliance, <code>Laporan WMS harian</code> (on hand and remain per day)</td></tr>
 <tr><td><b>Audits</b></td><td>Blind picking audit in staging and at the rack, putaway audit, WMS-file audit; a shipment loads only when every line passes</td></tr>
@@ -86,7 +87,7 @@ The order matters: an open wave of an earlier day still reserves stock and bring
 | **1. Morning, before anything** | Close every wave of an earlier date: `Selesaikan wave` if it shipped, `Batalkan` if not. `Tunda` only for an order that really comes back. | `Wave` (Alokasi warns and lists them) |
 | **2. After inbound / putaway** | Import the day's WMS file with **`Ganti seluruh stok`** | `Import` |
 | **3. Plan** | Run the day from the database or from the WMS file, review, save | `Alokasi` |
-| **4. Pick** | Post what physically happened, when it happened. A row that differs: `Berbeda`. A row in `stok kurang`: `Perbaiki`. | `Wave` |
+| **4. Pick** | Post what physically happened: `Posting` per row on the floor, or `Isi dari picklist` at the desk to copy a whole filled-in picklist and post it at once. Work the `Perlu ditangani` panel from the top. | `Wave` |
 | **5. Count** | Finish the count tasks opened by short picks the same day | `Cycle count` |
 | **6. End of day** | Download on hand and remain for SAP | `Inventory` → `Stok` → `Laporan WMS harian` |
 
@@ -132,7 +133,7 @@ The values below are **assumptions**. Change each one in the single file or menu
 ### 2.1 Supabase
 
 1. Create a project at supabase.com (Singapore region).
-2. Apply the migrations in filename order. The set is 55 files, `supabase/migrations/0001_schema.sql` through `supabase/migrations/0055_wms_day_report.sql`; use the CLI rather than the SQL Editor so nothing is skipped or run twice:
+2. Apply the migrations in filename order. The set is 60 files, `supabase/migrations/0001_schema.sql` through `supabase/migrations/0060_post_wave_sheet_final.sql`; use the CLI rather than the SQL Editor so nothing is skipped or run twice:
    ```bash
    supabase link --project-ref <ref>
    supabase db push
@@ -189,6 +190,10 @@ psql -f supabase/tests/27_unpost_pick_keep_move.sql      # Batalkan posting, pic
 psql -f supabase/tests/28_post_move_early.sql            # Posting Bin To Bin saja (0053), same
 psql -f supabase/tests/29_block_aisle_cg.sql             # aisle CG blocked (0054), same
 psql -f supabase/tests/30_wms_day_report.sql             # Laporan WMS harian (0055), same
+psql -f supabase/tests/31_post_as_done.sql               # Posting sesuai lapangan (0056), same
+psql -f supabase/tests/32_post_wave_sheet.sql            # Isi dari picklist (0057), same
+psql -f supabase/tests/33_bin_checks.sql                 # Cek sisa bin (0058), same
+psql -f supabase/tests/34_putaway_moved_in.sql           # putaway of a pallet rest already moved in (0059), same
 ```
 Or all of them at once against a temporary local database: `scripts/sql-test.sh`.
 
@@ -327,7 +332,7 @@ Pages: **`Audit picking`** (per shipment, per rack, per WMS file, plus an accura
 
 Test: `supabase/tests/10`–`13`, `tests/pick-audit.test.ts`, `tests/sheet-audit-export.test.ts`, `tests/putaway-audit-export.test.ts`.
 
-### Phase 12 — Wave corrections, floor exceptions and daily reporting (`0033`–`0055`)
+### Phase 12 — Wave corrections, floor exceptions and daily reporting (`0033`–`0060`)
 
 Everything here exists because of something that happened on the floor; each migration header records the real case.
 
@@ -352,9 +357,17 @@ Everything here exists because of something that happened on the floor; each mig
 - `0054` aisle **CG** does not exist: its 400 template bins from the WMS sheet are blocked, so they leave `Bin kosong` and are refused as targets; a later import keeps them blocked.
 - `0055` **`Laporan WMS harian`** rebuilds, for any date, the WMS sheet's on hand (after inbound and putaway, before picking) and remain (after picking, the next day's on hand) per bin from the movements ledger: `Remain = On hand − PICK − b out + b in` on every row, an undone pick counted as un-picking. Downloads as Excel with a per-SKU sheet for SAP.
 
-Page-level tools in the same phase, no migration of their own: **`Perbaiki`** on a `stok kurang` row proposes the smallest fix in one sentence (shrink the Bin To Bin, or the bin the engine's own `selectNextBin` picks from current free stock) and saves it through `Ubah baris`; the Bin To Bin column names where an opened pallet's rest goes when another wave moves it; cancelled rows hide behind `Tampilkan dibatalkan`; `Alokasi` and `Import` warn about open waves of earlier dates.
+- `0056` **`Posting sesuai lapangan`** takes what the picker really did — bin + batch, cartons taken, where the pallet rest went — and in one transaction corrects the row (`edit_pick_row`) and posts the pick and its move; any failure posts nothing.
+- `0057` **`Isi dari picklist`** (supervisor; the green button on every wave not cancelled) opens in place of the wave's table, as its printed picklist, with every cell editable: bin, batch, expiry, cartons, a second bin (`+ bin lain`, the row is split), the Bin To Bin and its sisa, or `Belum` to leave a row open. Rows already posted can be corrected in the same sheet. One `Simpan & posting` posts everything in one transaction (`post_wave_sheet`). Nothing is refused except a bin code that does not exist: the preview names it, and a source the system says is short first gets an open relocation into it posted, then the rest booked as a `FOUND` adjustment (`Koreksi picklist`) with a count task on the bin. Every such correction is listed under **`Koreksi picklist`** on the Wave page for that wave date (`picklist_corrections`): SKU, bin, batch, how much was added, system versus paper, the row it came from, the bin's stock now and its count status, with `Adjust` per line and `Unduh Excel`.
+- `0058` **`Cek sisa bin`**: after a phone Posting that leaves at most `bin_check_max_qty` cartons (default 5, Pengaturan) of the SKU + batch in the bin, the dialog asks how many are left, blind (`Kosong (0)` / a number / `Lewati`). Answers are logged in `bin_checks`; one that differs from the system opens a count task on the bin. Stock is not changed by the answer.
+- `0059` **Putaway of a pallet rest already moved in**: a `data putaway` row into a bin that received the same SKU by Bin To Bin in the last two days is a `moved_in` conflict (shown with that move). It posts only with `Palet baru: tetap posting`; left alone it becomes a count task, so a pallet rest is never counted twice.
+- `0060` re-applies 0057's final version (`post_wave_sheet`, `picklist_corrections`): 0057 reached live as a draft before it was finished, and an applied migration never runs again.
+- **`Bandingkan dengan sistem`** (Import page, after validation): the WMS file against the system's stock now, nothing imported. Per bin and SKU: same, batch/expiry name only, moved to another bin (the SKU total agrees), quantity differs, only in the file, only in the system; filter chips and `Unduh selisih`. The way to run the system next to the WMS sheet until they agree every morning.
+- **Undoing a posted Bin To Bin** asks for confirmation that the cartons physically went back; a move that happened (to another bin or quantity) is corrected with `Isi dari picklist` or `Mutasi`, not undone.
 
-Test: `supabase/tests/14`–`30`, plus `tests/carry-over.test.ts`, `tests/wave-edits.test.ts`, `tests/wave-fix.test.ts`, `tests/pair-moves.test.ts`, `tests/pickpath.test.ts`.
+Page-level tools in the same phase, no migration of their own: the **`Perlu ditangani`** panel lists every row of the day that needs a person (stok kurang, waiting on a Bin To Bin, a short pick's count) with its button, and **`Perbaiki semua`** proposes fixes for all stok kurang rows at once, never giving two rows the same cartons; tapping a bin opens its stock, open rows and movements; **`Riwayat`** shows a row's decisions and stock movements in order; `Tunda`, `Posting Bin To Bin saja`, `Batalkan posting`, `Ubah baris` and `Perbaiki` list the rows of other waves they would make stok kurang or hold up (the database's own rules replayed, `lib/wave-impact.ts`), and `Posting Bin To Bin saja` asks for the physical move first; a filter bar and folded finished waves keep the page short. **`Perbaiki`** on a `stok kurang` row proposes the smallest fix in one sentence (shrink the Bin To Bin, or the bin the engine's own `selectNextBin` picks from current free stock) and saves it through `Ubah baris`; the Bin To Bin column names where an opened pallet's rest goes when another wave moves it; cancelled rows hide behind `Tampilkan dibatalkan`; `Alokasi` and `Import` warn about open waves of earlier dates.
+
+Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-edits.test.ts`, `tests/wave-fix.test.ts`, `tests/wave-impact.test.ts`, `tests/pair-moves.test.ts`, `tests/pickpath.test.ts`.
 
 ---
 
@@ -484,8 +497,8 @@ Test: `supabase/tests/14`–`30`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - [x] Import of the real WMS file: 2,614 rows in, re-import after the seed gives 0 movements.
 - [x] Labels: exact page sizes (80 × 85 mm and 80 × 469 mm); QR and Code 128 read by zbar from the 203 dpi render.
 - [x] `tsc`, ESLint, and `next build` pass.
-- [x] SQL test suite: `supabase/tests/00_local_auth_stub.sql`–`supabase/tests/30_wms_day_report.sql` (31 files), covering the stock rules and RLS, the allocation flow, rolling execution, putaway import, pickfaces, counts and corrections, audits, stock fixes, inventory control, picking, rack and putaway audits, the WMS-file audit, relocations, parked-wave carry-over, the pick order guard, picks found in another bin, putaway redirect, add/change relocation and pick bin, batch/expiry-aware pick-bin changes, Tambah item edits, Ubah baris, pick-only undo, Posting Bin To Bin saja, the aisle-CG block, and the daily WMS report.
-- [x] TypeScript suite: `npm test` runs 33 test files, 0 failures, including the FEFO engine, leftover and FEFO regression, the daily workflow, pickface behaviour, pick path, stress runs on the real workbooks, database-versus-workbook stock parity, batch-code decoding, minimum shelf life, SAP stock, and the audit exports, Tambah item edits, and Perbaiki proposals.
+- [x] SQL test suite: `supabase/tests/00_local_auth_stub.sql`–`supabase/tests/31_post_as_done.sql` (32 files), covering the stock rules and RLS, the allocation flow, rolling execution, putaway import, pickfaces, counts and corrections, audits, stock fixes, inventory control, picking, rack and putaway audits, the WMS-file audit, relocations, parked-wave carry-over, the pick order guard, picks found in another bin, putaway redirect, add/change relocation and pick bin, batch/expiry-aware pick-bin changes, Tambah item edits, Ubah baris, pick-only undo, Posting Bin To Bin saja, the aisle-CG block, the daily WMS report, and posting as it happened.
+- [x] TypeScript suite: `npm test` runs 34 test files, 0 failures, including the FEFO engine, leftover and FEFO regression, the daily workflow, pickface behaviour, pick path, stress runs on the real workbooks, database-versus-workbook stock parity, batch-code decoding, minimum shelf life, SAP stock, and the audit exports, Tambah item edits, Perbaiki proposals, and the impact check.
 - [x] End-to-end on local Supabase (Auth + PostgREST, supervisor and operator accounts): the 24 Sep file → 1,790 stock rows → allocation of 1,293 cartons → 8 waves / 51 tasks → all waves completed by the operator → stock 52,078 → 50,785, with every ledger row in the operator's name.
 
 **Not yet:**
@@ -503,4 +516,4 @@ Test: `supabase/tests/14`–`30`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - Movement filter dates use WIB (UTC+7).
 - **Explicit grants (`0005`).** New Supabase projects no longer grant SELECT/INSERT/EXECUTE to `authenticated` by default; without `0005` every query fails with "permission denied". Safe to run on an existing project.
 - Old allocator audit documents live in `docs/archive/allocator/` and refer to code that has since been replaced.
-- The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0055_wms_day_report.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).
+- The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0060_post_wave_sheet_final.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).

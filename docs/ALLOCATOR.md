@@ -106,15 +106,22 @@ wave at a time from the Wave page.
 
 The replay (`relocateByWaveOrder`, then `settleSisa` in `ledger.ts`) also decides:
 
-- **Where the stock is.** Once an earlier row moved a batch's leftover to the
-  pickface, later picks of that batch go to the pickface.
+- **Where the stock is.** Once an earlier row carried a pallet's leftover
+  down (to the pickface or an overflow bin), later picks of that pallet go
+  where the leftover went.
 - **Which row opens a sealed pallet**: the first one in execution order.
-- **The bin-to-bin move.** A row that breaks a pallet away from the SKU's
-  pickface, while the pickface is below its target, carries the leftover to
-  the pickface right after the pick. If the pickface is already at or above
-  its target and no later row needs that SKU, the leftover goes to the
-  nearest empty Level-A bin instead (one-time overflow, never registered as
-  a dedicated pickface); with no empty Level-A slot it stays (`tetap di bin`). The printed row shows the destination in
+- **The bin-to-bin move. A reserve bin is picked from once.** The first row
+  that leaves loose cartons in a reserve pallet (Level B–E, not a pickface)
+  carries all of them down right after the pick, whether the run opened the
+  pallet or it was already open: to the SKU's pickface while it is below its
+  target, otherwise (pickface full, or none) to the nearest empty Level-A
+  bin, same bay first (one-time overflow, never registered as a dedicated
+  pickface). With no empty Level-A slot it stays (`tetap di bin`). Inside one
+  shipment the move waits for that shipment's last row on the pallet. Until
+  5 Oct 2026 the rest stayed up until the *last* pick of the run, so a later
+  wave sent the forklift to the same reserve bin again (CE24D01: NO 3 and
+  NO 6). A sealed pallet broken on Level A (not the pickface) still sends
+  its leftover to the pickface only while the pickface is below target. The printed row shows the destination in
   *Bin To Bin* (`CB01A01`) and, as *Sisa*, the leftover to carry (34): what is
   in the bin right after the pick (`sisaPrinted` in picklist.ts). Internally
   `qtyRemainingInBin` is what stays once the move is done too (0). The plan's REPLENISH task, the
