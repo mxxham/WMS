@@ -1,7 +1,6 @@
 "use client";
 import { useMemo } from "react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,7 +59,9 @@ export function FefoTab({ lines, nearDays, days, exceptions, picks, error, shelf
   const mismatchBins = new Set(issues.map((i) => i.row.bin_code)).size;
   const compliance = picks ? ((picks - exceptions.length) / picks) * 100 : null;
 
-  function exportNear() {
+  async function exportNear() {
+    // Loaded on click: the Excel library (~140 kB) is not part of the page.
+    const XLSX = await import("xlsx");
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(groups.map((g) => ({
       item: g.sku, Description: g.description, Batch: g.batch, "Expired Date": g.expiry, "GR date": g.gr ?? "",

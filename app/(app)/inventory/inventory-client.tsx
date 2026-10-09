@@ -1,8 +1,9 @@
 "use client";
+import { unpackLines, type PackedLines } from "@/lib/inventory-pack";
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
+import { AdjustLineButton } from "@/components/app/adjust-line";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpiryBadge } from "@/components/ui/badge";
@@ -37,10 +38,14 @@ const SORTS: Sort[] = ["sku", "qty", "expiry", "reserved"];
 
 const LEVELS = ["A", "B", "C", "D", "E"];
 
-export function InventoryClient({ lines, tasks, initialQuery, initialAbc, initialSort, initialAisle, initialLevel, initialView, emptyBins = [] }: {
-  lines: InvLine[]; tasks: OpenTask[]; initialQuery: string; initialAbc?: string; initialSort?: string;
+export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initialSort, initialAisle, initialLevel, initialView, emptyBins = [], canAdjust = false }: {
+  /** the stock lines, packed (lib/inventory-pack): each SKU and bin once */
+  packed: PackedLines; tasks: OpenTask[]; initialQuery: string; initialAbc?: string; initialSort?: string;
+  /** supervisors adjust a line right here (AdjustLineButton) instead of finding it again on Adjust stok */
+  canAdjust?: boolean;
   initialAisle?: string; initialLevel?: string; initialView?: View; emptyBins?: { code: string; blocked: boolean }[];
 }) {
+  const lines: InvLine[] = useMemo(() => unpackLines(packed), [packed]);
   const [q, setQ] = useState(initialQuery);
   const [loc, setLoc] = useState<LocType | "all">("all");
   const [aisle, setAisle] = useState(initialAisle ?? "all");
@@ -117,7 +122,9 @@ export function InventoryClient({ lines, tasks, initialQuery, initialAbc, initia
     for (const r of rows) {
       r.bins = new Set(r.lines.map((l) => l.bin_code)).size;
       r.batches = new Set(r.lines.map((l) => l.batch_lot)).size;
-      r.lines.sort((a, b) => (a.expiry_date ?? "9999").localeCompare(b.expiry_date ?? "9999") || a.bin_code.localeCompare(b.bin_code));
+      // Opened stock first (pickfaces, broken pallets: fewer cartons than UPP), full pallets below; FEFO inside each.
+      const full = (l: InvLine) => (l.upp && Number(l.quantity) >= Number(l.upp) ? 1 : 0);
+      r.lines.sort((a, b) => full(a) - full(b) || (a.expiry_date ?? "9999").localeCompare(b.expiry_date ?? "9999") || a.bin_code.localeCompare(b.bin_code));
     }
     return rows.sort((a, b) =>
       sort === "qty" ? b.total - a.total
@@ -142,7 +149,9 @@ export function InventoryClient({ lines, tasks, initialQuery, initialAbc, initia
     bins: new Set(filtered.map((l) => l.bin_code)).size,
   }), [filtered]);
 
-  function exportXlsx() {
+  async function exportXlsx() {
+    // Loaded on click: the Excel library (~140 kB) is not part of the page.
+    const XLSX = await import("xlsx");
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(skuRows.map((r) => ({
       SKU: r.sku, Deskripsi: r.description, ABC: r.abc ?? "", UOM: r.uom ?? "", UPP: r.upp ?? "",
@@ -264,12 +273,12 @@ export function InventoryClient({ lines, tasks, initialQuery, initialAbc, initia
                     <Td className="whitespace-nowrap text-xs">{fmtDate(r.earliest)} <ExpiryBadge status={expiryStatus(r.earliest)} /></Td>
                   </tr>
                   {open.has(r.sku) && (
-                    <tr><td colSpan={14} className="bg-paper px-4 py-2"><LineTable lines={r.lines} compact /></td></tr>
+                    <tr><td colSpan={14} className="bg-paper px-4 py-2"><LineTable lines={r.lines} compact canAdjust={canAdjust} /></td></tr>
                   )}
                 </Fragment>
               ))}</tbody>
             </Table>
-          ) : <LineTable lines={lineRows.slice(0, limit)} />}
+          ) : <LineTable lines={lineRows.slice(0, limit)} canAdjust={canAdjust} />}
           {(view === "sku" ? skuRows.length : lineRows.length) > limit && (
             <Button variant="outline" className="mt-3" onClick={() => setLimit(limit + PAGE)}>
               Tampilkan lebih banyak ({fmtNum((view === "sku" ? skuRows.length : lineRows.length) - limit)} lagi)
@@ -282,12 +291,12 @@ export function InventoryClient({ lines, tasks, initialQuery, initialAbc, initia
   );
 }
 
-function LineTable({ lines, compact }: { lines: Line[]; compact?: boolean }) {
+function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boolean; canAdjust?: boolean }) {
   return (
     <Table>
       <thead><tr>
         <Th>Bin</Th><Th>Lokasi</Th>{!compact && <><Th>SKU</Th><Th>Deskripsi</Th></>}<Th>Batch</Th><Th>Expired</Th><Th className="text-right">Qty</Th>
-        <Th className="text-right">Dipesan</Th><Th className="text-right">Ditahan</Th><Th className="text-right">Tersedia</Th><Th>Wave</Th><Th>Terima</Th>
+        <Th className="text-right">Dipesan</Th><Th className="text-right">Ditahan</Th><Th className="text-right">Tersedia</Th><Th>Wave</Th><Th>Terima</Th>{canAdjust && <Th><span className="sr-only">Adjust</span></Th>}
       </tr></thead>
       <tbody>{lines.map((l, i) => (
         <tr key={i}>
@@ -303,6 +312,7 @@ function LineTable({ lines, compact }: { lines: Line[]; compact?: boolean }) {
           <Td className="text-right font-semibold tabular">{fmtNum(l.available)}</Td>
           <Td className="text-xs">{l.waves.join(", ") || "–"}</Td>
           <Td className="whitespace-nowrap text-xs">{fmtDate(l.received_date)}</Td>
+          {canAdjust && <Td><AdjustLineButton line={l} /></Td>}
         </tr>
       ))}</tbody>
     </Table>

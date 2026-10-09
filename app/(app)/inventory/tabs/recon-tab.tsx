@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
+import type { WorkBook } from "xlsx";
 import { Download, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { RECON_STATUS } from "@/lib/inventory-control";
-import { parsePendingList, parseSapStock, type PendingRow, type SapParse } from "@/lib/sap-stock";
+import type { PendingRow, SapParse } from "@/lib/sap-stock";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 
 export type ReconSummary = {
@@ -71,7 +71,7 @@ function NewRecon() {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
   const [asOf, setAsOf] = useState(today());
-  const [file, setFile] = useState<{ name: string; wb: XLSX.WorkBook } | null>(null);
+  const [file, setFile] = useState<{ name: string; wb: WorkBook } | null>(null);
   const [sheet, setSheet] = useState("");
   const [parsed, setParsed] = useState<SapParse | null>(null);
   const [gi, setGi] = useState<PendingRow[]>([]);
@@ -80,25 +80,28 @@ function NewRecon() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function readBook(f: File) { return XLSX.read(await f.arrayBuffer(), { cellDates: false }); }
+  // The Excel library and the SAP parsers load with the first file, not with the page.
+  const sap = () => import("@/lib/sap-stock");
+  async function readBook(f: File) { const XLSX = await import("xlsx"); return XLSX.read(await f.arrayBuffer(), { cellDates: false }); }
   async function onSap(f: File | undefined) {
     setError(null); setParsed(null);
     if (!f) return;
     try {
       const wb = await readBook(f);
       setFile({ name: f.name, wb });
-      const p = parseSapStock(wb);
+      const p = (await sap()).parseSapStock(wb);
       setParsed(p); setSheet(p.sheet);
     } catch (e) { setError((e as Error).message); }
   }
-  function pickSheet(name: string) {
+  async function pickSheet(name: string) {
     setSheet(name); setError(null);
+    const { parseSapStock } = await sap();
     try { setParsed(parseSapStock(file!.wb, name)); } catch (e) { setParsed(null); setError((e as Error).message); }
   }
   async function onPending(f: File | undefined, set: (r: PendingRow[]) => void) {
     setError(null);
     if (!f) return set([]);
-    try { set(parsePendingList(await readBook(f))); } catch (e) { setError(`${f.name}: ${(e as Error).message}`); }
+    try { const book = await readBook(f); set((await sap()).parsePendingList(book)); } catch (e) { setError(`${f.name}: ${(e as Error).message}`); }
   }
 
   async function create() {
@@ -172,7 +175,9 @@ function ReconDetail({ run, lines }: { run: ReconSummary; lines: ReconLine[] }) 
     .sort((a, b) => Math.abs(Number(b.diff_unrestricted)) + Math.abs(Number(b.diff_blocked)) - Math.abs(Number(a.diff_unrestricted)) - Math.abs(Number(a.diff_blocked)) || a.sku.localeCompare(b.sku)), [lines, filter]);
   const open = run.status === "OPEN";
 
-  function exportXlsx() {
+  async function exportXlsx() {
+    // Loaded on click: the Excel library (~140 kB) is not part of the page.
+    const XLSX = await import("xlsx");
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(lines.map((l) => ({
       "SKU CODE": l.sku, "Material Description": l.description ?? "", "Base Unit of Measure": l.sap_uom || l.wms_uom || "",

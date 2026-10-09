@@ -1,6 +1,8 @@
+import { packLines } from "@/lib/inventory-pack";
 import { requireRole } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
+import { unstable_cache } from "next/cache";
 import { PageHeader } from "@/components/app/page-header";
 import { TabsNav } from "@/components/app/tabs-nav";
 import { parsePolicy } from "@/lib/inventory-control";
@@ -29,6 +31,24 @@ const TABS = [
 type Tab = (typeof TABS)[number]["key"];
 
 type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string };
+
+// fefo_exceptions takes ~8s on the live data set; cache both counts per window
+// for 15 min, mirroring the dashboard's getFefoCompliance, so the FEFO tab
+// does not wait on it. A cached function may not read cookies, so it uses the
+// server-only client: two read-only, warehouse-wide queries with no per-user
+// rule, and the page has already required a signed-in user. A failed call is
+// not cached — it throws, and the caller shows the message.
+const getFefoCompliance = unstable_cache(async (days: number) => {
+  const supabase = createServiceClient();
+  const from = new Date(Date.now() - days * 86_400_000).toISOString();
+  const to = new Date(Date.now() + 60_000).toISOString();
+  const [exc, picks] = await Promise.all([
+    supabase.rpc("fefo_exceptions", { p_from: from, p_to: to }),
+    supabase.rpc("fefo_pick_count", { p_from: from, p_to: to }),
+  ]);
+  if (exc.error || picks.error) throw new Error(exc.error?.message ?? picks.error?.message);
+  return { exceptions: (exc.data ?? []) as FefoException[], picks: Number(picks.data ?? 0) };
+}, ["inventory-fefo-compliance"], { revalidate: 900 });
 
 /**
  * Inventory control in one place: the stock (with what is reserved and what
@@ -88,7 +108,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         : Promise.resolve([]),
     ]);
     return (
-      <InventoryClient lines={lines} tasks={tasks} initialQuery={p.q ?? ""} initialAbc={p.abc} initialSort={p.sort}
+      <InventoryClient packed={packLines(lines)} tasks={tasks} canAdjust={supervisor} initialQuery={p.q ?? ""} initialAbc={p.abc} initialSort={p.sort}
         initialAisle={aisle} initialLevel={level} initialView={p.view === "line" || aisle || level ? "line" : "sku"}
         emptyBins={empty.map((e) => ({ code: e.bin_code, blocked: e.status === "blocked" }))} />
     );

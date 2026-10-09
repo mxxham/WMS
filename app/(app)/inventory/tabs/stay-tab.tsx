@@ -1,7 +1,6 @@
 "use client";
 import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,7 +112,9 @@ export function StayTab({ lines }: { lines: FefoLine[] }) {
     });
   }
 
-  function exportStay() {
+  async function exportStay() {
+    // Loaded on click: the Excel library (~140 kB) is not part of the page.
+    const XLSX = await import("xlsx");
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(ranked.map((g) => ({
       SKU: g.sku, Deskripsi: g.description, Qty: g.qty, "Terima tertua": g.oldest ? fmtDate(g.oldest) : "",

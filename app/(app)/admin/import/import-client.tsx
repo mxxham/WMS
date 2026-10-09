@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { StaleWavesNotice } from "@/components/app/stale-waves";
+import { ComparePanel } from "./compare-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
@@ -167,6 +168,7 @@ export function ImportClient() {
               {rows.length > 500 && <p className="mt-2 text-xs text-steel-500">Menampilkan 500 baris pertama dari filter ini. Laporan unduhan berisi semua baris bermasalah.</p>}
             </CardContent>
           </Card>
+          <ComparePanel rows={rows} fileName={fileName} />
           <Card>
             <CardContent className="space-y-3">
               <fieldset className="grid gap-2 sm:grid-cols-2">
