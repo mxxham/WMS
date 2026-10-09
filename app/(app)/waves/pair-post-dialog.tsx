@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
+import { BinLeftCheck } from "./bin-left-check";
 import { ItemScanInput } from "@/components/app/item-scan-input";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
@@ -23,6 +24,8 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
   const [moveQty, setMoveQty] = useState(String(m.quantity));
   const [reason, setReason] = useState("");
   const [person, setPerson] = usePersonName();
+  // After a successful posting: Cek sisa bin (0058) — is the pallet bin really empty now?
+  const [checking, setChecking] = useState(false);
   const [scan, setScan] = useState("");
   const [scanned, setScanned] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,16 +61,17 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
     });
     setBusy(false);
     if (error) return setError(error.message);
-    setOpen(false); onDone();
+    setChecking(true);
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => {
       setOpen(o); setError(null);
-      if (o) { setDifferent(false); setPickQty(String(p.quantity)); setReason(""); setScan(""); setScanned(null); setLeft(null); loadLeft(); }
+      if (o) { setChecking(false); setDifferent(false); setPickQty(String(p.quantity)); setReason(""); setScan(""); setScanned(null); setLeft(null); loadLeft(); }
     }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting pick + pindah sisa palet" description={`NO ${p.wave_no} · #${p.seq}`}>
+        {checking ? <BinLeftCheck taskId={p.id} person={person} onDone={() => { setOpen(false); onDone(); }} /> : (
         <div className="space-y-4">
           <div className="space-y-1 rounded-md bg-plate/30 p-3 text-base">
             <p>1. Ambil <b>{fmtNum(plannedPick)} {p.uom ?? ""}</b> SKU {p.sku} batch {p.batch_lot || "–"} dari <b>{p.from_bin}</b> untuk shipment {p.shipment_number}.</p>
@@ -117,6 +121,7 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
             <Button size="lg" onClick={submit} disabled={busy || invalid}>{busy ? "Memproses…" : "Sudah dikerjakan"}</Button>
           </div>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );

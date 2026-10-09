@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, Pencil, Scissors, Undo2, Wrench } from "lucide-react";
+import { ArrowRightLeft, CheckCheck, Pencil, Scissors, Undo2, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,11 @@ import { DEFAULT_CONFIG } from "@/lib/allocator/config";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { proposeFix, type FixClaim, type FixProposal, type FixStock } from "@/lib/wave-fix";
+import type { ImpTask } from "@/lib/wave-impact";
+import { ImpactNote } from "./impact-note";
+import { reopened } from "./sku-context";
 import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
+import { pgrstValue } from "@/lib/postgrest";
 
 /** A dialog with the person's name, a reason and an action; closes and refreshes on success. */
 function CorrectionDialog({ trigger, title, children, confirmLabel, run, ready = true }: {
@@ -57,22 +61,84 @@ function CorrectionDialog({ trigger, title, children, confirmLabel, run, ready =
   );
 }
 
-/** "Batalkan posting" (0034): stock goes back as the posting took it, the task opens again. */
+/**
+ * "Batalkan posting" (0034): stock goes back as the posting took it, the task opens again.
+ * A Bin To Bin can only go back while its destination still holds what it brought: 5 Oct,
+ * NO 1 #10 had moved 41 into CE11A02, other waves had picked 12 of them, and the undo
+ * failed with "available 29, requested 41" — the dialog now checks first and says why.
+ */
+/**
+ * Undoing a posted Bin To Bin puts its cartons back in the source bin on the
+ * books. Only true when someone carried them back: a move that happened, only
+ * to another bin or with another quantity, is corrected, not undone (5 Oct:
+ * CE11E01 kept 44 cartons in the system that were on the floor elsewhere).
+ */
+function MovedBackCheck({ qty, to, from, checked, onChange }: { qty: number; to: string; from: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="space-y-2 rounded-md border-2 border-warn bg-warn/10 p-3 text-sm">
+      <label className="flex items-start gap-2 font-semibold">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-1" />
+        <span>{fmtNum(qty)} karton sudah benar-benar dikembalikan dari {to} ke {from}.</span>
+      </label>
+      <p className="text-steel-700">
+        Bila Bin To Bin-nya memang terjadi, hanya ke bin lain atau dengan jumlah lain: jangan dibatalkan. Betulkan baris yang sudah diposting
+        lewat <b>Isi dari picklist</b> (isi tujuan / jumlah sebenarnya), atau catat sisanya dengan <b>Mutasi</b>.
+      </p>
+    </div>
+  );
+}
+
 export function UnpostButton({ task: t }: { task: TaskRow }) {
   const qty = Number(t.actual_quantity ?? t.quantity);
   const from = t.actual_from_bin ?? t.from_bin;
-  const what = t.task_type === "PICK"
+  const isMove = t.task_type !== "PICK";
+  const [atDest, setAtDest] = useState<{ have: number; by: string[] } | null>(null);
+  const blocked = isMove && atDest !== null && atDest.have < qty;
+  // 5 Oct, CE11E01: a Bin To Bin the floor did was undone in the system, and 44 cartons stayed on the books twice.
+  const [movedBack, setMovedBack] = useState(false);
+  async function check() {
+    setMovedBack(false);
+    if (!isMove || !t.to_bin) return;
+    setAtDest(null);
+    const db = createClient();
+    const batch = t.actual_batch_lot ?? t.batch_lot;
+    const [{ data: inv }, { data: picks }] = await Promise.all([
+      db.from("inventory_detail").select("quantity").eq("bin_code", t.to_bin).eq("sku", t.sku).eq("batch_lot", batch),
+      db.from("pick_task_detail").select("wave_no, seq, actual_quantity, quantity, completed_at")
+        .eq("sku", t.sku).eq("status", "COMPLETED").eq("task_type", "PICK").or(`from_bin.eq.${pgrstValue(t.to_bin)},actual_from_bin.eq.${pgrstValue(t.to_bin)}`)
+        .gte("completed_at", t.completed_at ?? "1970-01-01").order("completed_at").limit(10),
+    ]);
+    setAtDest({
+      have: (inv ?? []).reduce((a, r) => a + Number(r.quantity), 0),
+      by: ((picks ?? []) as { wave_no: string; seq: number; actual_quantity: number | null; quantity: number }[])
+        .map((p) => `NO ${p.wave_no} #${p.seq} (${fmtNum(Number(p.actual_quantity ?? p.quantity))})`),
+    });
+  }
+  const what = !isMove
     ? `${fmtNum(qty)} ${t.uom ?? ""} SKU ${t.sku} kembali ke ${from} (barang fisik juga dikembalikan ke bin itu).`
     : `${fmtNum(qty)} ${t.uom ?? ""} SKU ${t.sku} kembali dari ${t.to_bin} ke ${from}.`;
   return (
-    <CorrectionDialog title={`Batalkan posting #${t.seq}`} confirmLabel="Batalkan posting"
-      trigger={<Button size="sm" variant="ghost" className="underline"><Undo2 className="h-4 w-4" />Batalkan posting</Button>}
+    <CorrectionDialog title={`Batalkan posting #${t.seq}`} confirmLabel="Batalkan posting" ready={!blocked && (!isMove || (atDest !== null && movedBack))}
+      trigger={<Button size="sm" variant="ghost" className="underline" onClick={() => void check()}><Undo2 className="h-4 w-4" />Batalkan posting</Button>}
       run={async (person, reason) => {
         const { error } = await createClient().rpc("unpost_task", { p_task_id: t.id, p_by_name: person, p_reason: reason });
         return error?.message ?? null;
       }}>
-      <p className="rounded-md bg-plate/30 p-3 text-base">Posting dibatalkan: {what} Tugas jadi belum dikerjakan; posting lagi dengan jumlah / bin yang benar.</p>
-      <p className="text-xs text-steel-500">Posting lama dan pembatalannya tetap tercatat di riwayat stok. Wave yang sudah selesai dibuka lagi.</p>
+      {blocked ? (
+        <div className="space-y-2 rounded-md bg-bad/10 p-3 text-sm">
+          <p><b>Tidak bisa dibatalkan.</b> Bin To Bin ini memindah {fmtNum(qty)} ke {t.to_bin}, tapi di sana tinggal <b>{fmtNum(atDest!.have)}</b>:{" "}
+            {fmtNum(qty - atDest!.have)} karton sudah diambil tugas lain{atDest!.by.length ? ` (${atDest!.by.join(", ")})` : ""} dan sudah keluar gudang.</p>
+          <p>Biarkan Bin To Bin ini tetap diposting: pindahannya memang terjadi. Bila sisa di {t.to_bin} sebagian dikembalikan fisik ke {from}, catat dengan <b>Mutasi</b> untuk jumlah itu saja.</p>
+        </div>
+      ) : (
+        <>
+          <p className="rounded-md bg-plate/30 p-3 text-base">Posting dibatalkan: {what} Tugas jadi belum dikerjakan; posting lagi dengan jumlah / bin yang benar.</p>
+          {isMove && atDest === null && <p className="text-xs text-steel-500">Memeriksa isi {t.to_bin}…</p>}
+          {isMove && <MovedBackCheck qty={qty} to={t.to_bin ?? ""} from={from} checked={movedBack} onChange={setMovedBack} />}
+          <p className="text-xs text-steel-500">Posting lama dan pembatalannya tetap tercatat di riwayat stok. Wave yang sudah selesai dibuka lagi.</p>
+          <ImpactNote skus={[t.sku]} build={() => ({ change: { kind: "unpost", tasks: [reopened(t, `NO ${t.wave_no} #${t.seq}`)] }, own: [t.id] })} />
+        </>
+      )}
     </CorrectionDialog>
   );
 }
@@ -123,8 +189,9 @@ export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: Ta
   // What the pickface still holds of this batch: below what was moved in, the move cannot be undone.
   const [atDest, setAtDest] = useState<number | null>(null);
   const moveUndoable = atDest === null || atDest >= moved;
+  const [movedBack, setMovedBack] = useState(false);
   async function check() {
-    setScope("both"); setAtDest(null);
+    setScope("both"); setAtDest(null); setMovedBack(false);
     const { data } = await createClient().from("inventory_detail").select("quantity")
       .eq("bin_code", m.to_bin ?? "").eq("sku", m.sku).eq("batch_lot", m.actual_batch_lot ?? m.batch_lot);
     const have = (data ?? []).reduce((a, r) => a + Number(r.quantity), 0);
@@ -132,7 +199,7 @@ export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: Ta
     if (have < moved) setScope("pick");
   }
   return (
-    <CorrectionDialog title={`Batalkan posting #${p.seq}`} confirmLabel="Batalkan posting"
+    <CorrectionDialog title={`Batalkan posting #${p.seq}`} confirmLabel="Batalkan posting" ready={scope === "pick" || movedBack}
       trigger={<Button size="sm" variant="ghost" className="underline" onClick={() => void check()}><Undo2 className="h-4 w-4" />Batalkan posting</Button>}
       run={async (person, reason) => {
         const { error } = scope === "pick"
@@ -159,7 +226,11 @@ export function UnpostPairButton({ pick: p, move: m }: { pick: TaskRow; move: Ta
           ? <>Posting dibatalkan: {fmtNum(moved)} dari {m.to_bin} dan {fmtNum(picked)} dari truk kembali ke {src} (barang fisik juga dikembalikan). Baris jadi belum dikerjakan; posting lagi dengan jumlah yang benar.</>
           : <>Pick #{p.seq} dibatalkan: {fmtNum(picked)} karton dari truk kembali ke {src} (taruh fisiknya di sana). Bin To Bin ke {m.to_bin} tetap tercatat selesai; pick jadi belum dikerjakan.</>}
       </p>
+      {scope === "both" && <MovedBackCheck qty={moved} to={m.to_bin ?? ""} from={src} checked={movedBack} onChange={setMovedBack} />}
       <p className="text-xs text-steel-500">Posting lama dan pembatalannya tetap tercatat di riwayat stok.</p>
+      <ImpactNote skus={[p.sku]} build={() => ({
+        change: { kind: "unpost", tasks: scope === "pick" ? [reopened(p, `NO ${p.wave_no} #${p.seq}`)] : [reopened(p, `NO ${p.wave_no} #${p.seq}`), reopened(m, `NO ${m.wave_no} #${m.seq}`)] },
+        own: [p.id, m.id] })} />
     </CorrectionDialog>
   );
 }
@@ -317,12 +388,18 @@ async function loadSourceRows(sku: string, exclude: string[]): Promise<SourceRow
  * never blocked) and its Bin To Bin (change, add or remove). Replaces Ubah
  * Bin Pick, Tambah Bin To Bin and Ubah Bin To Bin on open rows.
  */
-export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | null }) {
+export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; move?: TaskRow | null; mode?: "edit" | "post" }) {
+  // "post" = Posting sesuai lapangan (0056): the same choices plus the cartons really taken, saved and posted in one step.
+  const posting = mode === "post";
   const curBin = pick.from_bin;
   const curBatch = pick.actual_batch_lot ?? pick.batch_lot;
   const curExpiry = pick.actual_expiry_date ?? pick.expiry_date;
   const curKey = sourceKey(curBin, curBatch, curExpiry);
-  const qty = Number(pick.quantity);
+  const planned = Number(pick.quantity);
+  const [taken, setTaken] = useState(String(planned));
+  const takenN = Number(taken);
+  const takenErr = posting && (!Number.isInteger(takenN) || takenN < 0 || takenN > planned) ? `Jumlah diambil 0 sampai ${fmtNum(planned)}.` : null;
+  const qty = posting && !takenErr ? takenN : planned;
   const [rows, setRows] = useState<SourceRow[] | null>(null);
   const [sel, setSel] = useState<SourceRow | null>(null);
   const [typed, setTyped] = useState("");
@@ -331,7 +408,7 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
   const [targets, setTargets] = useState<Target[]>([]);
 
   function reset() {
-    setSel(null); setTyped(""); setMoveTo(move?.to_bin ?? ""); setMoveQty(null);
+    setSel(null); setTyped(""); setMoveTo(move?.to_bin ?? ""); setMoveQty(null); setTaken(String(planned));
     void loadSourceRows(pick.sku, [pick.id, ...(move ? [move.id] : [])]).then(setRows);
   }
 
@@ -352,7 +429,8 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
   const leftover = free === null ? null : free - qty;
 
   // Sisa: the plan's own while the source stays, else what the new source keeps; a typed number wins.
-  const defaultQty = move && !srcChanged ? String(Number(move.quantity)) : leftover !== null && leftover > 0 ? String(leftover) : "";
+  // Posting fewer cartons than planned leaves more on the pallet: the sisa then follows what is really left.
+  const defaultQty = move && !srcChanged && qty === planned ? String(Number(move.quantity)) : leftover !== null && leftover > 0 ? String(leftover) : "";
   const sisa = moveQty ?? defaultQty;
   const to = moveTo.trim().toUpperCase();
   const sisaN = Number(sisa);
@@ -365,7 +443,7 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
         : "Isi jumlah sisa (lebih dari 0).")
       : null;
   const moveChanged = move ? to !== move.to_bin || sisaN !== Number(move.quantity) : to !== "";
-  const ready = rows !== null && !ambiguous && !unknownBin && moveErr === null && (srcChanged || moveChanged);
+  const ready = rows !== null && !ambiguous && !unknownBin && moveErr === null && !takenErr && (posting || srcChanged || moveChanged);
 
   useEffect(() => {
     let live = true;
@@ -378,9 +456,17 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
   const chips = (rows ?? []).filter((r) => !bin || r.bin === bin)
     .sort((a, b) => Number(sourceKey(b.bin, b.batch, b.expiry) === curKey) - Number(sourceKey(a.bin, a.batch, a.expiry) === curKey));
   return (
-    <CorrectionDialog title={`Ubah baris #${pick.seq}`} confirmLabel="Simpan baris" ready={ready}
-      trigger={<Button size="sm" variant="ghost" className="underline" onClick={reset}><Pencil className="h-4 w-4" />Ubah baris</Button>}
+    <CorrectionDialog title={`${posting ? "Posting sesuai lapangan" : "Ubah baris"} #${pick.seq}`} confirmLabel={posting ? "Simpan & posting" : "Simpan baris"} ready={ready}
+      trigger={<Button size="sm" variant="ghost" className="underline" onClick={reset}>
+        {posting ? <><CheckCheck className="h-4 w-4" />Posting sesuai lapangan</> : <><Pencil className="h-4 w-4" />Ubah baris</>}</Button>}
       run={async (person, reason) => {
+        if (posting) {
+          const { error } = await createClient().rpc("post_as_done", {
+            p_task_id: pick.id, p_move_id: move?.id ?? null, p_from_bin: srcBin, p_batch_lot: srcBatch, p_expiry_date: srcExpiry, p_qty: qty,
+            p_move_to: to || null, p_move_qty: to ? sisaN : null, p_by_name: person, p_reason: reason,
+          });
+          return error?.message ?? null;
+        }
         const { error } = await createClient().rpc("edit_pick_row", {
           p_task_id: pick.id, p_move_id: move?.id ?? null, p_from_bin: srcBin, p_batch_lot: srcBatch, p_expiry_date: srcExpiry,
           p_move_to: to || null, p_move_qty: to ? sisaN : null, p_by_name: person, p_reason: reason,
@@ -388,12 +474,20 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
         return error?.message ?? null;
       }}>
       <p className="rounded-md bg-plate/30 p-3 text-sm">
-        #{pick.seq}: ambil <b>{fmtNum(qty)}</b> {pick.uom ?? ""} SKU {pick.sku} dari <b>{srcBin}</b> batch {srcBatch || "–"} exp {srcExpiry ? fmtDate(srcExpiry) : "–"}
+        #{pick.seq}: {posting ? "diambil" : "ambil"} <b>{fmtNum(qty)}</b>{posting && qty !== planned && <> (rencana {fmtNum(planned)})</>} {pick.uom ?? ""} SKU {pick.sku} dari <b>{srcBin}</b> batch {srcBatch || "–"} exp {srcExpiry ? fmtDate(srcExpiry) : "–"}
         {srcChanged && <> (rencana {curBin} {curBatch || "–"})</>}
         {moveErr ? <>.</>
           : to ? <>, sisa <b>{fmtNum(sisaN)}</b> dipindah ke <b>{to}</b>.</>
           : move ? <>, <b>Bin To Bin ke {move.to_bin} dihapus</b>.</> : <>, tanpa Bin To Bin.</>}
       </p>
+      {posting && (
+        <div>
+          <Label htmlFor="er-taken">Jumlah yang benar-benar diambil (0–{fmtNum(planned)})</Label>
+          <Input id="er-taken" type="number" inputMode="numeric" min={0} max={planned} value={taken} onChange={(e) => setTaken(e.target.value)} className="w-32" />
+          {takenErr && <p className="mt-1 text-xs text-bad">{takenErr}</p>}
+          <p className="mt-1 text-xs text-steel-500">Pilih bin dan batch yang benar-benar diambil, dan ke mana sisa palet dipindah (atau Hapus). Baris dibetulkan lalu langsung diposting; gagal satu, tidak ada yang diposting.</p>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="er-bin">Ambil dari (Sumber)</Label>
@@ -450,6 +544,14 @@ export function EditRowButton({ pick, move }: { pick: TaskRow; move?: TaskRow | 
           <p className="text-xs text-steel-500">Baris lain dari {srcBin} batch ini: {srcRow.by.join(", ")}.</p>
         )}
       </div>
+      {ready && (
+        <ImpactNote skus={[pick.sku]} build={() => {
+          const base = { wave: pick.wave_id, parked: false, sku: pick.sku, batch: srcBatch, expiry: srcExpiry, label: `NO ${pick.wave_no} #${pick.seq}` };
+          const add: ImpTask[] = [{ ...base, id: pick.id, type: "PICK", from: srcBin, to: null, qty }];
+          if (to) add.push({ ...base, id: move?.id ?? `${pick.id}-move`, type: "REPLENISH", from: srcBin, to, qty: sisaN });
+          return { change: { kind: "replace", remove: [pick.id, ...(move ? [move.id] : [])], add }, own: [pick.id, ...(move ? [move.id] : []), `${pick.id}-move`] };
+        }} />
+      )}
     </CorrectionDialog>
   );
 }
@@ -515,6 +617,14 @@ export function FixButton({ pick, move }: { pick: TaskRow; move?: TaskRow | null
             <p className="rounded-md bg-warn/10 p-2 text-sm">Batch lebih awal tidak cukup di satu bin. Pakai hanya bila memang begitu di lapangan.</p>
           )}
           {doable && <p className="text-xs text-steel-500">Berdasarkan stok di sistem. Bila bin yang diusulkan ternyata kosong di lapangan, hitung bin itu dulu (Cycle count).</p>}
+          {proposal && (proposal.kind === "resize" || proposal.kind === "repoint") && (
+            <ImpactNote skus={[pick.sku]} build={() => {
+              const base = { wave: pick.wave_id, parked: false, sku: pick.sku, batch: proposal.batch, expiry: proposal.expiry, label: `NO ${pick.wave_no} #${pick.seq}` };
+              const add: ImpTask[] = [{ ...base, id: pick.id, type: "PICK", from: proposal.from, to: null, qty: Number(pick.quantity) }];
+              if (proposal.moveTo && proposal.moveQty) add.push({ ...base, id: move?.id ?? `${pick.id}-move`, type: "REPLENISH", from: proposal.from, to: proposal.moveTo, qty: proposal.moveQty });
+              return { change: { kind: "replace", remove: [pick.id, ...(move ? [move.id] : [])], add }, own: [pick.id, ...(move ? [move.id] : []), `${pick.id}-move`] };
+            }} />
+          )}
           {error && <p role="alert" className="text-sm text-bad">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>Tutup</Button>

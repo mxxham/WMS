@@ -104,3 +104,27 @@ export function proposeFix(pick: FixRow, move: FixMove | null, stock: FixStock[]
       + (fefoLater ? `. FEFO dilewati: exp lebih lama dari rencana ${pick.expiry}.` : "."),
   };
 }
+
+/** One stok kurang row for "Perbaiki semua": the pick, its paired move, and the ids they have among the open rows. */
+export type FixItem = { pickId: string; moveId: string | null; row: FixRow; move: FixMove | null };
+export type OpenClaim = FixClaim & { id: string };
+
+/**
+ * "Perbaiki semua": proposals for several rows at once, each computed on the
+ * open rows as the earlier proposals leave them — two rows are never handed
+ * the same free cartons. The supervisor unticks any before applying; nothing
+ * here writes.
+ */
+export function planFixes(items: FixItem[], stock: FixStock[], open: OpenClaim[], config: AllocatorConfig): { item: FixItem; proposal: FixProposal }[] {
+  let work = open.slice();
+  return items.map((item) => {
+    const own = [item.pickId, ...(item.moveId ? [item.moveId] : [])];
+    const proposal = proposeFix(item.row, item.move, stock, work.filter((c) => !own.includes(c.id)), config);
+    if (proposal.kind === "resize" || proposal.kind === "repoint") {
+      const next: OpenClaim[] = [{ id: item.pickId, from: proposal.from, to: null, batch: proposal.batch, expiry: proposal.expiry, qty: item.row.qty }];
+      if (proposal.moveTo && proposal.moveQty) next.push({ id: item.moveId ?? `${item.pickId}-move`, from: proposal.from, to: proposal.moveTo, batch: proposal.batch, expiry: proposal.expiry, qty: proposal.moveQty });
+      work = work.filter((c) => !own.includes(c.id)).concat(next);
+    }
+    return { item, proposal };
+  });
+}

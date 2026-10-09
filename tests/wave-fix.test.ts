@@ -6,7 +6,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { withConfig } from '../lib/allocator/config';
-import { proposeFix, type FixClaim, type FixStock } from '../lib/wave-fix';
+import { planFixes, proposeFix, type FixClaim, type FixStock } from '../lib/wave-fix';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -103,6 +103,21 @@ test('the bin already covers everything → nothing to change', () => {
   const p = proposeFix({ from: 'CA01A01', sku: 'S', batch: 'B', expiry: '2030-01-01', qty: 5, upp: 48 }, null,
     [st('CA01A01', 'B', '2030-01-01', 30)], [], config);
   assert.equal(p.kind, 'ok');
+});
+
+
+test('Perbaiki semua: two short rows never get the same free cartons', () => {
+  // CE10A02 has 6 free; two rows need 4 each. The first takes CE10A02, the second must go elsewhere.
+  const stock = [st('CE10A02', 'B', '2030-08-08', 6), st('CE11A01', 'B', '2030-08-08', 9)];
+  const open = [
+    { id: 'r1', from: 'CC25A02', to: null, batch: 'B', expiry: '2030-08-08', qty: 4 },
+    { id: 'r2', from: 'CC25A03', to: null, batch: 'B', expiry: '2030-08-08', qty: 4 },
+  ];
+  const row = (id: string, from: string) => ({ pickId: id, moveId: null, move: null, row: { from, sku: 'S', batch: 'B', expiry: '2030-08-08', qty: 4, upp: 48 } });
+  const plan = planFixes([row('r1', 'CC25A02'), row('r2', 'CC25A03')], stock, open, config);
+  const froms = plan.map((p) => (p.proposal.kind === 'repoint' ? p.proposal.from : p.proposal.kind));
+  assert.equal(new Set(froms).size, 2, `both rows got ${froms.join(', ')}`);
+  assert.ok(froms.includes('CE10A02') && froms.includes('CE11A01'));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
