@@ -137,6 +137,8 @@ export interface Picklist {
   totalPallets: number;
   distinctLocations: number;
   distinctSkus: number;
+  /** Order lines of this shipment not fully allocated, printed in the header so the truck's shortage is known before loading. */
+  shortages?: { sku: string; qtyShort: number }[];
 }
 
 export interface AllocationStats {

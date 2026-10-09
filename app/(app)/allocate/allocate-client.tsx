@@ -9,6 +9,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { StaleWavesNotice, loadStaleWaves, type StaleWave } from "@/components/app/stale-waves";
+import { StockBasis, useStockBasis } from "@/components/app/stock-basis";
 import { cn, fmtNum } from "@/lib/utils";
 import { expiryText, withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
@@ -50,7 +51,11 @@ export function AllocateClient() {
   const [stale, setStale] = useState<StaleWave[]>([]);
   const [ackStale, setAckStale] = useState(false);
   useEffect(() => { setAckStale(false); }, [asOf]);
-  const staleBlocks = source === "db" && stale.length > 0 && !ackStale;
+  // The day's WMS file not imported: planning from the database is then a deliberate choice.
+  const basis = useStockBasis();
+  const [ackBasis, setAckBasis] = useState(false);
+  const basisStale = source === "db" && basis !== null && basis.importedDay !== asOf;
+  const staleBlocks = (source === "db" && stale.length > 0 && !ackStale) || (basisStale && !ackBasis);
   const [target, setTarget] = useState("upp");
   const [split, setSplit] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -106,8 +111,8 @@ export function AllocateClient() {
       const release = carry.filter((m) => m.mode === "fresh").map((m) => m.wave_id);
       if (source === "db") {
         const db = inventoryToStock(await loadPlanningStock(supabase, asOf, release), config);
-        // The workbook's warnings are all about its stock sheet, which is not used here.
-        stock = db.stock; staged = db.stagedBySku; warnings = db.warnings;
+        // The workbook's stock-sheet warnings do not apply here; its order warnings (a shipment without NO) do.
+        stock = db.stock; staged = db.stagedBySku; warnings = [...db.warnings, ...wb.warnings.filter((w) => w.code === "SHIPMENT_WITHOUT_NO")];
       }
       const result = runPipeline(stock, demand, staged, config, warnings);
       // The file's picklist becomes the waves only where the database holds the same stock.
@@ -192,6 +197,17 @@ export function AllocateClient() {
             <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
             Pisahkan picklist forklift (palet) & handpick (karton)
           </label>
+          {source === "db" && (
+            <div className="space-y-2 md:col-span-3">
+              <StockBasis info={basis} day={asOf} />
+              {basisStale && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={ackBasis} onChange={(e) => setAckBasis(e.target.checked)} />
+                  Jalankan tetap dari stok sistem (tanpa impor file {asOf})
+                </label>
+              )}
+            </div>
+          )}
           <div className="md:col-span-3">
             <StaleWavesNotice before={asOf} onChange={setStale}
               intro={source === "db"
@@ -213,8 +229,10 @@ export function AllocateClient() {
 
       {run && s && plan && (
         <>
+          {run.source === "db" && <StockBasis info={basis} day={run.asOf} />}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi label="Fill rate" value={`${s.fillRatePct.toFixed(1)}%`} sub={`${fmtNum(s.cartonsAllocated)} / ${fmtNum(s.cartonsRequested)} karton`} />
+            <Kpi label="Fill rate" value={fillRateText(s.cartonsAllocated, s.cartonsRequested)} tone={s.cartonsAllocated < s.cartonsRequested ? "warn" : undefined}
+              sub={`${fmtNum(s.cartonsAllocated)} / ${fmtNum(s.cartonsRequested)} karton${s.cartonsAllocated < s.cartonsRequested ? ` · kurang ${fmtNum(s.cartonsRequested - s.cartonsAllocated)}` : ""}`} />
             <Kpi label="Picklist" value={fmtNum(run.allocation.picklists.length)} sub={`${s.palletPicks} palet · ${s.casePicks} karton`} />
             <Kpi label="Kekurangan" value={fmtNum(run.allocation.shortages.length)} sub="baris order kurang" tone={run.allocation.shortages.length ? "warn" : undefined} />
             <Kpi label="Palet dibuka" value={fmtNum(s.palletsBroken)} sub={`${plan.tasks.filter((t) => t.task_type === "REPLENISH").length} relokasi ke pickface`} />
@@ -241,7 +259,13 @@ export function AllocateClient() {
             <CardHeader className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle>2. Hasil</CardTitle>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadPicklistPdf(run.allocation.picklists, run.pickfaces, `picklist_${run.asOf}.pdf`)}><FileText className="h-4 w-4" />PDF picklist</Button>
+                <Button variant="outline" size="sm" onClick={async () => {
+                  const [{ downloadPicklistPdf }, { binToBinRowsFromResult }] = await Promise.all([
+                    import("@/lib/allocator/browser/downloads"),
+                    import("@/lib/allocator/picklist-from-tasks"),
+                  ]);
+                  downloadPicklistPdf(run.allocation.picklists, run.pickfaces, `picklist_${run.asOf}.pdf`, { binToBin: binToBinRowsFromResult(run.allocation, run.asOf) });
+                }}><FileText className="h-4 w-4" />PDF picklist</Button>
                 <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadAllocationWorkbook(run.allocation, run.movement, run.pickfaces, `picklist_${run.asOf}.xlsx`)}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
                 {run.source === "db" || run.check?.ok ? (
                   <ConfirmButton size="sm" variant="plate" title="Simpan rencana"
@@ -332,6 +356,15 @@ function StockCheckPanel({ check }: { check: { ok: boolean; rows: StockCheckRow[
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * Rounded down, never up: 5,689 of 5,691 cartons (6 Oct, 2 cartons only in
+ * quarantine) printed as "100.0%" and hid the shortage. 100% means nothing short.
+ */
+export function fillRateText(allocated: number, requested: number): string {
+  if (!requested || allocated >= requested) return "100%";
+  return `${(Math.floor((allocated / requested) * 10000) / 100).toFixed(2)}%`;
 }
 
 function Kpi({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: "warn" }) {

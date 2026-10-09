@@ -1,3 +1,4 @@
+import { assignWaves } from '../wave-numbers';
 import ExcelJS from 'exceljs';
 import { isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
@@ -164,27 +165,24 @@ export async function loadWorkbook(path: string, config: AllocatorConfig): Promi
   // Several SAP orders can share one shipment + material; they are merged into
   // a single pick instruction and the order numbers are kept for traceability.
   //
-  // The "NO" column groups one or more shipments into a single outbound run
-  // and is only populated on the first row of each group — forward-fill it so
-  // every row (and therefore every shipment) knows which wave it belongs to.
+  // The "NO" column groups shipments into a wave and is typed on a shipment's
+  // first row only: it is filled down within that shipment, never into the
+  // next one (assignWaves). A shipment without any NO becomes its own wave.
   const merged = new Map<string, DemandLine>();
-  let currentWave = '';
-  const waveByShipment = new Map<string, string>();
+  // NO per shipment: filled down within a shipment, never across shipments (wave-numbers.ts).
+  const demandRows = [...readRows(wb, SHEETS.demand, SHEETS.demandHeaderRow)];
+  const waves = assignWaves(demandRows.map((row) => ({ shipment: asString(row['Shipment Number']), no: asString(row['NO']) })));
+  const waveByShipment = waves.waveByShipment;
+  warnings.push(...waves.warnings);
 
-  for (const row of readRows(wb, SHEETS.demand, SHEETS.demandHeaderRow)) {
+  for (const row of demandRows) {
     const sku = asSku(row['Material']);
     const shipmentNumber = asString(row['Shipment Number']);
     const qty = asNumber(row['Delivery quantity']);
 
-    const noCell = asString(row['NO']);
-    if (noCell) currentWave = noCell;
-
     if (!sku || !shipmentNumber || qty <= 0) continue;
 
-    if (!waveByShipment.has(shipmentNumber)) {
-      waveByShipment.set(shipmentNumber, currentWave || shipmentNumber);
-    }
-    const waveNo = waveByShipment.get(shipmentNumber)!;
+    const waveNo = waveByShipment.get(shipmentNumber) ?? shipmentNumber;
 
     const key = `${shipmentNumber}|${sku}`;
     const existing = merged.get(key);

@@ -4,8 +4,9 @@
  * above target — e.g. breaking a Level-E bulk pallet while Level-A holds a
  * full pallet — the leftover goes to the nearest empty Level-A bin as a
  * one-time move instead of stranding at the source (`tetap di bin`), also
- * when the pallet is opened by an earlier line of the day (later picks of
- * that batch follow it) or the SKU has no pickface. A pallet already on
+ * when the SKU has no pickface. The rest comes down at the FIRST pick that
+ * leaves it loose, and later picks of that batch follow it, so a reserve bin
+ * is never opened twice in a day (5 Oct: CE24D01, CA08D02). A pallet already on
  * Level A stays. The overflow slot is never registered as a dedicated pickface.
  */
 import { strict as assert } from 'node:assert';
@@ -89,18 +90,45 @@ test('no empty Level-A anywhere -> falls back to tetap di bin', () => {
   assert.equal(binToBin(l), 'tetap di bin');
 });
 
-test('two picks from one pallet: it stays for the later pick, whose rest then comes down', () => {
+test('two picks from one pallet: the first pick brings the rest down, the later pick follows it', () => {
+  // 5 Oct: CE24D01 opened by NO 3 (8) and opened again by NO 6 (20 + 16 down). Never again.
   const res = allocate(stockFull, [order(S, 1, 'SH1', '1', '01:00'), order(S, 2, 'SH2', '2', '02:00')], config);
   const pfs = derivePickfaces(stockFull, config);
   relocateByWaveOrder(res.lines, pfs, config, stockFull);
   const first = res.lines.find((x) => x.shipmentNumber === 'SH1')!;
   const later = res.lines.find((x) => x.shipmentNumber === 'SH2')!;
-  assert.equal(first.moveTo, null);
-  assert.equal(first.qtyRemainingInBin, 3);
-  assert.equal(later.location, 'CE13E02');
-  assert.equal(later.moveTo, 'CE13A02');
-  assert.equal(later.moveQty, 1);
-  assert.equal(later.qtyRemainingInBin, 0);
+  assert.equal(first.location, 'CE13E02');
+  assert.equal(first.breaksPallet, true);
+  assert.equal(first.moveTo, 'CE13A02');
+  assert.equal(first.moveQty, 3);
+  assert.equal(first.qtyRemainingInBin, 0);
+  assert.equal(later.location, 'CE13A02', 'the later wave picks where the rest went, not the reserve bin');
+  assert.equal(later.moveTo, null);
+  assert.equal(later.qtyRemainingInBin, 1);
+});
+
+test('pickface below target: first pick brings the rest to the pickface, later waves pick there', () => {
+  const stock = [bin('CE13E02', S, 4, 'B1', '2030-09-04T00:00:00Z'), bin('CE13A01', S, 1, 'B1', '2030-09-04T00:00:00Z')];
+  const pfs = derivePickfaces(stock, config);
+  const res = allocate(stock, [order(S, 2, 'SH1', '1', '01:00'), order(S, 2, 'SH2', '2', '02:00'), order(S, 1, 'SH3', '3', '03:00')], config);
+  relocateByWaveOrder(res.lines, pfs, config, stock);
+  const fromReserve = res.lines.filter((l) => l.location === 'CE13E02');
+  assert.equal(fromReserve.length, 1, 'the reserve bin is picked by one row only');
+  assert.equal(fromReserve[0].moveTo, 'CE13A01');
+  const total = res.lines.reduce((n, l) => n + l.qtyPick, 0);
+  assert.equal(total, 5);
+});
+
+test('one shipment with two rows on the same pallet: the move waits for the last of them', () => {
+  const T = '550000001';
+  const stock = [bin('CE20E01', T, 4, 'B1'), bin('CE20E01', T, 0, 'B9'), bin('CE20A01', 'OTHER', 4)];
+  const res = allocate(stock, [{ ...order(T, 1), orderNos: ['O1'] }, { ...order(T, 1), orderNos: ['O2'] }], config);
+  relocateByWaveOrder(res.lines, new Map(), config, stock);
+  const rows = res.lines.filter((l) => l.sku === T);
+  assert.ok(rows.every((l) => l.location === 'CE20E01'));
+  const moves = rows.filter((l) => l.moveTo);
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].moveQty, 4 - rows.reduce((n, l) => n + l.qtyPick, 0));
 });
 
 test('an already-opened reserve pallet (no *): the rest of the last pick comes down too', () => {

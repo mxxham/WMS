@@ -346,20 +346,25 @@ export function executionOrder(lines: AllocationLine[], config: AllocatorConfig)
  * balance per physical identity: location + SKU + batch + expiry) and fixes
  * up what allocation could not know:
  *
- *   · Where the stock is. When an earlier pallet break carried the leftover
- *     of this batch to the pickface, the pick goes to the pickface.
+ *   · Where the stock is. When an earlier pick carried the leftover of a
+ *     pallet down (to the pickface or an overflow bin), later picks that
+ *     allocation placed on that pallet follow it there.
  *   · Whether this line opens a sealed pallet (the first line to touch a
  *     full pallet in EXECUTION order does, not in allocation order).
  *   · The bin-to-bin move: when a line breaks a pallet away from the SKU's
  *     pickface and the pickface is below its target, the leftover goes to
  *     the pickface right after the pick (moveQty / moveTo).
- *   · The rest of a reserve pallet (Level B-E) comes down to Level A at the
- *     LAST pick from that pallet in the run, whether this run opened it or
- *     it was opened before: to the SKU's pickface while it is below target,
- *     otherwise (pickface full, or none) to the nearest empty Level-A bin, a
- *     one-time move never registered as a dedicated pickface. Earlier picks
- *     from the pallet keep using it. It stays only when no empty Level-A bin
- *     exists.
+ *   · A reserve pallet (Level B-E) is picked from once: the FIRST pick that
+ *     leaves a loose rest in it carries that rest down to Level A, whether
+ *     this run opened the pallet or it was opened before — to the SKU's
+ *     pickface while it is below target, otherwise (pickface full, or none)
+ *     to the nearest empty Level-A bin, a one-time move never registered as
+ *     a dedicated pickface. It stays only when no empty Level-A bin exists.
+ *     (Before 5 Oct 2026 the rest stayed up until the LAST pick of the run,
+ *     so a later wave opened the same reserve bin again: CE24D01 by NO 3 and
+ *     NO 6, CA08D02 by NO 4 and NO 7.) Inside one shipment the move waits
+ *     for that shipment's last row on the pallet, so its own rows never
+ *     pick from an emptied bin.
  *   · Sisa (qtyRemainingInBin): what physically stays in the bin once the
  *     line, including its move, is done.
  *
@@ -406,10 +411,8 @@ export function relocateByWaveOrder(
     stock.filter((b) => b.qtyCartons > 0).map((b) => b.location.toUpperCase()),
   );
   const claimedOverflow = new Set<string>();
-  // How many picks of the run still take from each pallet (bin + SKU + batch + expiry, as allocated).
-  const palletOf = new Map(order.map((l) => [l, stockIdentityKey(l.location, l.sku, l.batch, l.expiryDate)]));
-  const picksLeft = new Map<string, number>();
-  for (const k of palletOf.values()) picksLeft.set(k, (picksLeft.get(k) ?? 0) + 1);
+  // Where a pallet's rest was carried down to (pallet key -> destination location), so later picks follow it.
+  const movedTo = new Map<string, string>();
   // A reserve rack bin: a real rack location (not staging / floor) on a level above the pickface levels.
   const isReserveRack = (loc: string) => {
     const p = parseLocation(loc);
@@ -478,26 +481,34 @@ export function relocateByWaveOrder(
     for (const line of rows) {
       const pf = pickfaces.get(line.sku);
       let key = stockIdentityKey(line.location, line.sku, line.batch, line.expiryDate);
-      if (get(key) < line.qtyPick && pf && pf.location !== line.location) {
-        const pfKey = stockIdentityKey(pf.location, line.sku, line.batch, line.expiryDate);
-        if (get(pfKey) - (claimed.get(pfKey) ?? 0) >= line.qtyPick) {
+      // Follow the pallet's rest to where it was carried, else try the pickface.
+      const dest = movedTo.get(key) ?? (pf && pf.location !== line.location ? pf.location : null);
+      if (get(key) < line.qtyPick && dest) {
+        const destKey = stockIdentityKey(dest, line.sku, line.batch, line.expiryDate);
+        if (get(destKey) - (claimed.get(destKey) ?? 0) >= line.qtyPick) {
           claimed.set(key, claimed.get(key)! - line.qtyPick);
-          claimed.set(pfKey, (claimed.get(pfKey) ?? 0) + line.qtyPick);
-          line.location = pf.location;
-          line.binId = `${pf.location}|${line.sku}|${line.batch ?? 'NOBATCH'}`;
-          key = pfKey;
+          claimed.set(destKey, (claimed.get(destKey) ?? 0) + line.qtyPick);
+          line.location = dest;
+          line.binId = `${dest}|${line.sku}|${line.batch ?? 'NOBATCH'}`;
+          key = destKey;
         }
       }
       line.pickType = !opened.has(key) && get(key) === line.upp && line.qtyPick === line.upp ? 'PALLET' : 'CASE';
     }
     rows.sort((a, b) => pickRowCompare(a, b, config));
 
+    // Rows of this shipment still to take from each bin: the rest comes down at the shipment's last one.
+    const rowsLeft = new Map<string, number>();
+    for (const r of rows) {
+      const k = stockIdentityKey(r.location, r.sku, r.batch, r.expiryDate);
+      rowsLeft.set(k, (rowsLeft.get(k) ?? 0) + 1);
+    }
+
     for (const line of rows) {
       const pf = pickfaces.get(line.sku);
       const key = stockIdentityKey(line.location, line.sku, line.batch, line.expiryDate);
-      const pallet = palletOf.get(line)!;
-      picksLeft.set(pallet, (picksLeft.get(pallet) ?? 1) - 1);
-      const lastFromPallet = (picksLeft.get(pallet) ?? 0) <= 0;
+      rowsLeft.set(key, (rowsLeft.get(key) ?? 1) - 1);
+      const lastInShipment = (rowsLeft.get(key) ?? 0) <= 0;
       const before = get(key);
       const sealed = !opened.has(key) && before === line.upp;
       line.breaksPallet = sealed && line.qtyPick < line.upp;
@@ -505,7 +516,9 @@ export function relocateByWaveOrder(
       balance.set(key, before - line.qtyPick);
       opened.add(key);
 
-      if (line.breaksPallet && pf && pf.location !== line.location && get(key) > 0
+      const reserve = isReserveRack(line.location)
+        && !pickfaceLocs.has(line.location.toUpperCase()) && !fixedLocs.has(line.location.toUpperCase());
+      if (!reserve && line.breaksPallet && pf && pf.location !== line.location && get(key) > 0
           && atLocation(pf.location, line.sku) < pf.targetQtyCartons) {
         const pfKey = stockIdentityKey(pf.location, line.sku, line.batch, line.expiryDate);
         line.moveQty = get(key);
@@ -513,10 +526,10 @@ export function relocateByWaveOrder(
         balance.set(pfKey, get(pfKey) + line.moveQty);
         opened.add(pfKey);
         balance.set(key, 0);
-      } else if (lastFromPallet && get(key) > 0 && get(key) < line.upp && isReserveRack(line.location)
-          && !pickfaceLocs.has(line.location.toUpperCase()) && !fixedLocs.has(line.location.toUpperCase())) {
+        movedTo.set(key, pf.location);
+      } else if (reserve && lastInShipment && get(key) > 0 && get(key) < line.upp) {
         // (A pickface keeps its own stock, whatever level it is on.)
-        // Last pick from a reserve pallet: what is left comes down to Level A, never stays up.
+        // A loose rest in a reserve pallet comes down to Level A now, so no later wave opens this bin again.
         const toPickface = pf && pf.location !== line.location && atLocation(pf.location, line.sku) < pf.targetQtyCartons;
         const dest = toPickface ? pf!.location : findOverflowSlot(line.location);
         if (dest) {
@@ -526,6 +539,7 @@ export function relocateByWaveOrder(
           balance.set(destKey, get(destKey) + line.moveQty);
           opened.add(destKey);
           balance.set(key, 0);
+          movedTo.set(key, dest);
           if (!toPickface) claimedOverflow.add(dest.toUpperCase());
         }
       }

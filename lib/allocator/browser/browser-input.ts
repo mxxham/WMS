@@ -1,3 +1,4 @@
+import { assignWaves } from '../wave-numbers';
 import * as XLSX from 'xlsx';
 import { isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
@@ -112,23 +113,20 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
   }
 
   const merged = new Map<string, DemandLine>();
-  let currentWave = '';
-  const waveByShipment = new Map<string, string>();
+  // NO per shipment: filled down within a shipment, never across shipments (wave-numbers.ts).
+  const demandRows = [...sheetRows(wb, SHEETS.demand, 1)];
+  const waves = assignWaves(demandRows.map((row) => ({ shipment: asString(row['Shipment Number']), no: asString(row['NO']) })));
+  const waveByShipment = waves.waveByShipment;
+  warnings.push(...waves.warnings);
 
-  for (const row of sheetRows(wb, SHEETS.demand, 1)) {
+  for (const row of demandRows) {
     const sku = asSku(row['Material']);
     const shipmentNumber = asString(row['Shipment Number']);
     const qty = asNumber(row['Delivery quantity']);
 
-    const noCell = asString(row['NO']);
-    if (noCell) currentWave = noCell;
-
     if (!sku || !shipmentNumber || qty <= 0) continue;
 
-    if (!waveByShipment.has(shipmentNumber)) {
-      waveByShipment.set(shipmentNumber, currentWave || shipmentNumber);
-    }
-    const waveNo = waveByShipment.get(shipmentNumber)!;
+    const waveNo = waveByShipment.get(shipmentNumber) ?? shipmentNumber;
 
     const key = `${shipmentNumber}|${sku}`;
     const existing = merged.get(key);

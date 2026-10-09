@@ -4,6 +4,7 @@ import { checkDigit, parseLocation } from '../pickpath';
 import { binToBin, sisaPrinted, uomLabel } from '../picklist';
 
 import { expiryText, withConfig, type AllocatorConfig } from '../config';
+import type { BinToBinRow } from '../picklist-from-tasks';
 import type { AllocationResult, PickfaceAssignment, Picklist } from '../types';
 
 function escape(s: string): string {
@@ -76,6 +77,12 @@ function picklistHeaderHeight(doc: jsPDF, pl: Picklist, geo: PageGeometry): numb
   const doLines = wrapText(doc, `DO Number: ${doText}`, geo.contentWidth);
   h += doLines.length * 5 + 1;
 
+  if (pl.shortages?.length) {
+    doc.setFont('helvetica', 'bold');
+    h += wrapText(doc, shortageText(pl), geo.contentWidth).length * 5 + 1;
+    doc.setFont('helvetica', 'normal');
+  }
+
   const printedDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   const printedLines = wrapText(doc, `Printed: ${printedDate}`, geo.contentWidth);
   h += printedLines.length * 5 + 4;
@@ -121,8 +128,27 @@ function drawPicklistHeader(doc: jsPDF, pl: Picklist, geo: PageGeometry): void {
   }
   y += 1;
 
+  // The truck leaves short: said on the paper, so picker, checker and driver know before loading.
+  if (pl.shortages?.length) {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(192, 57, 43);
+    for (const line of wrapText(doc, shortageText(pl), geo.contentWidth)) {
+      doc.text(line, geo.marginLeft, y + 4);
+      y += 5;
+    }
+    y += 1;
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+  }
+
   const printedDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   doc.text(`Printed: ${printedDate}`, geo.marginLeft, y + 4);
+}
+
+function shortageText(pl: Picklist): string {
+  const list = pl.shortages ?? [];
+  const total = list.reduce((n, s) => n + s.qtyShort, 0);
+  return `KURANG ${total} ctn: ${list.map((s) => `${s.sku} x${s.qtyShort}`).join(', ')}`;
 }
 
 function drawSignatures(doc: jsPDF, finalY: number, geo: PageGeometry): void {
@@ -282,6 +308,146 @@ export function generatePicklistPdfs(
   }
 
   return pdfs;
+}
+
+// ── Bin To Bin work sheet (A4 landscape content = 268mm) ────────────────────
+
+const BIN_TO_BIN_COL_WIDTHS = [10, 26, 26, 24, 41, 30, 24, 22, 14, 17, 19, 12] as const;
+// idx:  0-No  1-Dari Bin  2-Ke Bin  3-Material  4-Description  5-Shipment  6-Batch  7-ExpDate  8-Qty  9-UOM  10-Wave NO  11-(check)
+
+const BIN_TO_BIN_COLS = 12;
+const BIN_TO_BIN_CHECK_COL = 11;
+
+function printedStamp(): string {
+  return new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function binToBinTitle(rows: BinToBinRow[], opts?: { date?: string }): string {
+  const today = new Date().toLocaleDateString('en-CA');
+  return `BIN TO BIN — ${opts?.date ?? rows[0]?.planned_date ?? today}`;
+}
+
+function binToBinTotals(rows: BinToBinRow[]): string {
+  const cartons = rows.reduce((s, r) => s + Number(r.quantity || 0), 0);
+  return `Total: ${rows.length} move / ${cartons} ctn`;
+}
+
+function binToBinHeaderHeight(doc: jsPDF, rows: BinToBinRow[], geo: PageGeometry): number {
+  let h = 9;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  h += wrapText(doc, `Printed: ${printedStamp()}`, geo.contentWidth).length * 5 + 1;
+  h += wrapText(doc, binToBinTotals(rows), geo.contentWidth).length * 5 + 4;
+
+  return h;
+}
+
+function drawBinToBinHeader(doc: jsPDF, rows: BinToBinRow[], opts: { date?: string } | undefined, geo: PageGeometry): void {
+  let y = geo.marginTop;
+
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text(binToBinTitle(rows, opts), geo.marginLeft, y + 4);
+  y += 9;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  for (const line of wrapText(doc, `Printed: ${printedStamp()}`, geo.contentWidth)) {
+    doc.text(line, geo.marginLeft, y + 4);
+    y += 5;
+  }
+  y += 1;
+  doc.text(binToBinTotals(rows), geo.marginLeft, y + 4);
+}
+
+/** Every planned bin-to-bin move on one sheet: no signature block, a check box per move. */
+export function renderBinToBinPdfPage(doc: jsPDF, rows: BinToBinRow[], opts?: { date?: string }): void {
+  const geo = getPageGeometry(doc);
+  const headerH = binToBinHeaderHeight(doc, rows, geo);
+  const tableStartY = geo.marginTop + headerH;
+
+  const head = [['No', 'Dari Bin', 'Ke Bin', 'Material', 'Description', 'Shipment', 'Batch', 'Exp Date', 'Qty', 'UOM', 'Wave NO', '']];
+  const body: any[][] = [];
+  let lastAisle: string | null = null;
+  for (const r of rows) {
+    if (r.aisle !== lastAisle) {
+      body.push([{ content: `— LORONG ${r.aisle} —`, colSpan: BIN_TO_BIN_COLS, styles: { pageBreak: 'before', fillColor: [230, 230, 230], fontStyle: 'bold', halign: 'center', textColor: [0, 0, 0] } }]);
+      lastAisle = r.aisle;
+    }
+    body.push([
+      String(r.seq),
+      r.from_bin,
+      r.to_bin,
+      r.sku,
+      escape(r.description),
+      r.shipment_number,
+      r.batch_lot,
+      r.expiry_date,
+      String(r.quantity),
+      r.uom,
+      r.wave_no,
+      '',
+    ]);
+  }
+
+  autoTable(doc, {
+    startY: tableStartY,
+    head,
+    body,
+    theme: 'grid',
+    pageBreak: 'auto',
+    rowPageBreak: 'auto',
+    showHead: 'everyPage',
+    margin: {
+      left: geo.marginLeft,
+      right: geo.marginRight,
+      top: tableStartY,
+      bottom: SIGNATURE_BLOCK_HEIGHT,
+    },
+    styles: {
+      fontSize: 10,
+      cellPadding: 1.5,
+      textColor: [0, 0, 0],
+      lineWidth: 0.2,
+      lineColor: [0, 0, 0],
+      overflow: 'linebreak',
+    },
+    headStyles: {
+      fillColor: [255, 255, 255],
+      textColor: [0, 0, 0],
+      fontStyle: 'bold',
+      fontSize: 10,
+      lineWidth: 0.2,
+      lineColor: [0, 0, 0],
+    },
+    columnStyles: {
+      0: { cellWidth: BIN_TO_BIN_COL_WIDTHS[0] },
+      1: { cellWidth: BIN_TO_BIN_COL_WIDTHS[1], fontStyle: 'bold' },
+      2: { cellWidth: BIN_TO_BIN_COL_WIDTHS[2], fontStyle: 'bold' },
+      3: { cellWidth: BIN_TO_BIN_COL_WIDTHS[3] },
+      4: { cellWidth: BIN_TO_BIN_COL_WIDTHS[4], overflow: 'linebreak' },
+      5: { cellWidth: BIN_TO_BIN_COL_WIDTHS[5] },
+      6: { cellWidth: BIN_TO_BIN_COL_WIDTHS[6] },
+      7: { cellWidth: BIN_TO_BIN_COL_WIDTHS[7], halign: 'right' },
+      8: { cellWidth: BIN_TO_BIN_COL_WIDTHS[8], halign: 'right' },
+      9: { cellWidth: BIN_TO_BIN_COL_WIDTHS[9], halign: 'right' },
+      10: { cellWidth: BIN_TO_BIN_COL_WIDTHS[10] },
+      11: { cellWidth: BIN_TO_BIN_COL_WIDTHS[11], halign: 'center' },
+    },
+    didDrawPage() {
+      drawBinToBinHeader(doc, rows, opts, geo);
+    },
+    didDrawCell(data: any) {
+      if (data.column.index === BIN_TO_BIN_CHECK_COL && data.section === 'body') {
+        const { x, y, width, height } = data.cell;
+        const size = Math.min(width, height) * 0.5;
+        const cx = x + width / 2 - size / 2;
+        const cy = y + height / 2 - size / 2;
+        doc.rect(cx, cy, size, size);
+      }
+    },
+  });
 }
 
 // ── Blank picklist PDF rendering ────────────────────────────────────────────

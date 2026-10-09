@@ -17,6 +17,13 @@ import { parseLocation } from './pickpath';
  *   · lines sorted along the serpentine pick path, not by SKU
  *   · sequence numbers assigned last so they match the walking order
  */
+/** What the run could not allocate for one shipment (or wave, when there is no shipment number), per SKU. */
+function shortagesOf(result: AllocationResult, key: string) {
+  const m = new Map<string, number>();
+  for (const s of result.shortages) if ((s.shipmentNumber || '') === key && s.qtyShort > 0) m.set(s.sku, (m.get(s.sku) ?? 0) + s.qtyShort);
+  return [...m].map(([sku, qtyShort]) => ({ sku, qtyShort })).sort((a, b) => b.qtyShort - a.qtyShort || a.sku.localeCompare(b.sku));
+}
+
 export function buildPicklists(
   result: AllocationResult,
   demand: DemandLine[],
@@ -75,6 +82,7 @@ export function buildPicklists(
         totalPallets: lines.filter((l) => l.pickType === 'PALLET').length,
         distinctLocations: new Set(lines.map((l) => l.location)).size,
         distinctSkus: new Set(lines.map((l) => l.sku)).size,
+        shortages: idx === 0 ? shortagesOf(result, key) : [],
       });
     });
   }

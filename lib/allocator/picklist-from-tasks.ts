@@ -1,5 +1,6 @@
 import { replaySteps, stockIdentityKey, type ReplayStep } from './ledger';
-import type { AllocationLine, Picklist, PickType } from './types';
+import type { AllocationLine, AllocationResult, Picklist, PickType } from './types';
+import { expiryText, withConfig } from './config';
 import { lookupUom } from './uom-master';
 import { restNoteAt, type RestStep } from './picklist';
 
@@ -49,6 +50,9 @@ export interface OutboundRow {
   shipment_number: string;
   sku: string;
   order_nos: string[];
+  /** when given, a line allocated below its order is printed as a shortage in the header */
+  quantity_requested?: number;
+  quantity_allocated?: number;
 }
 
 /** Physical stock of one identity now (a row of inventory_detail). */
@@ -205,8 +209,141 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
         totalPallets: lines.filter((l) => l.pickType === 'PALLET').length,
         distinctLocations: new Set(lines.map((l) => l.location)).size,
         distinctSkus: new Set(lines.map((l) => l.sku)).size,
+        shortages: outbound
+          .filter((o) => o.wave_id === w.id && o.shipment_number === shipment && o.quantity_requested !== undefined
+            && Number(o.quantity_allocated ?? 0) < Number(o.quantity_requested))
+          .map((o) => ({ sku: o.sku, qtyShort: Number(o.quantity_requested) - Number(o.quantity_allocated ?? 0) }))
+          .sort((a, b) => b.qtyShort - a.qtyShort || a.sku.localeCompare(b.sku)),
       });
     }
   }
   return out;
+}
+
+/** One row of the printable Bin To Bin work sheet. */
+export interface BinToBinRow {
+  /** Continuous 1..N down the sheet. */
+  seq: number;
+  aisle: string;
+  from_bin: string;
+  to_bin: string;
+  sku: string;
+  description: string;
+  shipment_number: string;
+  batch_lot: string;
+  /** Formatted by expiryText, '-' when the plan carries none. */
+  expiry_date: string;
+  quantity: number;
+  uom: string;
+  wave_no: string;
+  /** The wave's date, printed in the sheet's title. */
+  planned_date: string;
+}
+
+/** Leading letters of a bin code: CA01A01 → CA. */
+function aisleOf(bin: string): string {
+  return /^[A-Za-z]+/.exec(String(bin ?? '').trim().toUpperCase())?.[0] ?? '-';
+}
+
+/**
+ * Every planned bin-to-bin move of the day (REPLENISH tasks still open) as
+ * rows for one operator work sheet. Execution order first — waves by slot then
+ * NO, tasks by seq, the same order as the Sisa replay — then grouped by aisle
+ * in pick-path order (`config.aisleSequence`), keeping that execution order
+ * inside an aisle; the No runs continuously over the sheet. Completed and
+ * cancelled moves are left off: they already happened or will not.
+ */
+export function binToBinRows(waves: WaveRow[], tasks: TaskRow[]): BinToBinRow[] {
+  const waveIds = new Set(waves.map((w) => w.id));
+  const open = tasks.filter((t) => t.task_type === 'REPLENISH'
+    && (t.status === 'PLANNED' || t.status === 'RESCHEDULED') && waveIds.has(t.wave_id));
+  const ordered = executionOrder(waves, open);
+
+  const cfg = withConfig();
+  const rank = (aisle: string) => {
+    const i = cfg.aisleSequence.indexOf(aisle);
+    return i === -1 ? cfg.aisleSequence.length : i;
+  };
+  const groups = new Map<string, TaskRow[]>();
+  for (const t of ordered) {
+    const a = aisleOf(t.from_bin);
+    const g = groups.get(a);
+    if (g) g.push(t); else groups.set(a, [t]);
+  }
+  const aisles = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+
+  const wave = new Map(waves.map((w) => [w.id, w]));
+  const rows: BinToBinRow[] = [];
+  for (const aisle of aisles) {
+    for (const t of groups.get(aisle) ?? []) {
+      const w = wave.get(t.wave_id);
+      rows.push({
+        seq: rows.length + 1,
+        aisle,
+        from_bin: t.from_bin,
+        to_bin: t.to_bin ?? '-',
+        sku: t.sku,
+        description: t.description,
+        shipment_number: t.shipment_number || w?.shipment_numbers[0] || '-',
+        batch_lot: t.batch_lot || '-',
+        expiry_date: expiryText(new Date(`${t.expiry_date}T00:00:00Z`)),
+        quantity: Number(t.quantity),
+        uom: lookupUom(t.sku) || t.uom || '-',
+        wave_no: t.wave_no,
+        planned_date: w?.planned_date ?? '',
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * The same work sheet derived straight from an `AllocationResult` (the Alokasi
+ * page prints from that, not from saved pick tasks): every pick line that
+ * opens a pallet and moves its rest (`moveTo` set, `moveQty` > 0). Grouped
+ * by aisle in pick-path order, continuous No — same layout as `binToBinRows`.
+ */
+export function binToBinRowsFromResult(result: AllocationResult, asOf: string): BinToBinRow[] {
+  const lines: AllocationLine[] = [];
+  for (const pl of result.picklists) {
+    for (const l of pl.lines) {
+      if (l.moveTo && l.moveQty > 0) lines.push(l);
+    }
+  }
+  lines.sort((a, b) => String(a.waveNo).localeCompare(String(b.waveNo), undefined, { numeric: true }) || a.seq - b.seq);
+
+  const cfg = withConfig();
+  const rank = (aisle: string) => {
+    const i = cfg.aisleSequence.indexOf(aisle);
+    return i === -1 ? cfg.aisleSequence.length : i;
+  };
+  const groups = new Map<string, AllocationLine[]>();
+  for (const l of lines) {
+    const a = aisleOf(l.location);
+    const g = groups.get(a);
+    if (g) g.push(l); else groups.set(a, [l]);
+  }
+  const aisles = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+
+  const rows: BinToBinRow[] = [];
+  for (const aisle of aisles) {
+    for (const l of groups.get(aisle) ?? []) {
+      rows.push({
+        seq: rows.length + 1,
+        aisle,
+        from_bin: l.location,
+        to_bin: l.moveTo ?? '-',
+        sku: l.sku,
+        description: l.description,
+        shipment_number: l.shipmentNumber || '-',
+        batch_lot: l.batch ?? '-',
+        expiry_date: expiryText(l.expiryDate),
+        quantity: l.moveQty,
+        uom: lookupUom(l.sku) || l.uom || '-',
+        wave_no: String(l.waveNo),
+        planned_date: asOf,
+      });
+    }
+  }
+  return rows;
 }
