@@ -54,7 +54,7 @@ select pg_temp.check('no longer parked', not exists (select 1 from parked_orders
 select pg_temp.check('both waves of the day together use the 8 in the bin, not more',
   (select sum(quantity) from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-16') = 8);
 select pg_temp.check('carried wave can be posted',
-  (post_task_by((select id from pick_tasks where wave_id = (pg_temp.w()).id), p_by_name => 'Budi')->>'result') = 'POSTED');
+  (post_task_by((select id from pick_tasks where wave_id = (pg_temp.w()).id), p_by_name => 'Budi', p_scanned => 'CF38C01')->>'result') = 'POSTED');
 
 -- ---- Parked shipment back with a new item (0037) -----------------------------
 reset role; reset request.jwt.claim.sub; drop table if exists _replace, _wave_ids;
@@ -71,7 +71,7 @@ select save_plan('2026-10-17', '{
 create or replace function pg_temp.x() returns waves language sql as $$
   select w.* from waves w join outbound o on o.wave_id = w.id where 'O-0037-A' = any(o.order_nos) $$;
 -- 4 already picked, 2 still open when the wave is parked.
-select post_task_by((select id from pick_tasks where wave_id = (pg_temp.x()).id and seq = 1), p_by_name => 'Budi');
+select post_task_by((select id from pick_tasks where wave_id = (pg_temp.x()).id and seq = 1), p_by_name => 'Budi', p_scanned => 'CF37C01');
 select set_wave_status((pg_temp.x()).id, 'RESCHEDULED', 'tunda');
 select pg_temp.check('parked: its open 2 stay reserved (10 - 4 picked - 2)',
   (select quantity from planning_stock('2026-10-18') where bin_code = 'CF37C01') = 4);

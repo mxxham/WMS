@@ -66,19 +66,20 @@ select pg_temp.check('errors: wrong SKU compares nothing else',
   pick_audit_errors('S', 'A7', null, 10, 'T', 'ZZ', null, 3, false) = '{WRONG_SKU}');
 
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
-select post_task_by(pg_temp.task('PA1', 1), p_by_name => 'Budi Santoso');
-select post_task_by(pg_temp.task('PA1', 2), 4, null, null, null, 'karton kurang', 'Budi Santoso', null);
-select post_task_by(pg_temp.task('PA1', 5), 0, null, null, null, 'stok tidak ada', 'Budi Santoso', null);
-select post_task_by(pg_temp.task('PA2', 3), p_by_name => 'Budi Santoso', p_scanned => ' 8994123456789 ');
-select post_task_by(pg_temp.task('PA5', 6), p_by_name => 'Budi Santoso');
+-- 0068: every posting confirms the bin's rack label (scanned or typed).
+select post_task_by(pg_temp.task('PA1', 1), p_by_name => 'Budi Santoso', p_scanned => 'CF38C01');
+select post_task_by(pg_temp.task('PA1', 2), 4, null, null, null, 'karton kurang', 'Budi Santoso', 'CF37C01');
+select post_task_by(pg_temp.task('PA1', 5), 0, null, null, null, 'stok tidak ada', 'Budi Santoso', 'CF37C01');
+select post_task_by(pg_temp.task('PA2', 3), p_by_name => 'Budi Santoso', p_scanned => ' cf38 c01 ');
+select post_task_by(pg_temp.task('PA5', 6), p_by_name => 'Budi Santoso', p_scanned => 'CF37C01', p_scan_mode => 'ketik');
 select complete_wave_by(pg_temp.wave('2'), 'Rina');
 
 select pg_temp.check('the picker''s typed name is kept on the task, not the shared account',
-  (select picked_by_name = 'Budi Santoso' and scanned_code is null and not bulk_posted from pick_tasks where id = pg_temp.task('PA1', 1)));
-select pg_temp.check('the scanned carton code is kept (spaces removed)',
-  (select scanned_code = '8994123456789' and not bulk_posted from pick_tasks where id = pg_temp.task('PA2', 3)));
+  (select picked_by_name = 'Budi Santoso' and scanned_code = 'CF38C01' and not bulk_posted from pick_tasks where id = pg_temp.task('PA1', 1)));
+select pg_temp.check('the scanned bin code is kept (spaces removed, upper case)',
+  (select scanned_code = 'CF38C01' and scan_method = 'scan' and not bulk_posted from pick_tasks where id = pg_temp.task('PA2', 3)));
 select pg_temp.check('a scan does not leak onto the next task of the same transaction',
-  (select scanned_code is null from pick_tasks where id = pg_temp.task('PA5', 6)));
+  (select scanned_code = 'CF37C01' and scan_method = 'ketik' from pick_tasks where id = pg_temp.task('PA5', 6)));
 select pg_temp.check('bulk completion keeps the name and flags the line',
   (select picked_by_name = 'Rina' and bulk_posted from pick_tasks where id = pg_temp.task('PA3', 1)));
 select pg_temp.check('line shows what the picker reported (4 of 5), not yet audited',

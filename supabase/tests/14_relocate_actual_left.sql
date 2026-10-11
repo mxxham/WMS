@@ -34,13 +34,13 @@ select save_plan('2026-10-12', '{
   "outbound":[{"wave_no":"4","shipment_number":"S65","sku":"550044709","quantity_requested":32,"quantity_allocated":32}]}'::jsonb);
 
 select pg_temp.check('pick still capped at the planned quantity',
-  pg_temp.fails(format($q$select post_task_by(%L, 33, null, null, null, 'x', 'Budi')$q$, pg_temp.task('PICK')), 'Jumlah aktual harus%'));
-select post_task_by(pg_temp.task('PICK'), 15, null, null, null, 'hanya butuh 15', 'Budi');
+  pg_temp.fails(format($q$select post_task_by(%L, 33, null, null, null, 'x', 'Budi', 'CF38C01')$q$, pg_temp.task('PICK')), 'Jumlah aktual harus%'));
+select post_task_by(pg_temp.task('PICK'), 15, null, null, null, 'hanya butuh 15', 'Budi', 'CF38C01');
 select pg_temp.check('pick 15 of 32 leaves 29 in the pallet bin', pg_temp.qty('CF38C01') = 29);
 select pg_temp.check('relocation cannot move more than the bin holds',
-  pg_temp.fails(format($q$select post_task_by(%L, 30, null, null, null, 'semua', 'Budi')$q$, pg_temp.task('REPLENISH')), '%'));
+  pg_temp.fails(format($q$select post_task_by(%L, 30, null, null, null, 'semua', 'Budi', 'CF38C01')$q$, pg_temp.task('REPLENISH')), '%'));
 select pg_temp.check('relocation posts everything left (29, planned 12)',
-  (post_task_by(pg_temp.task('REPLENISH'), 29, null, null, null, 'sisa setelah pick 15', 'Budi')->>'quantity')::numeric = 29);
+  (post_task_by(pg_temp.task('REPLENISH'), 29, null, null, null, 'sisa setelah pick 15', 'Budi', 'CF38C01')->>'quantity')::numeric = 29);
 select pg_temp.check('pallet bin empty, pickface 1 + 29 = 30', pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 30);
 
 -- ---- Ubah jumlah order + Batalkan posting (0034) ------------------------------
@@ -75,7 +75,7 @@ select pg_temp.check('its relocation carries the rest (12 -> 29)', (pg_temp.t13(
 select pg_temp.check('order line now 59 requested and allocated',
   (select quantity_requested = 59 and quantity_allocated = 59 from outbound where wave_id = pg_temp.w13()));
 
-select post_task_by((pg_temp.t13(1)).id, p_by_name => 'Budi');
+select post_task_by((pg_temp.t13(1)).id, p_by_name => 'Budi', p_scanned => 'CF38C01');
 select pg_temp.check('pick posted as planned: 15 out, 29 left', pg_temp.qty('CF38C01') = 29);
 select pg_temp.check('undo: reason required',
   pg_temp.fails(format($q$select unpost_task(%L, 'Budi', '')$q$, (pg_temp.t13(1)).id), '%Alasan%'));
@@ -88,8 +88,8 @@ select pg_temp.check('undo: bin back to 44, task open, order picked back to 0',
 select pg_temp.check('undo: an open task cannot be undone',
   pg_temp.fails(format($q$select unpost_task(%L, 'Budi', 'x')$q$, (pg_temp.t13(1)).id), '%belum diposting%'));
 
-select post_task_by((pg_temp.t13(1)).id, 14, null, null, null, 'rusak 1', 'Budi');
-select post_task_by((pg_temp.t13(2)).id, 30, null, null, null, 'semua sisa', 'Budi');
+select post_task_by((pg_temp.t13(1)).id, 14, null, null, null, 'rusak 1', 'Budi', 'CF38C01');
+select post_task_by((pg_temp.t13(2)).id, 30, null, null, null, 'semua sisa', 'Budi', 'CF38C01');
 select pg_temp.check('relocation of 30 posted: pallet bin 0, pickface 31', pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 31);
 select pg_temp.check('undo relocation: 30 go back from the pickface',
   unpost_task((pg_temp.t13(2)).id, 'Budi', 'salah qty') @> '{"result":"UNPOSTED"}');
@@ -131,19 +131,19 @@ create or replace function pg_temp.t14(p_seq int) returns pick_tasks language sq
   select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-14' and t.seq = p_seq $$;
 
 select pg_temp.check('pair: not a pair refused',
-  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, null, null, null, 'Budi')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(2)).id), '%bukan pasangan%'));
+  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, null, null, null, 'Budi', 'CF38C01')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(2)).id), '%bukan pasangan%'));
 select pg_temp.check('pair: a difference needs a reason, nothing posted',
-  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, 30, 0, null, 'Budi')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(3)).id), '%Alasan wajib%'));
+  pg_temp.fails(format($q$select post_pick_with_move(%L, %L, 30, 0, null, 'Budi', 'CF38C01')$q$, (pg_temp.t14(2)).id, (pg_temp.t14(3)).id), '%Alasan wajib%'));
 select pg_temp.check('pair: still both open after the refusal',
   (pg_temp.t14(2)).status = 'PLANNED' and (pg_temp.t14(3)).status = 'PLANNED');
-select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, 0, 'sisa tetap di bin', 'Budi');
+select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, 0, 'sisa tetap di bin', 'Budi', 'CF38C01');
 select pg_temp.check('pair: pick 30 to the truck, move 0: 6 stay in the pallet bin',
   pg_temp.qty('CF38C01') = 6 and pg_temp.qty('CF38C02') = 0
   and (pg_temp.t14(2)).actual_quantity = 30 and (pg_temp.t14(3)).actual_quantity = 0);
 select unpost_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, 'Budi', 'salah, sisa dipindah');
 select pg_temp.check('pair undone: pallet whole again, both open',
   pg_temp.qty('CF38C01') = 36 and (pg_temp.t14(2)).status = 'PLANNED' and (pg_temp.t14(3)).status = 'PLANNED');
-select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, null, null, 'Budi');
+select post_pick_with_move((pg_temp.t14(2)).id, (pg_temp.t14(3)).id, null, null, null, 'Budi', 'CF38C01');
 select pg_temp.check('pair as planned: 30 out, 6 to the pickface, pallet bin empty',
   pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 6);
 

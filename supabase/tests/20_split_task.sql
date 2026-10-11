@@ -28,9 +28,9 @@ select pg_temp.check('keep must be 1..35', pg_temp.fails(format($q$select split_
 select pg_temp.check('split 36 -> 23 + 13', split_task((pg_temp.t(8)).id, 23, 'Budi') @> '{"kept":23,"new_qty":13,"new_seq":9}');
 select pg_temp.check('the new part sits right after, the later task moved down',
   (pg_temp.t(8)).quantity = 23 and (pg_temp.t(9)).quantity = 13 and (pg_temp.t(9)).shipment_number = '109694908' and (pg_temp.t(10)).quantity = 0.5);
-select pg_temp.check('23 from CF38D02 as planned', (post_task_by((pg_temp.t(8)).id, p_by_name => 'Budi')->>'result') = 'POSTED');
+select pg_temp.check('23 from CF38D02 as planned', (post_task_by((pg_temp.t(8)).id, p_by_name => 'Budi', p_scanned => 'CF38D02')->>'result') = 'POSTED');
 select pg_temp.check('13 from the other bin (Berbeda)',
-  (post_task_by((pg_temp.t(9)).id, 13, 'CF38A01', '17I', '2030-09-17', 'diambil dari CF38A01', 'Budi')->>'result') = 'POSTED');
+  (post_task_by((pg_temp.t(9)).id, 13, 'CF38A01', '17I', '2030-09-17', 'diambil dari CF38A01', 'Budi', 'CF38A01')->>'result') = 'POSTED');
 select pg_temp.check('order picked 36 in total',
   (select quantity_picked from outbound o join waves w on w.id = o.wave_id where w.planned_date = '2026-10-25') = 36);
 rollback;

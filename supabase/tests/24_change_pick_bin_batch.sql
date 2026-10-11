@@ -82,7 +82,7 @@ select pg_temp.check('the batch change is in the history',
   exists (select 1 from execution_events where entity_type = 'TASK' and entity_id = (pg_temp.pk()).id
           and reason like '%Budi: CF38C01 → CF38C02 batch 16I26JJ exp 2030-10-16%'));
 select pg_temp.check('the re-pointed pick and move still post as one line: 6 out, 14 to CF38D02',
-  (post_pick_with_move((pg_temp.pk()).id, (pg_temp.mv()).id, null, null, null, 'Budi')->'move'->>'result') = 'POSTED');
+  (post_pick_with_move((pg_temp.pk()).id, (pg_temp.mv()).id, null, null, null, 'Budi', 'CF38C02')->'move'->>'result') = 'POSTED');
 select pg_temp.check('a posted pick cannot be re-pointed',
   pg_temp.fails(format($q$select change_pick_bin(%L, 'CF38C01', 'Budi')$q$, (pg_temp.pk()).id), '%belum diposting%'));
 rollback;

@@ -31,8 +31,8 @@ select save_plan('2026-10-26', '{
 create or replace function pg_temp.t(p_wave text, p_seq int) returns pick_tasks language sql as $$
   select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-26' and w.wave_no = p_wave and t.seq = p_seq $$;
 
-select post_pick_with_move((pg_temp.t('1',1)).id, (pg_temp.t('1',2)).id, null, null, null, 'Budi') \g /dev/null
-select post_task_by((pg_temp.t('2',1)).id, null, null, null, null, null, 'Budi') \g /dev/null
+select post_pick_with_move((pg_temp.t('1',1)).id, (pg_temp.t('1',2)).id, null, null, null, 'Budi', 'CF01C01') \g /dev/null
+select post_task_by((pg_temp.t('2',1)).id, null, null, null, null, null, 'Budi', 'CF38A01') \g /dev/null
 select set_wave_status((select id from waves where planned_date = '2026-10-26' and wave_no = '1'), 'RESCHEDULED') \g /dev/null
 select pg_temp.check('setup: pallet emptied, pickface 28 - 4 = 24, NO 1 on Tunda',
   pg_temp.qty('CF01C01') = 0 and pg_temp.qty('CF38A01') = 24);

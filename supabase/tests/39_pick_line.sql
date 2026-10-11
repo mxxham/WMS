@@ -57,37 +57,37 @@ do $$ begin
 exception when others then raise notice 'PASS an operator still cannot use Isi dari picklist'; end $$;
 
 do $$ begin
-  perform post_pick_line(pg_temp.wave(), pg_temp.row((select p1 from ids), null, '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":16}]', null, null), ' ', 'sesuai');
+  perform post_pick_line(pg_temp.wave(), pg_temp.row((select p1 from ids), null, '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":16}]', null, null), ' ', 'sesuai', 'CB18A02');
   raise notice 'FAIL a line without a name is refused';
 exception when others then raise notice 'PASS a line without a name is refused'; end $$;
 
 create temp table r1 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p1 from ids), null,
-  '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":16}]', null, null), 'Ani', 'sesuai') as r;
+  '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":16}]', null, null), 'Ani', 'sesuai', 'CB18A02') as r;
 select pg_temp.check('as planned: posted by an operator, CB18A02 16 -> 0, picked_by_name Ani',
   (select r->>'result' = 'posted' from r1) and pg_temp.qty('CB18A02', '550070614') = 0
   and (select picked_by_name from pick_tasks where id = (select p1 from ids)) = 'Ani');
-select pg_temp.check('a line posted without a scan is not bulk: bulk_posted false, scanned_code empty',
-  (select not bulk_posted and coalesce(scanned_code, '') = '' from pick_tasks where id = (select p1 from ids)));
+select pg_temp.check('a line posted at the bin is not bulk: bulk_posted false, scanned_code the confirmed bin (0068)',
+  (select not bulk_posted and scanned_code = 'CB18A02' from pick_tasks where id = (select p1 from ids)));
 
 create temp table r2 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p2 from ids), (select m3 from ids),
-  '[{"bin":"CB34D02","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CB18A01', 23), 'Ani', 'pickface penuh') as r;
+  '[{"bin":"CB34D02","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CB18A01', 23), 'Ani', 'pickface penuh', 'CB34D02') as r;
 select pg_temp.check('pallet: 13 picked, the rest 23 to CB18A01 instead of CB18A02',
   (select r->>'result' = 'posted' from r2) and pg_temp.qty('CB34D02', '550070614') = 0
   and pg_temp.qty('CB18A01', '550070614') = 23 and pg_temp.qty('CB18A02', '550070614') = 0);
 
 create temp table r4 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p4 from ids), null,
-  '[{"bin":"CB33E02","batch":"P11","expiry":"2030-09-11","qty":6},{"bin":"CB33E01","batch":"P11","expiry":"2030-09-11","qty":4}]', null, null), 'Ani', 'palet terhalang') as r;
+  '[{"bin":"CB33E02","batch":"P11","expiry":"2030-09-11","qty":6},{"bin":"CB33E01","batch":"P11","expiry":"2030-09-11","qty":4}]', null, null), 'Ani', 'palet terhalang', 'CB33E02') as r;
 select pg_temp.check('two sources: 6 from CB33E02 + 4 from CB33E01 (split_task inside works for an operator)',
   (select r->>'result' = 'posted' from r4) and pg_temp.qty('CB33E02', '550070614') = 30 and pg_temp.qty('CB33E01', '550070614') = 32);
 
 create temp table r5 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p5 from ids), null,
-  '[{"bin":"CD13A01","batch":"Q13","expiry":"2030-08-13","qty":8}]', null, null), 'Ani', 'sesuai') as r;
+  '[{"bin":"CD13A01","batch":"Q13","expiry":"2030-08-13","qty":8}]', null, null), 'Ani', 'sesuai', 'CD13A01') as r;
 select pg_temp.check('correction of 3 (<= 20): posted, CD13A01 5 + 3 - 8 = 0, a count task opens',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 1 from r5) and pg_temp.qty('CD13A01', '550048593') = 0
   and exists (select 1 from count_tasks c join bins b on b.id = c.bin_id where b.bin_code = 'CD13A01' and c.status = 'OPEN'));
 
 create temp table r6 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p6 from ids), null,
-  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":40}]', null, null), 'Ani', 'sesuai') as r;
+  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":40}]', null, null), 'Ani', 'sesuai', 'CE01A01') as r;
 select pg_temp.check('correction of 30 (> 20): refused, nothing posted, stock untouched, no FOUND booked',
   (select r->>'result' = 'refused' and r->>'kind' = 'correction_over_limit' and r->>'message' like '%minta supervisor%' from r6)
   and pg_temp.qty('CE01A01', '550062460') = 10
@@ -97,34 +97,34 @@ select pg_temp.check('the refused line is a request for a supervisor, listed ope
   exists (select 1 from pick_line_requests_open where pick_id = (select p6 from ids) and kind = 'correction_over_limit' and by_name = 'Ani'));
 
 select post_pick_line(pg_temp.wave(), pg_temp.row((select p6 from ids), null,
-  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":40}]', null, null), 'Ani', 'sesuai') \g /dev/null
+  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":40}]', null, null), 'Ani', 'sesuai', 'CE01A01') \g /dev/null
 select pg_temp.check('a refused line retried keeps one open request',
   (select count(*) from pick_line_requests where pick_id = (select p6 from ids) and status = 'OPEN') = 1);
 
 do $$ begin
-  perform post_pick_line(pg_temp.wave(), pg_temp.row((select p7 from ids), null, '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":11}]', null, null), 'Ani', 'x');
+  perform post_pick_line(pg_temp.wave(), pg_temp.row((select p7 from ids), null, '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":11}]', null, null), 'Ani', 'x', 'CE01A02');
   raise notice 'FAIL more than the order line is refused';
 exception when others then raise notice 'PASS more than the order line is refused'; end $$;
 select pg_temp.check('input mistakes write no request', pg_temp.requests() = 1);
 
 create temp table r7 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p7 from ids), null,
-  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":7}]', null, null), 'Ani', 'bin kosong / kurang') as r;
+  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":7}]', null, null), 'Ani', 'bin kosong / kurang', 'CE01A02') as r;
 select pg_temp.check('fewer than planned: 7 of 10 posted',
   (select r->>'result' = 'posted' from r7) and pg_temp.qty('CE01A02', '550062460') = 3);
 
 create temp table r7b as select post_pick_line(pg_temp.wave(), pg_temp.row((select p7 from ids), null,
-  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":9}]', null, null), 'ani', 'salah ketik') as r;
+  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":9}]', null, null), 'ani', 'salah ketik', 'CE01A02') as r;
 select pg_temp.check('re-post own line (name case-insensitive): 9 instead of 7, stock taken once (10 - 9 = 1)',
   (select r->>'result' = 'posted' from r7b) and pg_temp.qty('CE01A02', '550062460') = 1);
 
 create temp table r7c as select post_pick_line(pg_temp.wave(), pg_temp.row((select p7 from ids), null,
-  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":10}]', null, null), 'Budi', 'x') as r;
+  '[{"bin":"CE01A02","batch":"R1","expiry":"2030-09-01","qty":10}]', null, null), 'Budi', 'x', 'CE01A02') as r;
 select pg_temp.check('same line posted twice by two names: second is a request, stock taken once',
   (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' and r->>'message' like '%ani%' from r7c)
   and pg_temp.qty('CE01A02', '550062460') = 1);
 
 create temp table r8 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p8 from ids), null,
-  '[{"bin":"CB33E01","batch":"P11","expiry":"2030-09-11","qty":0}]', null, null), 'Ani', 'bin kosong / kurang') as r;
+  '[{"bin":"CB33E01","batch":"P11","expiry":"2030-09-11","qty":0}]', null, null), 'Ani', 'bin kosong / kurang', 'CB33E01') as r;
 select pg_temp.check('Qty 0 posts as a short pick with a count task, not an input mistake',
   (select r->>'result' = 'posted' from r8) and (select status from pick_tasks where id = (select p8 from ids)) = 'COMPLETED'
   and exists (select 1 from count_tasks c join bins b on b.id = c.bin_id where b.bin_code = 'CB33E01' and c.status = 'OPEN'));
@@ -136,7 +136,7 @@ values ((select p1 from ids), 1, 'Cek', '550070614', 16, '550070614', 16, 'OK');
 set role authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table r1b as select post_pick_line(pg_temp.wave(), pg_temp.row((select p1 from ids), null,
-  '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":15}]', null, null), 'Ani', 'x') as r;
+  '[{"bin":"CB18A02","batch":"P20","expiry":"2030-08-20","qty":15}]', null, null), 'Ani', 'x', 'CB18A02') as r;
 select pg_temp.check('re-post of an audited line: request, nothing changes',
   (select r->>'result' = 'refused' and r->>'kind' = 'audited' from r1b)
   and (select actual_quantity from pick_tasks where id = (select p1 from ids)) = 16);
@@ -147,7 +147,7 @@ update waves set status = 'RESCHEDULED' where id = pg_temp.wave();
 set role authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table rt as select post_pick_line(pg_temp.wave(), pg_temp.row((select p6 from ids), null,
-  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":0}]', null, null), 'Ani', 'x') as r;
+  '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":0}]', null, null), 'Ani', 'x', 'CE01A01') as r;
 select pg_temp.check('a Tunda wave: request, nothing posted',
   (select r->>'result' = 'refused' and r->>'kind' = 'wave_not_pending' from rt)
   and (select status from pick_tasks where id = (select p6 from ids)) = 'PLANNED');
@@ -195,7 +195,7 @@ create temp table ids2 as select
 select post_task((select m from ids2), 30, null, null, null, null) \g /dev/null
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table rm as select post_pick_line((select w from ids2), pg_temp.row((select p from ids2), (select m from ids2),
-  '[{"bin":"CC01A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC01A02', 30), 'Ani', 'sesuai') as r;
+  '[{"bin":"CC01A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC01A02', 30), 'Ani', 'sesuai', 'CC01A01') as r;
 select pg_temp.check('pick posted after its move was posted early keeps the move: CC01A02 30, CC01A01 0, nothing invented',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rm) and pg_temp.qty('CC01A02', '550071397') = 30
   and pg_temp.qty('CC01A01', '550071397') = 0
@@ -230,7 +230,7 @@ set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table req_before as select pg_temp.requests() n;
 do $$ begin
   perform post_pick_line((select w from ids3), pg_temp.row((select b from ids3), (select m from ids3),
-    '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":4}]', 'CC02A02', 30), 'Ani', 'x');
+    '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":4}]', 'CC02A02', 30), 'Ani', 'x', 'CC03A01');
   raise notice 'FAIL a move that is not the pick''s own is refused';
 exception when others then raise notice 'PASS a move that is not the pick''s own is refused'; end $$;
 select pg_temp.check('that mistake writes no request and posts nothing',
@@ -239,7 +239,7 @@ select pg_temp.check('that mistake writes no request and posts nothing',
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED');
 
 create temp table rc as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
-  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC02A02', 20), 'Ani', 'x') as r;
+  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC02A02', 20), 'Ani', 'x', 'CC02A01') as r;
 select pg_temp.check('changing a move someone else posted (pick still open): request other_picker, move stays as posted',
   (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rc)
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
@@ -247,21 +247,21 @@ select pg_temp.check('changing a move someone else posted (pick still open): req
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 6);
 
 create temp table rd as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
-  '[{"bin":"CC02A01","batch":"S2","expiry":"2030-09-01","qty":6}]', 'CC02A02', 30), 'Ani', 'x') as r;
+  '[{"bin":"CC02A01","batch":"S2","expiry":"2030-09-01","qty":6}]', 'CC02A02', 30), 'Ani', 'x', 'CC02A01') as r;
 select pg_temp.check('same destination, quantity and bin but another batch: other_picker, move stays as posted',
   (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rd)
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
   and pg_temp.qty('CC02A02', '550071397') = 30);
 
 create temp table re as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
-  '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":3},{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":3}]', 'CC02A02', 30), 'Ani', 'x') as r;
+  '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":3},{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":3}]', 'CC02A02', 30), 'Ani', 'x', 'CC03A01') as r;
 select pg_temp.check('the move''s bin as second source, another bin first: other_picker, move stays as posted',
   (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from re)
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC03A01', '550071397') = 10);
 
 create temp table rg as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
-  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', '', 30), 'Ani', 'x') as r;
+  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', '', 30), 'Ani', 'x', 'CC02A01') as r;
 select pg_temp.check('blank move_to with everything else matching the other''s move: other_picker, move still COMPLETED, stock unchanged',
   (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rg)
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
@@ -269,7 +269,7 @@ select pg_temp.check('blank move_to with everything else matching the other''s m
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 6);
 
 create temp table rf as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
-  '[{"bin":" cc02a01 ","batch":"S1","expiry":"2030-09-01","qty":6}]', ' cc02a02', 30), 'Ani', 'x') as r;
+  '[{"bin":" cc02a01 ","batch":"S1","expiry":"2030-09-01","qty":6}]', ' cc02a02', 30), 'Ani', 'x', 'CC02A01') as r;
 select pg_temp.check('move_to and bin differing only by case/whitespace read as unchanged: pick posts next to the other''s move',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rf)
   and (select status from pick_tasks where id = (select a from ids3)) = 'COMPLETED'
@@ -297,7 +297,7 @@ set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table req_mo as select pg_temp.requests() n;
 do $$ begin
   perform post_pick_line((select w from ids4), pg_temp.row(null, (select mo from ids4),
-    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', '', 5), 'Ani', 'x');
+    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', '', 5), 'Ani', 'x', 'CC04A01');
   raise notice 'FAIL a move-only row with a blank destination is refused';
 exception when others then
   if sqlerrm like 'Isi bin tujuan dan Qty sisa%' then raise notice 'PASS a move-only row with a blank destination is refused';
@@ -305,7 +305,7 @@ exception when others then
 end $$;
 do $$ begin
   perform post_pick_line((select w from ids4), pg_temp.row(null, (select mo from ids4),
-    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', 'CC04A02', 0), 'Ani', 'x');
+    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', 'CC04A02', 0), 'Ani', 'x', 'CC04A01');
   raise notice 'FAIL a move-only row with zero Qty sisa is refused';
 exception when others then
   if sqlerrm like 'Isi bin tujuan dan Qty sisa%' then raise notice 'PASS a move-only row with zero Qty sisa is refused';
@@ -341,7 +341,7 @@ set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 
 create temp table r9 as select post_pick_line((select w from ids9), pg_temp.row((select p from ids9), (select m from ids9),
   '[{"bin":"CC06A01","batch":"P11","expiry":"2030-09-11","qty":10},{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":3}]', 'CC06A02', 26),
-  'Ani', 'palet terhalang', ' 550070614 ') as r;
+  'Ani', 'palet terhalang', ' cc06a01 ') as r;
 select pg_temp.check('two sources + rest to the pickface: CC06A01 0, CC07A01 33, CC06A02 26 of P11',
   (select r->>'result' = 'posted' from r9) and pg_temp.qty('CC06A01', '550070614') = 0
   and pg_temp.qty('CC07A01', '550070614') = 33 and pg_temp.batches('CC06A02') = 'P11:26');
@@ -351,13 +351,13 @@ select pg_temp.check('the split piece goes after the line''s Bin To Bin: pick #1
    where t.wave_id = (select w from ids9)) = 'PICK@1:CC06A01,REPLENISH@2:CC06A01,PICK@3:CC07A01'
   and (select seq from pick_tasks where id = (select m from ids9)) = 2);
 select pg_temp.check('a scanned line is not bulk: both picks carry the scan (whitespace removed), the move no scan',
-  (select bool_and(not bulk_posted and scanned_code = '550070614') from pick_tasks
+  (select bool_and(not bulk_posted and scanned_code = 'CC06A01') from pick_tasks
    where wave_id = (select w from ids9) and task_type = 'PICK')
   and (select not bulk_posted and coalesce(scanned_code, '') = '' from pick_tasks where id = (select m from ids9)));
 
 do $$ begin
   perform post_pick_line((select w from ids9), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids9) and t.seq = 3),
-    (select m from ids9), '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC06A02', 26), 'Ani', 'salah ketik');
+    (select m from ids9), '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC06A02', 26), 'Ani', 'salah ketik', 'CC07A01');
   raise notice 'FAIL the second source''s piece with the line''s posted move is refused';
 exception when others then
   if sqlerrm = 'Bin To Bin ini bukan milik baris ini' then raise notice 'PASS the second source''s piece with the line''s posted move is refused';
@@ -367,13 +367,13 @@ select pg_temp.check('that refusal changes no stock',
   pg_temp.qty('CC06A01', '550070614') = 0 and pg_temp.qty('CC07A01', '550070614') = 33 and pg_temp.batches('CC06A02') = 'P11:26');
 
 create temp table r9b as select post_pick_line((select w from ids9), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids9) and t.seq = 3),
-  null, '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', null, null), 'Ani', 'salah ketik') as r;
+  null, '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', null, null), 'Ani', 'salah ketik', 'CC07A01') as r;
 select pg_temp.check('Ubah on the second source alone (3 -> 2): CC07A01 34, CC06A01 0, CC06A02 still 26 of P11',
   (select r->>'result' = 'posted' from r9b) and pg_temp.qty('CC06A01', '550070614') = 0
   and pg_temp.qty('CC07A01', '550070614') = 34 and pg_temp.batches('CC06A02') = 'P11:26');
 
 create temp table r9c as select post_pick_line((select w from ids9), pg_temp.row((select p from ids9), (select m from ids9),
-  '[{"bin":"CC06A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC06A02', 26), 'Ani', 'salah ketik') as r;
+  '[{"bin":"CC06A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC06A02', 26), 'Ani', 'salah ketik', 'CC06A01') as r;
 select pg_temp.check('Ubah on the pick + move (10 -> 9): CC06A01 1, CC07A01 34, CC06A02 26 of P11, nothing invented',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r9c) and pg_temp.qty('CC06A01', '550070614') = 1
   and pg_temp.qty('CC07A01', '550070614') = 34 and pg_temp.batches('CC06A02') = 'P11:26'
@@ -409,7 +409,7 @@ grant execute on function pg_temp.layout10() to authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 
 create temp table r10 as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
-  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CC09A02', 23), 'Ani', 'palet terhalang') as r;
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CC09A02', 23), 'Ani', 'palet terhalang', 'CC10A01') as r;
 select pg_temp.check('Berbeda from CC10A01: pick planned CC09A01 / actual CC10A01, move planned CC10A01; CC09A01 36, CC10A01 0, CC09A02 23',
   (select r->>'result' = 'posted' from r10)
   and (select fb.bin_code || '/' || ab.bin_code from pick_tasks t join bins fb on fb.id = t.from_bin_id
@@ -418,7 +418,7 @@ select pg_temp.check('Berbeda from CC10A01: pick planned CC09A01 / actual CC10A0
   and pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0 and pg_temp.batches('CC09A02') = 'P11:23');
 
 create temp table r10b as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
-  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":12}]', 'CC09A02', 24), 'Ani', 'salah hitung') as r;
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":12}]', 'CC09A02', 24), 'Ani', 'salah hitung', 'CC10A01') as r;
 select pg_temp.check('N2: Ubah by the same name after that Berbeda (13 -> 12, rest 24) is posted',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r10b));
 select pg_temp.check('N2: stock after the Ubah: CC09A01 36, CC10A01 0, CC09A02 24 of P11, CC11A01 36, nothing invented',
@@ -431,7 +431,7 @@ select pg_temp.check('N2: stock after the Ubah: CC09A01 36, CC10A01 0, CC09A02 2
 
 create temp table r10c as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
   '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":10},{"bin":"CC11A01","batch":"P12","expiry":"2030-09-12","qty":3}]', 'CC09A02', 26),
-  'Ani', 'palet kurang') as r;
+  'Ani', 'palet kurang', 'CC10A01') as r;
 select pg_temp.check('N3: a second source after that Berbeda goes after the line''s move: pick #1, move #2, piece #3',
   (select r->>'result' = 'posted' from r10c)
   and pg_temp.layout10() = 'PICK@1:CC10A01,REPLENISH@2:CC10A01,PICK@3:CC11A01'
@@ -441,7 +441,7 @@ select pg_temp.check('N3: stock after the second source: CC09A01 36, CC10A01 0, 
   pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0
   and pg_temp.qty('CC11A01', '550070614') = 33 and pg_temp.batches('CC09A02') = 'P11:26');
 create temp table r10d as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
-  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC09A02', 27), 'Ani', 'salah hitung') as r;
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC09A02', 27), 'Ani', 'salah hitung', 'CC10A01') as r;
 select pg_temp.check('N3: the line still pairs: Ubah of pick + move (10 -> 9, rest 27) is posted; CC10A01 0, CC11A01 33, CC09A02 27',
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r10d)
   and pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0
@@ -449,7 +449,7 @@ select pg_temp.check('N3: the line still pairs: Ubah of pick + move (10 -> 9, re
   and pg_temp.layout10() = 'PICK@1:CC10A01,REPLENISH@2:CC10A01,PICK@3:CC11A01');
 do $$ begin
   perform post_pick_line((select w from ids10), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids10) and t.seq = 3),
-    (select m from ids10), '[{"bin":"CC11A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC09A02', 27), 'Ani', 'salah ketik');
+    (select m from ids10), '[{"bin":"CC11A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC09A02', 27), 'Ani', 'salah ketik', 'CC11A01');
   raise notice 'FAIL N2: the piece with the line''s posted move is still refused';
 exception when others then
   if sqlerrm = 'Bin To Bin ini bukan milik baris ini' then raise notice 'PASS N2: the piece with the line''s posted move is still refused';

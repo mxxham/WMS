@@ -29,8 +29,8 @@ create or replace function pg_temp.t(p_seq int) returns pick_tasks language sql 
 reset role; update profiles set role = 'operator' where id = '11111111-1111-1111-1111-111111111111'; set role authenticated;
 
 select pg_temp.check('nothing to ask before the task is posted', not (bin_left_after((pg_temp.t(1)).id)->>'ask')::boolean);
-select post_task_by((pg_temp.t(1)).id, null, null, null, null, null, 'Budi', null) \g /dev/null
-select post_task_by((pg_temp.t(2)).id, null, null, null, null, null, 'Budi', null) \g /dev/null
+select post_task_by((pg_temp.t(1)).id, null, null, null, null, null, 'Budi', 'CC25A01') \g /dev/null
+select post_task_by((pg_temp.t(2)).id, null, null, null, null, null, 'Budi', 'CE28D02') \g /dev/null
 select pg_temp.check('CC25A01: 9 − 6 = 3 left (≤ 5): ask, naming the bin',
   (bin_left_after((pg_temp.t(1)).id)->>'ask')::boolean and bin_left_after((pg_temp.t(1)).id)->>'bin' = 'CC25A01');
 select pg_temp.check('CE28D02: 44 − 10 = 34 left: do not ask', not (bin_left_after((pg_temp.t(2)).id)->>'ask')::boolean);
