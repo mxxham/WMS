@@ -31,7 +31,7 @@ alter table public.pick_tasks add column scan_method text
 
 -- The rack label read (or typed) against the bin a posting takes from. Returns the bin code as confirmed.
 create or replace function public.rack_scan_check(p_scanned text, p_scan_mode text, p_bin text)
-returns text language plpgsql immutable as $$
+returns text language plpgsql stable as $$
 declare v_code text := upper(regexp_replace(coalesce(p_scanned, ''), '\s', '', 'g'));
 begin
   if coalesce(p_scan_mode, '') not in ('scan', 'ketik') then
@@ -43,15 +43,22 @@ begin
 end $$;
 revoke execute on function public.rack_scan_check(text, text, text) from public, anon, authenticated;
 
--- stamp_pick_confirmation (0024) + scan_method.
+-- stamp_pick_confirmation (0024) + scan_method. The confirmed bin is stamped only on a task that really left
+-- from that bin: a line's piece taken from a second bin was never confirmed and keeps no scan.
 create or replace function public.stamp_pick_confirmation()
 returns trigger language plpgsql as $$
+declare v_scan text;
 begin
   if new.status = 'COMPLETED' and old.status is distinct from 'COMPLETED' then
     new.picked_by_name := coalesce(nullif(trim(new.picked_by_name), ''), nullif(current_setting('app.by_name', true), ''));
-    new.scanned_code := coalesce(new.scanned_code, nullif(current_setting('app.pick_scanned', true), ''));
-    -- 0068: how the bin was confirmed (scan / ketik), only on a task that carries the confirmation.
-    if new.scanned_code is not null then
+    -- 0068: post_task sets actual_from_bin_id in this same UPDATE, so the bin it really left from is known here.
+    v_scan := nullif(upper(regexp_replace(coalesce(current_setting('app.pick_scanned', true), ''), '\s', '', 'g')), '');
+    if v_scan is distinct from (select b.bin_code from public.bins b where b.id = coalesce(new.actual_from_bin_id, new.from_bin_id)) then
+      v_scan := null;
+    end if;
+    new.scanned_code := coalesce(new.scanned_code, v_scan);
+    -- 0068: how the bin was confirmed (scan / ketik), only with the confirmation it belongs to.
+    if v_scan is not null and new.scanned_code = v_scan then
       new.scan_method := coalesce(new.scan_method, nullif(current_setting('app.pick_scan_method', true), ''));
     end if;
     new.bulk_posted := new.bulk_posted or coalesce(current_setting('app.pick_bulk', true), '') = 'on';

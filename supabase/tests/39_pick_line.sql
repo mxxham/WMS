@@ -350,8 +350,8 @@ select pg_temp.check('the split piece goes after the line''s Bin To Bin: pick #1
    from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id
    where t.wave_id = (select w from ids9)) = 'PICK@1:CC06A01,REPLENISH@2:CC06A01,PICK@3:CC07A01'
   and (select seq from pick_tasks where id = (select m from ids9)) = 2);
-select pg_temp.check('a scanned line is not bulk: both picks carry the scan (whitespace removed), the move no scan',
-  (select bool_and(not bulk_posted and scanned_code = 'CC06A01') from pick_tasks
+select pg_temp.check('a scanned line is not bulk: the pick from the scanned bin carries it (whitespace removed), the piece from the second bin and the move none',
+  (select bool_and(not bulk_posted and coalesce(scanned_code, '-') = case when seq = 1 then 'CC06A01' else '-' end) from pick_tasks
    where wave_id = (select w from ids9) and task_type = 'PICK')
   and (select not bulk_posted and coalesce(scanned_code, '') = '' from pick_tasks where id = (select m from ids9)));
 
