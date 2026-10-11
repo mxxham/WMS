@@ -86,6 +86,7 @@ export function RackScan({ id, target, value, onChange, onTakeFrom, hideButton =
             <button type="button" className={cn("block w-full text-center text-sm text-steel-500 underline")}
               onClick={() => { setCamera(false); setTyping(true); setText(""); timing.current = { first: 0, last: 0, pasted: false }; }}>
               ketik kode
+              <span className="block text-xs no-underline">Pakai scanner? Tap ketik kode, lalu scan.</span>
             </button>
           )}
         </>

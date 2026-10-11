@@ -139,9 +139,12 @@ export function takeFrom(l: SheetLine, code: string, stock: SheetStock[]): Sheet
   const d = structuredClone(l);
   const bin = normBin(code);
   const here = stock.filter((r) => r.bin === bin && r.sku === l.sku && r.qty > 0);
-  const s = { ...d.sources[0], bin };
+  // Replace the source the scan is checked against (a 0-carton first source is skipped), so the retry matches.
+  const target = scanTarget(l);
+  const at = Math.max(d.sources.findIndex((x) => normBin(x.bin) === target), 0);
+  const s = { ...d.sources[at], bin };
   if (here.length === 1) { s.batch = here[0].batch; s.expiry = day(here[0].expiry); }
-  d.sources[0] = s;
+  d.sources[at] = s;
   return d;
 }
 

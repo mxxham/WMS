@@ -218,6 +218,15 @@ test('Ambil dari the scanned bin: it becomes the first source, batch and expiry 
   const mo = takeFrom(buildSheet([move]).lines[0], 'CB34C02', stock);
   assert.equal(mo.sources[0].bin, 'CB34C02');
 });
+test('Ambil dari on an edited line whose first source has 0: it replaces the source the scan checks, so the retry matches', () => {
+  const l = line();
+  l.sources = [{ ...l.sources[0], qty: '0' }, { bin: 'CB33E02', batch: '11I26JJ', expiry: '2030-09-11', qty: '13' }];
+  assert.equal(scanTarget(l), 'CB33E02');
+  const d = takeFrom(l, 'CB34C02', STOCK);
+  assert.equal(d.sources[0].bin, 'CB34D02', 'the 0-carton source is left alone');
+  assert.equal(d.sources[1].bin, 'CB34C02');
+  assert.equal(scanMatches(d, 'CB34C02'), true);
+});
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
