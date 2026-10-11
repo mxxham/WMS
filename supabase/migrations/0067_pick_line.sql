@@ -23,6 +23,11 @@
 --    the move with the wrong source and re-posted it from there).
 --  · A line posted from the phone is not bulk: post_pick_line sets
 --    app.pick_line and the scan; the engine then leaves app.pick_bulk off.
+--  · Once a line's pick or move is posted, post_pick_line checks that the move
+--    left from where the pick really was taken, not the planned bins (a
+--    Berbeda moves the move's planned source); split_task also knows the
+--    row's move from the engine (app.split_move), so a later second source
+--    still goes after it.
 -- =====================================================================
 
 create or replace function public.post_wave_sheet_rows(p_wave_id uuid, p_rows jsonb, p_by_name text, p_reason text)
@@ -179,6 +184,9 @@ begin
       end if;
       v_part_ids := array[t.id]; v_part_qty := array[(v_srcs->0->>'qty')::numeric]; v_part_src := jsonb_build_array(v_srcs->0);
       -- Extra sources split off the task; the first source keeps the rest (and any shortfall).
+      -- split_task is told which task is this row's move, so the piece goes after it even when an earlier
+      -- Berbeda left the move's planned source different from the pick's (residual N3).
+      perform set_config('app.split_move', coalesce(m.id::text, ''), true);
       for i in 1 .. n_src - 1 loop
         v_q := (v_srcs->i->>'qty')::numeric;
         select quantity into v_keep from public.pick_tasks where id = t.id;
@@ -187,6 +195,7 @@ begin
         v_part_qty := v_part_qty || v_q;
         v_part_src := v_part_src || jsonb_build_array(v_srcs->i);
       end loop;
+      perform set_config('app.split_move', '', true);
       for i in 1 .. array_length(v_part_ids, 1) loop
         src := v_part_src->(i - 1);
         v_q := v_part_qty[i];
@@ -383,10 +392,19 @@ begin
   -- 0067: the pick's own Bin To Bin (the move right after it, from the same pallet) stays its
   -- neighbour: the new piece goes after that move. A piece between them made the wave page pair
   -- the move with the piece, whose real source is another bin (final review C1).
+  -- Residual N3: after a Berbeda the move's planned source is the bin really used, not the pick's
+  -- plan (and a re-post first clears the pick's actual source), so the planned fields alone miss it.
+  -- The engine names the row's move (app.split_move, set only inside post_wave_sheet_rows); that
+  -- move at seq + 1, same item, counts as well.
   v_at := t.seq + 1;
   if exists (select 1 from public.pick_tasks x where x.wave_id = t.wave_id and x.seq = t.seq + 1 and x.task_type <> 'PICK'
-               and x.item_id = t.item_id and x.from_bin_id = t.from_bin_id and x.batch_lot = t.batch_lot
-               and x.expiry_date is not distinct from t.expiry_date) then
+               and x.item_id = t.item_id
+               and ((x.from_bin_id = coalesce(t.actual_from_bin_id, t.from_bin_id) or x.from_bin_id = t.from_bin_id)
+                    and (x.batch_lot = coalesce(t.actual_batch_lot, t.batch_lot) or x.batch_lot = t.batch_lot)
+                    and (x.expiry_date is not distinct from coalesce(t.actual_expiry_date, t.expiry_date)
+                         or x.expiry_date is not distinct from t.expiry_date)
+                 or coalesce(current_setting('app.sheet_engine', true), '') = 'on'
+                    and x.id::text = coalesce(current_setting('app.split_move', true), ''))) then
     v_at := t.seq + 2;
   end if;
   update public.pick_tasks set seq = seq + 1 where wave_id = t.wave_id and seq >= v_at;
@@ -519,8 +537,14 @@ begin
      and (nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') is null or coalesce((p_row->>'move_qty')::numeric, 0) <= 0) then
     raise exception 'Isi bin tujuan dan Qty sisa untuk Bin To Bin ini';
   end if;
-  if t.id is not null and m.id is not null and not coalesce(m.item_id = t.item_id
-      and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id, false) then
+  if t.id is not null and m.id is not null and not coalesce(m.item_id = t.item_id, false) then
+    raise exception 'Bin To Bin ini bukan milik baris ini';
+  end if;
+  -- Neither posted: the planned pallet must match. Once either is posted the plan no longer says where the line
+  -- came from (a Berbeda moves the planned Bin To Bin's source to the real bin, the pick keeps its plan), so the
+  -- check below on the posted sources decides (residual N2).
+  if t.id is not null and m.id is not null and t.status <> 'COMPLETED' and m.status <> 'COMPLETED'
+     and not coalesce(m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id, false) then
     raise exception 'Bin To Bin ini bukan milik baris ini';
   end if;
   -- A posted pick or move: the move must have left from where the pick really was taken (bin, batch, expiry),

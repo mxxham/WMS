@@ -381,4 +381,78 @@ select pg_temp.check('Ubah on the pick + move (10 -> 9): CC06A01 1, CC07A01 34, 
        from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id
        where t.wave_id = (select w from ids9)) = 'CC06A01:P11,CC06A01:P11,CC07A01:P12'
   and not exists (select 1 from movements x join bins b on b.id = x.to_bin_id where b.bin_code in ('CC06A01','CC06A02','CC07A01') and x.reason_code = 'FOUND'));
+-- Residual N2 / N3: a Berbeda that changed the source bin moves the planned Bin To Bin's source to the
+-- new bin while the pick keeps its plan (and records the real bin). Ubah of that line must still be
+-- accepted, and a later second source must still go after the line's move.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+reset role;
+drop table if exists _seen, _replace, _wave_ids;
+delete from inventory v using bins b where b.id = v.bin_id and b.bin_code in ('CC09A01','CC09A02','CC10A01','CC11A01');
+set role authenticated;
+select import_snapshot('[
+ {"bin_code":"CC09A01","zone":"CC","rack":"09","level":"A","position":"01","sku":"550070614","batch_lot":"P11","quantity":36,"expiry_date":"2030-09-11"},
+ {"bin_code":"CC10A01","zone":"CC","rack":"10","level":"A","position":"01","sku":"550070614","batch_lot":"P11","quantity":36,"expiry_date":"2030-09-11"},
+ {"bin_code":"CC11A01","zone":"CC","rack":"11","level":"A","position":"01","sku":"550070614","batch_lot":"P12","quantity":36,"expiry_date":"2030-09-12"}]'::jsonb, false, 'uji') \g /dev/null
+select save_plan('2026-11-10', '{
+  "waves":[{"wave_no":"1","shipment_numbers":["SH10"],"planned_slot":"08:00"}],
+  "tasks":[
+   {"wave_no":"1","shipment_number":"SH10","task_type":"PICK","sku":"550070614","from_bin":"CC09A01","batch_lot":"P11","expiry_date":"2030-09-11","quantity":13,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"1","task_type":"REPLENISH","sku":"550070614","from_bin":"CC09A01","to_bin":"CC09A02","batch_lot":"P11","expiry_date":"2030-09-11","quantity":23,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb) \g /dev/null
+create temp table ids10 as select (select id from waves where planned_date = '2026-11-10') w,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-10' and t.seq = 1) p,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-10' and t.seq = 2) m;
+create or replace function pg_temp.layout10() returns text language sql as $$
+  select string_agg(t.task_type || '@' || t.seq || ':' || coalesce(ab.bin_code, fb.bin_code), ',' order by t.seq)
+  from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id
+  where t.wave_id = (select w from ids10) $$;
+grant execute on function pg_temp.layout10() to authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+
+create temp table r10 as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CC09A02', 23), 'Ani', 'palet terhalang') as r;
+select pg_temp.check('Berbeda from CC10A01: pick planned CC09A01 / actual CC10A01, move planned CC10A01; CC09A01 36, CC10A01 0, CC09A02 23',
+  (select r->>'result' = 'posted' from r10)
+  and (select fb.bin_code || '/' || ab.bin_code from pick_tasks t join bins fb on fb.id = t.from_bin_id
+       join bins ab on ab.id = t.actual_from_bin_id where t.id = (select p from ids10)) = 'CC09A01/CC10A01'
+  and (select fb.bin_code from pick_tasks t join bins fb on fb.id = t.from_bin_id where t.id = (select m from ids10)) = 'CC10A01'
+  and pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0 and pg_temp.batches('CC09A02') = 'P11:23');
+
+create temp table r10b as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":12}]', 'CC09A02', 24), 'Ani', 'salah hitung') as r;
+select pg_temp.check('N2: Ubah by the same name after that Berbeda (13 -> 12, rest 24) is posted',
+  (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r10b));
+select pg_temp.check('N2: stock after the Ubah: CC09A01 36, CC10A01 0, CC09A02 24 of P11, CC11A01 36, nothing invented',
+  pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0
+  and pg_temp.batches('CC09A02') = 'P11:24' and pg_temp.qty('CC11A01', '550070614') = 36
+  and (select actual_quantity from pick_tasks where id = (select p from ids10)) = 12
+  and (select coalesce(actual_quantity, quantity) from pick_tasks where id = (select m from ids10)) = 24
+  and not exists (select 1 from movements x join bins b on b.id = x.to_bin_id
+                  where b.bin_code in ('CC09A01','CC09A02','CC10A01','CC11A01') and x.reason_code = 'FOUND'));
+
+create temp table r10c as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":10},{"bin":"CC11A01","batch":"P12","expiry":"2030-09-12","qty":3}]', 'CC09A02', 26),
+  'Ani', 'palet kurang') as r;
+select pg_temp.check('N3: a second source after that Berbeda goes after the line''s move: pick #1, move #2, piece #3',
+  (select r->>'result' = 'posted' from r10c)
+  and pg_temp.layout10() = 'PICK@1:CC10A01,REPLENISH@2:CC10A01,PICK@3:CC11A01'
+  and (select seq from pick_tasks where id = (select p from ids10)) = 1
+  and (select seq from pick_tasks where id = (select m from ids10)) = 2);
+select pg_temp.check('N3: stock after the second source: CC09A01 36, CC10A01 0, CC11A01 33, CC09A02 26 of P11',
+  pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0
+  and pg_temp.qty('CC11A01', '550070614') = 33 and pg_temp.batches('CC09A02') = 'P11:26');
+create temp table r10d as select post_pick_line((select w from ids10), pg_temp.row((select p from ids10), (select m from ids10),
+  '[{"bin":"CC10A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC09A02', 27), 'Ani', 'salah hitung') as r;
+select pg_temp.check('N3: the line still pairs: Ubah of pick + move (10 -> 9, rest 27) is posted; CC10A01 0, CC11A01 33, CC09A02 27',
+  (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r10d)
+  and pg_temp.qty('CC09A01', '550070614') = 36 and pg_temp.qty('CC10A01', '550070614') = 0
+  and pg_temp.qty('CC11A01', '550070614') = 33 and pg_temp.batches('CC09A02') = 'P11:27'
+  and pg_temp.layout10() = 'PICK@1:CC10A01,REPLENISH@2:CC10A01,PICK@3:CC11A01');
+do $$ begin
+  perform post_pick_line((select w from ids10), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids10) and t.seq = 3),
+    (select m from ids10), '[{"bin":"CC11A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC09A02', 27), 'Ani', 'salah ketik');
+  raise notice 'FAIL N2: the piece with the line''s posted move is still refused';
+exception when others then
+  if sqlerrm = 'Bin To Bin ini bukan milik baris ini' then raise notice 'PASS N2: the piece with the line''s posted move is still refused';
+  else raise notice 'FAIL N2: the piece with the line''s posted move is still refused: %', sqlerrm; end if;
+end $$;
 rollback;
