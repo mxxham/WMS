@@ -241,4 +241,25 @@ select pg_temp.check('changing a move someone else posted (pick still open): req
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
   and (select status from pick_tasks where id = (select a from ids3)) = 'PLANNED'
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 6);
+
+create temp table rd as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
+  '[{"bin":"CC02A01","batch":"S2","expiry":"2030-09-01","qty":6}]', 'CC02A02', 30), 'Ani', 'x') as r;
+select pg_temp.check('same destination, quantity and bin but another batch: other_picker, move stays as posted',
+  (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rd)
+  and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
+  and pg_temp.qty('CC02A02', '550071397') = 30);
+
+create temp table re as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
+  '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":3},{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":3}]', 'CC02A02', 30), 'Ani', 'x') as r;
+select pg_temp.check('the move''s bin as second source, another bin first: other_picker, move stays as posted',
+  (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from re)
+  and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
+  and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC03A01', '550071397') = 10);
+
+create temp table rf as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
+  '[{"bin":" cc02a01 ","batch":"S1","expiry":"2030-09-01","qty":6}]', ' cc02a02', 30), 'Ani', 'x') as r;
+select pg_temp.check('move_to and bin differing only by case/whitespace read as unchanged: pick posts next to the other''s move',
+  (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rf)
+  and (select status from pick_tasks where id = (select a from ids3)) = 'COMPLETED'
+  and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 0);
 rollback;

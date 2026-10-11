@@ -454,13 +454,23 @@ grant execute on function public.close_pick_line_request(uuid, text, text) to au
 -- ---------------------------------------------------------------------
 -- post_pick_line: one line from the picking screen, any role (0067)
 -- ---------------------------------------------------------------------
+-- The first source of a row exactly as post_wave_sheet_rows reads it: 0-cartons sources are dropped only when
+-- there are several (all 0 keeps the first); bin upper(trim), batch coalesce(trim, ''), expiry nullif(.., '')::date.
+create or replace function public.pick_line_first_source(p_row jsonb)
+returns table (bin_code text, batch text, expiry date) language sql immutable as $$
+  select upper(trim(x.s->>'bin')), coalesce(trim(x.s->>'batch'), ''), nullif(x.s->>'expiry', '')::date
+  from jsonb_array_elements(coalesce(p_row->'sources', '[]'::jsonb)) with ordinality as x(s, n)
+  order by (jsonb_array_length(p_row->'sources') > 1 and coalesce((x.s->>'qty')::numeric, 0) <= 0), x.n
+  limit 1
+$$;
+
 create or replace function public.post_pick_line(p_wave_id uuid, p_row jsonb, p_by_name text, p_reason text, p_scanned text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_name text; w public.waves%rowtype; t public.pick_tasks%rowtype; m public.pick_tasks%rowtype;
   v_total numeric; v_sku text; v_ean text; v_scan_sku text;
   v_limit numeric := coalesce((public.inventory_policy()->>'adjust_approval_qty')::numeric, 20);
-  v_unchanged boolean := false;
+  v_unchanged boolean := false; v_fbin text; v_fbatch text; v_fexp date;
   v_kind text; v_msg text; v_res jsonb; c jsonb; v_req uuid; v_corr int := 0;
 begin
   if not public.has_role(array['operator','supervisor','admin']::public.user_role[]) then
@@ -509,12 +519,15 @@ begin
   elsif t.status = 'COMPLETED' or m.status = 'COMPLETED' then
     -- An open pick may be posted next to another picker's completed move as long as the row leaves that move as posted.
     if t.id is not null and t.status <> 'COMPLETED' and m.status = 'COMPLETED' then
-      v_unchanged :=
-        upper(trim(coalesce(p_row->>'move_to', ''))) = (select bin_code from public.bins where id = m.to_bin_id)
-        and coalesce(nullif(p_row->>'move_qty', '')::numeric, 0) = coalesce(m.actual_quantity, m.quantity)
-        and (jsonb_array_length(coalesce(p_row->'sources', '[]'::jsonb)) = 0
-             or exists (select 1 from jsonb_array_elements(p_row->'sources') s
-                        where upper(trim(s->>'bin')) = (select bin_code from public.bins where id = coalesce(m.actual_from_bin_id, m.from_bin_id))));
+      -- Mirrors the engine's v_same. The row is read the way the engine reads it (pick_line_first_source, move_to, move_qty).
+      -- The batch is compared as written, not as the engine maps it to the bin's own: that errs toward refusing.
+      select f.bin_code, f.batch, f.expiry into v_fbin, v_fbatch, v_fexp from public.pick_line_first_source(p_row) f;
+      v_unchanged := v_fbin is not null
+        and nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') = (select bin_code from public.bins where id = m.to_bin_id)
+        and coalesce((p_row->>'move_qty')::numeric, 0) = coalesce(m.actual_quantity, m.quantity)
+        and v_fbin = (select bin_code from public.bins where id = coalesce(m.actual_from_bin_id, m.from_bin_id))
+        and v_fbatch = coalesce(m.actual_batch_lot, m.batch_lot, '')
+        and v_fexp is not distinct from coalesce(m.actual_expiry_date, m.expiry_date);
     end if;
     if t.status = 'COMPLETED' and not public.same_person(t.picked_by_name, v_name) then
       v_kind := 'other_picker';
