@@ -1,4 +1,5 @@
-import { Undo2 } from "lucide-react";
+import { MoreHorizontal, Undo2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { ActionMenu, MenuDanger, MenuNote, MenuSection } from "@/components/app/action-menu";
 import { fmtNum } from "@/lib/utils";
@@ -102,7 +103,10 @@ export function LineMenu(props: LineProps & { open?: boolean; onOpenChange?: (o:
   const main = rows.filter((r) => !r.danger);
   const danger = rows.filter((r) => r.danger);
   return (
-    <ActionMenu title={label} open={props.open} onOpenChange={props.onOpenChange} trigger={props.trigger}>
+    <ActionMenu title={label} open={props.open} onOpenChange={props.onOpenChange}
+      trigger={props.trigger === undefined
+        ? <Button variant="ghost" size="icon" className="h-10 w-10 text-steel-700" aria-label={`Lainnya ${label}`}><MoreHorizontal className="h-5 w-5" /></Button>
+        : props.trigger}>
       <MenuSection>
         {main.map((r) => <div key={r.key}>{r.node}</div>)}
         <div><RowHistory ids={ids} label={label} /></div>

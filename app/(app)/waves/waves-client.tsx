@@ -1,42 +1,38 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCheck, ClipboardList, FileText, MoreHorizontal, Plus, RefreshCw, Truck, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, FileText, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { ConfirmButton } from "@/components/app/confirm-button";
-import { LEVEL_COLORS } from "@/config/warehouse";
+import { ActionMenu, MenuSection } from "@/components/app/action-menu";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import type { Role } from "@/lib/types";
-import { binToBinRows, picklistsFromTasks, restNotesFromTasks, type OutboundRow, type StockNow, type TaskRow, type WaveRow } from "@/lib/allocator/picklist-from-tasks";
+import { restNotesFromTasks, type OutboundRow, type TaskRow, type WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import { replanRemaining } from "@/lib/allocator/browser/plan-client";
 import { SHIPMENT_STATE_LABEL, SHIPMENT_STATE_TONE, type ShipmentState } from "@/lib/pick-audit";
-import { TaskPostDialog } from "./task-post-dialog";
-import { AddMoveButton, EditRowButton, FixButton, OrderQtyButton, SplitButton, UnpostButton, UnpostPairButton } from "./wave-corrections";
-import { PairPostDialog } from "./pair-post-dialog";
+import { dayNextStep, waveNextStep, waveOrder, type DayStep, type WaveFacts } from "@/lib/wave-next-step";
+import { pairMoves } from "@/lib/allocator/pair-moves";
+import { OrderQtyButton } from "./wave-corrections";
 import { BinButton } from "./bin-panel";
 import { CorrectionsPanel, type PicklistCorrection } from "./corrections-panel";
-import { RowHistory } from "./row-history";
-import { ImpactNote } from "./impact-note";
-import { PostMoveEarlyButton } from "./post-move-early";
 import { EscalationsPanel, type LineRequest } from "./escalations-panel";
 import { ProblemsPanel, type OpenCount } from "./problems-panel";
-import { pairMoves } from "@/lib/allocator/pair-moves";
+import { Actual, AddOrder, REASON, StatusTag, printBinToBin, printPicklists, type OutboundDetail, type Rpc, type TaskWait } from "./wave-parts";
+import { LineMenu, LinePrimary, type LineItem } from "./line-menu";
+import { CompleteWaveButton, WaveMenu } from "./wave-menu";
+import { DayBar } from "./day-bar";
+import { ProblemsSummary, type ProblemCounts } from "./problems-summary";
+import { useIsPhone } from "./use-is-phone";
 
-// Opened on a click: their code (the sheet, and the allocation engine behind
-// Tambah order / item) loads then, not with the Wave page. The placeholder is
-// the same button, so nothing moves while it loads.
-const Placeholder = ({ label }: { label: string }) => (
-  <Button variant="outline" size="sm" disabled><Plus className="h-4 w-4" />{label}</Button>
-);
-const AddOrder = dynamic(() => import("./add-order").then((m) => m.AddOrder), { ssr: false, loading: () => <Placeholder label="Tambah order" /> });
-const AddItems = dynamic(() => import("./add-order").then((m) => m.AddItems), { ssr: false, loading: () => <Placeholder label="Tambah item" /> });
+export type { OutboundDetail, TaskWait } from "./wave-parts";
+
 const PickingPanel = dynamic(() => import("./picking-panel").then((m) => m.PickingPanel), {
   ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka layar picking…</p>,
 });
@@ -44,55 +40,10 @@ const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSh
   ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka lembar picklist…</p>,
 });
 
-// jsPDF is ~380 kB: load it only when someone actually prints.
-// Sisa is replayed from the stock of the touched bins right now, over all of the day's waves (allWaves).
-async function printPicklists(waves: WaveRow[], allWaves: WaveRow[], tasks: TaskRow[], outbound: OutboundRow[], filename: string) {
-  const { downloadPicklistPdf } = await import("@/lib/allocator/browser/downloads");
-  const bins = [...new Set(tasks.flatMap((t) => [t.from_bin, t.to_bin, t.actual_from_bin]).filter((b): b is string => !!b))];
-  const { data } = await createClient().from("inventory_detail").select("bin_code, sku, batch_lot, expiry_date, quantity").in("bin_code", bins);
-  downloadPicklistPdf(picklistsFromTasks(waves, tasks, outbound, (data ?? []) as StockNow[], allWaves), undefined, filename);
-}
-
-async function printBinToBin(waves: WaveRow[], tasks: TaskRow[], filename: string) {
-  const { downloadBinToBinPdf } = await import("@/lib/allocator/browser/downloads");
-  downloadBinToBinPdf(binToBinRows(waves, tasks), filename);
-}
-
-/** An open task whose bin is still waiting for a relocation into it (task_waits, 0038). */
-export type TaskWait = { task_id: string; have: number; wait_wave_no: string; wait_seq: number; wait_from: string; wait_to: string; wait_qty: number;
-  /** the move it waits for (0053), and its wave's status: a Tunda wave's move is posted by a supervisor */
-  wait_task_id: string; wait_wave_status: string };
-const waitText = (w: TaskWait) => `Tunggu relokasi NO ${w.wait_wave_no} #${w.wait_seq}: ${w.wait_from} → ${w.wait_to} (${fmtNum(Number(w.wait_qty))}). Di ${w.wait_to} baru ${fmtNum(Number(w.have))}.`;
-
-export type OutboundDetail = {
-  description: string; quantity_requested: number; quantity_allocated: number; quantity_picked: number; shortage_reason: string | null; status: string;
-};
-
-const STATUS_TONE: Record<string, string> = {
-  PENDING: "bg-steel-100 text-steel-700", PLANNED: "bg-steel-100 text-steel-700",
-  COMPLETED: "bg-ok text-white", RESCHEDULED: "bg-warn text-steel", CANCELLED: "bg-bad/15 text-bad line-through",
-};
-const STATUS_LABEL: Record<string, string> = {
-  PENDING: "Menunggu", PLANNED: "Rencana", COMPLETED: "Selesai", RESCHEDULED: "Dijadwal ulang", CANCELLED: "Batal",
-};
-const REASON: Record<string, string> = { ALREADY_STAGED: "Sudah di staging", BLOCKED_SHELF_LIFE: "Umur simpan", NO_STOCK: "Stok tidak ada" };
-
-/** Bin code set like the yellow location plate, with the level colour strip. */
-function BinChip({ code }: { code: string }) {
-  const color = LEVEL_COLORS[code.charAt(4)]?.hex;
-  return (
-    <span className="inline-block overflow-hidden rounded-plate bg-plate font-cond text-2xl font-bold leading-none text-steel">
-      {color && <span className="block h-1" style={{ background: color }} aria-hidden />}
-      <span className="block px-2 py-1">{code}</span>
-    </span>
-  );
-}
-
-/** Filter bar of the wave page: free text on SKU / bin / description, only open rows, only rows with a problem. */
-type RowFilter = { q: string; onlyOpen: boolean; onlyProblems: boolean };
-type Item = ReturnType<typeof pairMoves<TaskRow>>[number];
+/** Search: free text on SKU / bin / description, only open lines, only lines with a problem. */
+export type RowFilter = { q: string; onlyOpen: boolean; onlyProblems: boolean };
 const filterActive = (f: RowFilter) => f.q.trim() !== "" || f.onlyOpen || f.onlyProblems;
-function rowMatches(it: Item, f: RowFilter, short: Set<string>, waits: Record<string, TaskWait>): boolean {
+export function rowMatches(it: LineItem, f: RowFilter, short: Set<string>, waits: Record<string, TaskWait>): boolean {
   const ts = it.kind === "pair" ? [it.pick, it.move] : [it.task];
   const q = f.q.trim().toUpperCase();
   if (q && !ts.some((t) => [t.sku, t.from_bin, t.to_bin ?? "", t.description ?? ""].some((v) => v.toUpperCase().includes(q)))) return false;
@@ -101,29 +52,32 @@ function rowMatches(it: Item, f: RowFilter, short: Set<string>, waits: Record<st
   return true;
 }
 
-function FilterBar({ filter: f, onChange }: { filter: RowFilter; onChange: (f: RowFilter) => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md bg-white p-3">
-      <Input aria-label="Cari SKU atau bin" placeholder="Cari SKU atau bin, mis. 550058592 atau CE28D02" value={f.q} className="w-80 max-w-full"
-        onChange={(e) => onChange({ ...f, q: e.target.value })} />
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.onlyOpen} onChange={(e) => onChange({ ...f, onlyOpen: e.target.checked })} />Hanya yang belum diposting</label>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.onlyProblems} onChange={(e) => onChange({ ...f, onlyProblems: e.target.checked })} />Hanya yang bermasalah</label>
-      {filterActive(f) && <button className="text-sm underline" onClick={() => onChange({ q: "", onlyOpen: false, onlyProblems: false })}>Hapus filter</button>}
-    </div>
-  );
-}
+export const lineIds = (it: LineItem) => (it.kind === "pair" ? [it.pick, it.move] : [it.task]);
+export const lineDone = (it: LineItem) => lineIds(it).every((t) => t.status === "COMPLETED");
+export const lineCancelled = (it: LineItem) => lineIds(it).every((t) => t.status === "CANCELLED");
 
-function StatusTag({ status }: { status: string }) {
-  return <span className={cn("inline-block rounded px-2 py-0.5 text-xs font-semibold", STATUS_TONE[status])}>{STATUS_LABEL[status] ?? status}</span>;
-}
+/** Everything both layouts need about the day, computed once. */
+export type WaveModel = {
+  date: string; prevDate: string | null; nextDate: string | null;
+  waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
+  supervisor: boolean; rpc: Rpc; onDone: () => void;
+  short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
+  facts: Map<string, WaveFacts>; ordered: WaveRow[]; step: DayStep; problems: ProblemCounts;
+  posted: number; total: number;
+  /** the existing Perlu ditangani panels, unchanged */
+  panels: (layout: "desktop" | "phone") => React.ReactNode;
+  /** the day's menu: Tambah order, the PDFs, Hitung ulang */
+  dayMenu: React.ReactNode;
+  printWave: (w: WaveRow) => void;
+};
 
 /**
- * Execution view of a saved plan. Posting a task writes its ledger movement
- * (stock changes here, not when the plan was saved). Supervisors can also
- * cancel or reschedule; operators only execute.
+ * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
+ * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
-  date: string; role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
+export function WavesClient({ date, prevDate, nextDate, openWave = null, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
+  date: string; prevDate: string | null; nextDate: string | null; openWave?: string | null;
+  role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
   /** audit / loading state per `${wave_id}|${shipment}` (0024) */
@@ -140,10 +94,10 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
   requests?: LineRequest[];
 }) {
   const router = useRouter();
+  const phone = useIsPhone();
   const [person, setPerson] = usePersonName();
   const supervisor = role === "supervisor" || role === "admin";
-  const [filter, setFilter] = useState<RowFilter>({ q: "", onlyOpen: false, onlyProblems: false });
-  // The request whose line the sheet opens at (Isi dari picklist).
+  // The request whose line the sheet opens at (Isi dari picklist, desktop only).
   const [sheetAt, setSheetAt] = useState<LineRequest | null>(null);
 
   async function rpc(fn: string, args: Record<string, unknown>): Promise<string | null> {
@@ -153,21 +107,8 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
     return null;
   }
 
-  if (!waves.length) {
-    return (
-      <Card><CardContent className="space-y-2 text-sm">
-        <p>Belum ada rencana untuk {fmtDate(date)}.</p>
-        {supervisor && <p><Link href="/allocate" className="font-semibold underline">Jalankan alokasi →</Link></p>}
-        {supervisor && <div className="pt-1"><AddOrder date={date} /></div>}
-      </CardContent></Card>
-    );
-  }
-
-  const done = tasks.filter((t) => t.status === "COMPLETED").length;
-  const live = tasks.filter((t) => t.status !== "CANCELLED").length;
-  const short = new Set(shortfalls);
-  // Where an opened pallet's rest goes when its row does not move it (printed Bin To Bin note), over all of the day's waves.
-  const rest = restNotesFromTasks(waves, tasks);
+  const short = useMemo(() => new Set(shortfalls), [shortfalls]);
+  const live = tasks.filter((t) => t.status !== "CANCELLED");
   // Same rule as replaceable_waves(): pending and nothing posted/cancelled yet.
   const untouched = waves.filter((w) => w.status === "PENDING" && tasks.every((t) => t.wave_id !== w.id || t.status === "PLANNED"));
   const shortInUntouched = untouched.some((w) => tasks.some((t) => t.wave_id === w.id && short.has(t.id)));
@@ -180,276 +121,282 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
       return null;
     } catch (e) { return (e as Error).message; }
   }
-
   const replanButton = (variant: "outline" | "plate") => (
     <ConfirmButton size="sm" variant={variant} title="Hitung ulang wave tersisa" confirmLabel="Hitung ulang"
       summary={`Hitung ulang ${untouched.length} wave yang belum dikerjakan (NO ${untouched.map((w) => w.wave_no).join(", ")}) dari stok saat ini. Wave yang sudah berjalan tidak diubah. Picklist wave tersebut berubah — cetak ulang setelahnya.`}
       onConfirm={replan}><RefreshCw className="h-4 w-4" />Hitung ulang wave tersisa</ConfirmButton>
   );
 
+  const facts = new Map<string, WaveFacts>(waves.map((w) => {
+    const mine = live.filter((t) => t.wave_id === w.id);
+    const open = mine.filter((t) => t.status === "PLANNED");
+    const states = w.shipment_numbers.map((sh) => audit[`${w.id}|${sh}`]).filter(Boolean);
+    const finished = mine.map((t) => t.completed_at).filter((x): x is string => !!x).sort().pop() ?? null;
+    return [w.id, {
+      id: w.id, wave_no: w.wave_no, planned_slot: w.planned_slot, status: w.status,
+      open: open.length, total: mine.length, blocked: open.filter((t) => short.has(t.id) || !!waits[t.id]).length,
+      finishedAt: w.status === "COMPLETED" ? finished : null, cancelledAt: null,
+      audit: w.status === "COMPLETED" && states.length > 0 ? { done: states.filter((s) => s === "READY_LOAD" || s === "LOADED").length, total: w.shipment_numbers.length } : null,
+    }];
+  }));
+  const waveNoOf = (id: string) => waves.find((w) => w.id === id)?.wave_no ?? "?";
+  const step = dayNextStep([...facts.values()], {
+    short: live.filter((t) => short.has(t.id)).map((t) => ({ wave_no: waveNoOf(t.wave_id) })),
+    requests: requests.length,
+    waiting: live.filter((t) => t.status === "PLANNED" && !!waits[t.id]).map((t) => ({ wave_no: waveNoOf(t.wave_id) })),
+  });
+  const problems: ProblemCounts = {
+    short: short.size, waiting: Object.keys(waits).length, counts: counts.length, requests: requests.length, corrections: corrections.length,
+  };
+
+  const model: WaveModel = {
+    date, prevDate, nextDate, waves, tasks, outbound, supervisor, rpc, onDone: () => router.refresh(),
+    short, waits, audit, rest: restNotesFromTasks(waves, tasks),
+    facts, ordered: waveOrder([...facts.values()]).map((f) => waves.find((w) => w.id === f.id)!),
+    step, problems,
+    posted: live.filter((t) => t.status === "COMPLETED").length, total: live.length,
+    panels: (layout) => (
+      <>
+        <PersonNameField className="max-w-xs" value={person} onChange={setPerson} label="Nama Anda (untuk Tutup, Perbaiki)" />
+        <ProblemsPanel waves={waves} tasks={tasks} short={short} waits={waits} counts={counts} lastImport={lastImport} supervisor={supervisor} rpc={rpc}
+          extra={supervisor && untouched.length > 0 && shortInUntouched ? replanButton("plate") : undefined} />
+        <EscalationsPanel rows={requests} supervisor={supervisor} person={person} layout={layout} onOpenSheet={setSheetAt} />
+        <CorrectionsPanel date={date} rows={corrections} canAdjust={supervisor} />
+      </>
+    ),
+    dayMenu: (
+      <ActionMenu title="Hari ini">
+        <MenuSection>
+          {supervisor && <div><AddOrder date={date} /></div>}
+          {supervisor && untouched.length > 0 && short.size === 0 && <div>{replanButton("outline")}</div>}
+          <div><Button variant="outline" size="sm" onClick={() => printPicklists(waves, waves, tasks, outbound, `picklist_${date}.pdf`)}>
+            <FileText className="h-4 w-4" />PDF semua picklist</Button></div>
+          <div><Button variant="outline" size="sm" onClick={() => printBinToBin(waves, tasks, `bintobin_${date}.pdf`)}>
+            <FileText className="h-4 w-4" />PDF Bin To Bin</Button></div>
+        </MenuSection>
+      </ActionMenu>
+    ),
+    printWave: (w) => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`),
+  };
+
+  // The phone layout (Task 7) replaces this branch; until then both widths get the desktop layout.
+  if (phone) return <WavesDesktop model={model} openWave={openWave} sheetAt={sheetAt} onSheetAtDone={() => setSheetAt(null)} />;
+  return <WavesDesktop model={model} openWave={openWave} sheetAt={sheetAt} onSheetAtDone={() => setSheetAt(null)} />;
+}
+
+function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
+  model: WaveModel; openWave: string | null; sheetAt: LineRequest | null; onSheetAtDone: () => void;
+}) {
+  const router = useRouter();
+  const [openId, setOpenId] = useState<string | null>(openWave);
+  const [problemsOpen, setProblemsOpen] = useState(false);
+  const [filter, setFilter] = useState<RowFilter>({ q: "", onlyOpen: false, onlyProblems: false });
+  const [showFilter, setShowFilter] = useState(false);
+
+  useEffect(() => { setOpenId(openWave); }, [openWave]);
+  // A request opened in Isi dari picklist opens its wave.
+  useEffect(() => { if (sheetAt) setOpenId(sheetAt.wave_id); }, [sheetAt]);
+
+  function open(id: string | null) {
+    setOpenId(id);
+    router.replace(`/waves?date=${m.date}${id ? `&wave=${id}` : ""}`, { scroll: false });
+  }
+  function goStep() {
+    const t = m.step.target;
+    if (!t) return;
+    if (t.kind === "problems") {
+      setProblemsOpen(true);
+      setTimeout(() => document.getElementById("perlu-ditangani")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    } else {
+      open(t.id);
+      setTimeout(() => document.getElementById(`wave-${t.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
+  }
+
+  const active = filterActive(filter);
   return (
     <>
-      <ProblemsPanel waves={waves} tasks={tasks} short={short} waits={waits} counts={counts} lastImport={lastImport} supervisor={supervisor} rpc={rpc}
-        extra={supervisor && untouched.length > 0 && shortInUntouched ? replanButton("plate") : undefined} />
-      <EscalationsPanel rows={requests} supervisor={supervisor} person={person} onOpenSheet={setSheetAt} />
-      <CorrectionsPanel date={date} rows={corrections} canAdjust={supervisor} />
-      <PersonNameField className="max-w-xs" value={person} onChange={setPerson} label="Nama Anda (dicatat di setiap posting)" />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-steel-500">{waves.length} wave · {fmtNum(done)}/{fmtNum(live)} tugas selesai · {untouched.length} wave belum dikerjakan</p>
-        <div className="flex flex-wrap gap-2">
-          {supervisor && <AddOrder date={date} />}
-          {supervisor && untouched.length > 0 && short.size === 0 && replanButton("outline")}
-          <Button variant="outline" size="sm" onClick={() => printPicklists(waves, waves, tasks, outbound, `picklist_${date}.pdf`)}>
-            <FileText className="h-4 w-4" />PDF semua picklist
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => printBinToBin(waves, tasks, `bintobin_${date}.pdf`)}>
-            <FileText className="h-4 w-4" />PDF Bin To Bin
-          </Button>
-        </div>
-      </div>
-      <FilterBar filter={filter} onChange={setFilter} />
-      {waves.map((w) => (
-        <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} audit={audit} waits={waits} rest={rest} filter={filter} onDone={() => router.refresh()}
-          sheetAt={sheetAt?.wave_id === w.id ? sheetAt : null} onSheetAtDone={() => setSheetAt(null)}
-          print={() => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`)}
-          tasks={tasks.filter((t) => t.wave_id === w.id)} outbound={outbound.filter((o) => o.wave_id === w.id)} />
-      ))}
+      <DayBar date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} posted={m.posted} total={m.total} step={m.step} onStep={goStep} dayMenu={m.dayMenu} />
+      <ProblemsSummary counts={m.problems} open={problemsOpen} onOpenChange={setProblemsOpen}>{m.panels("desktop")}</ProblemsSummary>
+
+      {m.waves.length === 0 ? (
+        <Card><CardContent className="space-y-2 text-sm">
+          <p>Belum ada rencana untuk {fmtDate(m.date)}.</p>
+          {m.supervisor && <p><Link href="/allocate" className="font-semibold underline">Jalankan alokasi</Link></p>}
+        </CardContent></Card>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-80 max-w-full">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-steel-500" />
+              <Input aria-label="Cari SKU atau bin" placeholder="Cari SKU atau bin" value={filter.q} className="pl-9"
+                onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
+            </div>
+            <Button variant="ghost" size="sm" className="h-10" aria-expanded={showFilter} onClick={() => setShowFilter((v) => !v)}>
+              <SlidersHorizontal className="h-4 w-4" />Filter{filter.onlyOpen || filter.onlyProblems ? " (aktif)" : ""}
+            </Button>
+            {showFilter && (
+              <div className="flex flex-wrap items-center gap-4 text-sm">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyOpen} onChange={(e) => setFilter({ ...filter, onlyOpen: e.target.checked })} />Hanya yang belum diposting</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyProblems} onChange={(e) => setFilter({ ...filter, onlyProblems: e.target.checked })} />Hanya yang bermasalah</label>
+              </div>
+            )}
+            {active && <button className="text-sm underline" onClick={() => setFilter({ q: "", onlyOpen: false, onlyProblems: false })}>Hapus filter</button>}
+          </div>
+          <div className="space-y-2">
+            {m.ordered.map((w) => (
+              <WaveBlock key={w.id} model={m} wave={w} open={openId === w.id || (active && openId === null)} onToggle={() => open(openId === w.id ? null : w.id)}
+                filter={filter} onShowProblems={() => { setProblemsOpen(true); setTimeout(() => document.getElementById("perlu-ditangani")?.scrollIntoView({ behavior: "smooth" }), 50); }}
+                sheetAt={sheetAt?.wave_id === w.id ? sheetAt : null} onSheetAtDone={onSheetAtDone} />
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }
 
-function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, waits, rest, filter, onDone, print, sheetAt, onSheetAtDone }: {
-  wave: WaveRow; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[]; supervisor: boolean; print: () => void;
-  filter: RowFilter;
-  /** the request whose line the sheet opens at, for this wave only */
+const TONE = { normal: "text-steel", bad: "font-semibold text-bad", muted: "text-steel-500" } as const;
+
+/** One wave on the desktop: a compact header (next step, one button, menu), its lines when opened. */
+function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, sheetAt, onSheetAtDone }: {
+  model: WaveModel; wave: WaveRow; open: boolean; onToggle: () => void; filter: RowFilter; onShowProblems: () => void;
   sheetAt: LineRequest | null; onSheetAtDone: () => void;
-  /** Opened pallets without their own move: where the rest goes (same text as the printed Bin To Bin). */
-  rest: Map<string, string>;
-  rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>;
-  short: Set<string>; audit: Record<string, ShipmentState>; waits: Record<string, TaskWait>; onDone: () => void;
 }) {
-  const [showOrders, setShowOrders] = useState(false);
-  const [person] = usePersonName();
-  const complete = () => person.trim().length < 2
-    ? Promise.resolve("Isi nama Anda di atas daftar wave dulu.")
-    : rpc("complete_wave_by", { p_wave_id: w.id, p_by_name: person });
-  const open = tasks.filter((t) => t.status === "PLANNED");
-  const done = tasks.filter((t) => t.status === "COMPLETED").length;
-  const live = tasks.filter((t) => t.status !== "CANCELLED").length;
-  const pending = w.status === "PENDING";
-  const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
-  // A broken pallet's pick and its leftover move are one picklist line: one row, posted together (0035).
-  const allRows = pairMoves(tasks);
-  // Cancelled rows (leftovers of corrections) are hidden behind a toggle; a cancelled wave shows them all.
-  const [showCancelled, setShowCancelled] = useState(false);
-  const isCancelled = (it: (typeof allRows)[number]) => it.kind === "pair"
-    ? it.pick.status === "CANCELLED" && it.move.status === "CANCELLED" : it.task.status === "CANCELLED";
-  const cancelledCount = allRows.filter(isCancelled).length;
-  const visible = showCancelled || w.status === "CANCELLED" ? allRows : allRows.filter((it) => !isCancelled(it));
-  // Filter bar (SKU / bin text, only open, only problems): a wave with nothing matching is hidden.
-  const active = filterActive(filter);
-  const rows = active ? visible.filter((it) => rowMatches(it, filter, short, waits)) : visible;
-  // Finished waves fold to their header; a filter opens the matching ones.
-  const finished = w.status === "COMPLETED" || w.status === "CANCELLED" || (live > 0 && open.length === 0);
-  const [expanded, setExpanded] = useState(!finished);
-  // Isi dari picklist (0057) opens in place of the table, for this wave only.
+  const tasks = useMemo(() => m.tasks.filter((t) => t.wave_id === w.id), [m.tasks, w.id]);
+  const outbound = m.outbound.filter((o) => o.wave_id === w.id);
+  const f = m.facts.get(w.id)!;
+  const next = waveNextStep(f);
+  const openTasks = tasks.filter((t) => t.status === "PLANNED");
+  // Isi dari picklist (0057) and Mulai picking (0067) open in place of the lines, for this wave only.
   const [sheet, setSheet] = useState(false);
-  // A sheet opened from a request closes when the selection moves to another wave; a sheet opened by hand stays.
   const [sheetFromRequest, setSheetFromRequest] = useState(false);
+  const [picking, setPicking] = useState(false);
   useEffect(() => {
-    if (sheetAt) { setSheet(true); setExpanded(true); setSheetFromRequest(true); }
+    if (sheetAt) { setSheet(true); setSheetFromRequest(true); }
     else if (sheetFromRequest) { setSheet(false); setSheetFromRequest(false); }
   }, [sheetAt]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Picking (0067): the wave line by line for the floor, any role.
-  const [picking, setPicking] = useState(false);
-  const canPick = w.status === "PENDING" && live > 0;
-  const [hideDone, setHideDone] = useState(false);
-  const canSheet = supervisor && w.status !== "CANCELLED" && live > 0;
-  if (active && rows.length === 0 && !sheet && !picking) return null;
-  const show = expanded || active || sheet || picking;
-  // Rows already done can fold away inside a wave still being worked on.
-  const isDone = (it: (typeof allRows)[number]) => it.kind === "pair"
-    ? it.pick.status === "COMPLETED" && it.move.status === "COMPLETED" : it.task.status === "COMPLETED";
-  const doneRows = rows.filter(isDone).length;
-  const listed = hideDone ? rows.filter((it) => !isDone(it)) : rows;
-  // The order behind the wave, in one line: what was asked, planned, picked, and what the truck will miss.
-  const ordered = outbound.reduce((n, o) => n + Number(o.quantity_requested), 0);
-  const allocated = outbound.reduce((n, o) => n + Number(o.quantity_allocated), 0);
-  const picked = outbound.reduce((n, o) => n + Number(o.quantity_picked), 0);
+
+  const allRows = pairMoves(tasks);
+  const active = filterActive(filter);
+  const matching = active ? allRows.filter((it) => rowMatches(it, filter, m.short, m.waits)) : allRows;
+  if (active && matching.length === 0 && !sheet && !picking) return null;
+  const expanded = open || sheet || picking;
+
+  const primary = (() => {
+    switch (next.primary) {
+      case "mulai": return <Button onClick={(e) => { e.stopPropagation(); setPicking(true); if (!open) onToggle(); }}><ClipboardList className="h-4 w-4" />Mulai picking</Button>;
+      case "lihat": return <Button variant="outline" className="border-bad text-bad" onClick={(e) => { e.stopPropagation(); onShowProblems(); }}>Lihat</Button>;
+      case "tutup": return <span onClick={(e) => e.stopPropagation()}><CompleteWaveButton wave={w} open={openTasks} rpc={m.rpc} variant="default" size="sm" className="h-10 px-4 text-sm" /></span>;
+      case "aktifkan": return m.supervisor ? (
+        <span onClick={(e) => e.stopPropagation()}>
+          <ConfirmButton title={`Aktifkan NO ${w.wave_no}`} summary="Wave kembali bisa dikerjakan."
+            onConfirm={() => m.rpc("set_wave_status", { p_wave_id: w.id, p_status: "PENDING" })}>Aktifkan</ConfirmButton>
+        </span>
+      ) : null;
+      default: return null;
+    }
+  })();
 
   return (
-    <Card>
-      <CardHeader className={cn("flex flex-wrap items-start justify-between gap-3", show && !sheet && !picking && "lg:sticky lg:top-0 lg:z-20 lg:rounded-t-lg lg:border-b lg:border-steel-100 lg:bg-white/95 lg:backdrop-blur")}>
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-cond text-xl font-semibold">NO {w.wave_no}</h2>
-            <StatusTag status={w.status} />
-            {w.planned_slot && <span className="text-sm font-semibold">{w.planned_slot}</span>}
-          </div>
-          <p className="flex flex-wrap items-center gap-x-2 text-sm text-steel-500">
-            <Truck className="h-4 w-4" />{w.truck ?? "–"} · {w.destination || "–"} · shipment {w.shipment_numbers.map((sh, i) => {
-              const st = audit[`${w.id}|${sh}`];
-              return (
-                <span key={sh}>{i > 0 && ", "}{sh}
-                  {st && <Link href={`/audit/picking/${w.id}/${encodeURIComponent(sh)}`}
-                    className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</Link>}
-                </span>
-              );
-            })}
-          </p>
-          <div className="h-1.5 w-48 overflow-hidden rounded bg-steel-100" aria-label={`${done} dari ${live} tugas selesai`}>
-            <div className="h-full bg-ok" style={{ width: `${live ? (done / live) * 100 : 0}%` }} />
-          </div>
-          {ordered > 0 && (
-            <p className="text-sm tabular">
-              <b>{fmtNum(ordered)}</b> dipesan · <b>{fmtNum(allocated)}</b> dialokasi · <b>{fmtNum(picked)}</b> dipick
-              {ordered > allocated && (
-                <button type="button" onClick={() => setShowOrders(true)} className="ml-1 font-semibold text-bad underline" title="Lihat baris order yang kurang">
-                  · kurang {fmtNum(ordered - allocated)}
-                </button>
-              )}
-            </p>
-          )}
+    <Card id={`wave-${w.id}`} className={cn(expanded && "ring-1 ring-steel-300")}>
+      <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-2 p-4", expanded && "border-b border-steel-100")}>
+        <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-4 text-left">
+          <span className="w-20 shrink-0">
+            <span className="block font-cond text-xl font-semibold">NO {w.wave_no}</span>
+            <span className="block text-sm text-steel-500 tabular">{w.planned_slot ?? "–"}</span>
+          </span>
+          <span className="min-w-0 flex-1 space-y-1">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              {w.status !== "PENDING" && <StatusTag status={w.status} />}
+              {w.shipment_numbers.map((sh) => {
+                const st = m.audit[`${w.id}|${sh}`];
+                return <span key={sh} className="tabular">{sh}{st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}</span>;
+              })}
+              {(w.truck || w.destination) && <span className="text-steel-500">{[w.truck, w.destination].filter(Boolean).join(" · ")}</span>}
+            </span>
+            <span className={cn("block text-sm", TONE[next.tone])}>{next.text}</span>
+          </span>
+          <span className="w-28 shrink-0 text-right">
+            <span className="block text-sm tabular">{fmtNum(f.total - f.open)}/{fmtNum(f.total)} baris</span>
+            <span className="mt-1 block h-1.5 overflow-hidden rounded bg-steel-100" aria-hidden>
+              <span className="block h-full bg-ok" style={{ width: `${f.total ? ((f.total - f.open) / f.total) * 100 : 0}%` }} />
+            </span>
+          </span>
+          {expanded ? <ChevronUp className="h-5 w-5 shrink-0 text-steel-500" /> : <ChevronDown className="h-5 w-5 shrink-0 text-steel-500" />}
+        </button>
+        <div className="flex items-center gap-1">
+          {primary}
+          <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop" date={m.date}
+            onPrint={() => m.printWave(w)} onOpenSheet={() => { setSheet(true); setSheetFromRequest(false); if (!open) onToggle(); }} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm"
-            onClick={print}>
-            <FileText className="h-4 w-4" />Picklist
-          </Button>
-          {pending && open.length > 0 && (
-            <ConfirmButton size="sm" variant={canSheet ? "outline" : undefined} title={`Selesaikan NO ${w.wave_no}`} confirmLabel="Posting semua"
-              summary={`Posting ${open.length} tugas tersisa (${fmtNum(open.reduce((s, t) => s + Number(t.quantity), 0))} unit) sebagai sudah dikerjakan. Jika satu bin kurang stok, tidak ada yang diposting.`}
-              onConfirm={complete}>
-              <CheckCheck className="h-4 w-4" />Selesaikan wave
-            </ConfirmButton>
-          )}
-          {pending && open.length === 0 && (
-            <ConfirmButton size="sm" title={`Tutup NO ${w.wave_no}`} summary="Semua tugas sudah diposting. Tandai wave dan order-nya selesai."
-              onConfirm={complete}>
-              <CheckCheck className="h-4 w-4" />Tutup wave
-            </ConfirmButton>
-          )}
-          {canPick && !picking && !sheet && (
-            <Button size="sm" onClick={() => setPicking(true)} title="Picking tanpa kertas: posting baris demi baris di bin">
-              <ClipboardList className="h-4 w-4" />Mulai picking
-            </Button>
-          )}
-          {canSheet && !sheet && (
-            <Button size="sm" variant={open.length > 0 ? "default" : "outline"} onClick={() => { setSheet(true); setSheetFromRequest(false); }}
-              title="Salin picklist kertas yang sudah diisi, lalu posting semua baris sekaligus">
-              <ClipboardList className="h-4 w-4" />Isi dari picklist
-            </Button>
-          )}
-          {supervisor && (pending || w.status === "RESCHEDULED") && <AddItems date={w.planned_date} wave={w} />}
-          {supervisor && pending && <TundaButton wave={w} tasks={tasks} rpc={rpc} />}
-          {supervisor && w.status === "RESCHEDULED" && (
-            <ConfirmButton size="sm" variant="outline" title={`Aktifkan NO ${w.wave_no}`} summary="Wave kembali bisa dikerjakan."
-              onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "PENDING" })}>Aktifkan</ConfirmButton>
-          )}
-          {supervisor && (pending || w.status === "RESCHEDULED") && (
-            <ConfirmButton size="sm" variant="danger" title={`Batalkan NO ${w.wave_no}`} confirmLabel="Batalkan wave"
-              summary={`Batalkan wave dan ${open.length} tugas yang belum dikerjakan. Stok yang sudah dipindah tidak dikembalikan otomatis.`}
-              onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "CANCELLED" })}>Batalkan</ConfirmButton>
-          )}
-        </div>
-      </CardHeader>
+      </div>
 
-      {sheet && <WaveSheetPanel key={sheetAt?.id ?? "plain"} wave={w} tasks={tasks} prefill={sheetAt?.row} onClose={() => { setSheet(false); setSheetFromRequest(false); if (sheetAt) onSheetAtDone(); }} />}
+      {sheet && <WaveSheetPanel key={sheetAt?.id ?? "plain"} wave={w} tasks={tasks} prefill={sheetAt?.row}
+        onClose={() => { setSheet(false); setSheetFromRequest(false); if (sheetAt) onSheetAtDone(); }} />}
       {picking && <PickingPanel wave={w} tasks={tasks}
         orders={outbound.map((o) => ({ shipment_number: o.shipment_number, sku: o.sku, description: o.description, quantity_requested: Number(o.quantity_requested), shortage_reason: o.shortage_reason }))}
         onClose={() => setPicking(false)} />}
-      {show && !sheet && !picking && <>
-      {/* Mobile: one card per task, big tap target. Desktop: table. */}
-      <ul className="divide-y divide-steel-100 lg:hidden">
-        {listed.map((it) => it.kind === "pair" ? (
-          <li key={it.pick.id} className={cn("space-y-2 p-4", it.pick.status !== "PLANNED" && "opacity-60", (short.has(it.pick.id) || short.has(it.move.id)) && "bg-bad/10")}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-steel-500">#{it.pick.seq} · Pick {it.pick.shipment_number} + pindah sisa palet</span>
-              <span className="flex items-center gap-2"><RowHistory ids={[it.pick.id, it.move.id]} label={`NO ${w.wave_no} #${it.pick.seq}`} /><StatusTag status={it.pick.status} /></span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <BinButton code={it.pick.from_bin}><BinChip code={it.pick.from_bin} /></BinButton>
-              <ArrowRight className="h-4 w-4" /><span className="text-sm font-semibold">Truk {fmtNum(Number(it.pick.quantity))}</span>
-              <span className="text-sm">· sisa {fmtNum(Number(it.move.quantity))} →</span><BinButton code={it.move.to_bin ?? ""}><BinChip code={it.move.to_bin ?? ""} /></BinButton>
-            </div>
-            <p className="text-sm"><b>{fmtNum(Number(it.pick.quantity))} {it.pick.uom}</b> · {it.pick.sku} {it.pick.description}</p>
-            <p className="text-xs text-steel-500">Batch {it.pick.batch_lot || "–"} · exp {fmtDate(it.pick.expiry_date)} · CASE* (buka palet)</p>
-            <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
-            <PairAction pick={it.pick} move={it.move} isShort={short.has(it.pick.id) || short.has(it.move.id)} wait={waits[it.pick.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
-          </li>
-        ) : ((t) => (
-          <li key={t.id} className={cn("space-y-2 p-4", t.status !== "PLANNED" && "opacity-60", short.has(t.id) && "bg-bad/10")}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-steel-500">#{t.seq} · {t.task_type === "PICK" ? `Pick ${t.shipment_number}` : "Relokasi ke pickface"}</span>
-              <span className="flex items-center gap-2"><RowHistory ids={[t.id]} label={`NO ${w.wave_no} #${t.seq}`} /><StatusTag status={t.status} /></span>
-            </div>
-            <div className="flex items-center gap-2">
-              <BinButton code={t.from_bin}><BinChip code={t.from_bin} /></BinButton>
-              {t.to_bin && <><ArrowRight className="h-4 w-4" /><BinButton code={t.to_bin}><BinChip code={t.to_bin} /></BinButton></>}
-            </div>
-            {rest.has(t.id) && <p className="text-sm">Sisa palet: <b>{rest.get(t.id)}</b></p>}
-            <p className="text-sm"><b>{fmtNum(Number(t.quantity))} {t.uom}</b> · {t.sku} {t.description}</p>
-            <p className="text-xs text-steel-500">Batch {t.batch_lot || "–"} · exp {fmtDate(t.expiry_date)} · {t.breaks_pallet ? "CASE* (buka palet)" : t.pick_type}</p>
-            {short.has(t.id) && <p className="text-xs font-semibold text-bad">Stok bin ini tidak cukup lagi untuk tugas ini</p>}
-            <Actual task={t} />
-            <TaskAction task={t} isShort={short.has(t.id)} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} />
-          </li>
-        ))(it.task))}
-      </ul>
-      <div className="hidden lg:block">
-        <Table>
-          <thead><tr>{["#", "Jenis", "Dari", "Ke", "SKU", "Batch", "Exp", "Qty", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
-          <tbody>{listed.map((it) => it.kind === "pair" ? (
-            <tr key={it.pick.id} className={cn(it.pick.status !== "PLANNED" && "text-steel-500", (short.has(it.pick.id) || short.has(it.move.id)) && "bg-bad/10")}>
-              <Td>{it.pick.seq}</Td>
-              <Td>Pick {it.pick.shipment_number}<span className="block text-xs">+ pindah sisa palet</span></Td>
-              <Td><BinButton code={it.pick.from_bin} className="font-semibold underline-offset-2 hover:underline">{it.pick.from_bin}</BinButton></Td>
-              <Td>Truk<span className="block text-xs">sisa → <BinButton code={it.move.to_bin ?? ""} className="font-semibold underline-offset-2 hover:underline">{it.move.to_bin}</BinButton></span></Td>
-              <Td title={it.pick.description}>{it.pick.sku}</Td>
-              <Td>{it.pick.batch_lot || "–"}</Td>
-              <Td className="whitespace-nowrap">{fmtDate(it.pick.expiry_date)}</Td>
-              <Td className="whitespace-nowrap text-right">{fmtNum(Number(it.pick.quantity))} {it.pick.uom} *<span className="block text-xs">sisa {fmtNum(Number(it.move.quantity))}</span></Td>
-              <Td>
-                <StatusTag status={it.pick.status} />{(short.has(it.pick.id) || short.has(it.move.id)) && <span className="ml-1 text-xs font-semibold text-bad">stok kurang</span>}
-                {it.pick.completed_at && <span className="block text-xs">{it.pick.completed_by_name} · {fmtDateTime(it.pick.completed_at)}</span>}
-                <Actual task={it.pick} /><Actual task={it.move} label="Sisa dipindah" />
-                <RowHistory ids={[it.pick.id, it.move.id]} label={`NO ${w.wave_no} #${it.pick.seq}`} />
-              </Td>
-              <Td><PairAction pick={it.pick} move={it.move} isShort={short.has(it.pick.id) || short.has(it.move.id)} wait={waits[it.pick.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
-            </tr>
-          ) : ((t) => (
-            <tr key={t.id} className={cn(t.status !== "PLANNED" && "text-steel-500", short.has(t.id) && "bg-bad/10")}>
+      {expanded && !sheet && !picking && <DesktopLines model={m} wave={w} rows={matching} outbound={outbound} />}
+    </Card>
+  );
+}
+
+/** The open wave's lines: the table as before, with only the line's next action and its menu. */
+function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel; wave: WaveRow; rows: LineItem[]; outbound: (OutboundRow & OutboundDetail)[] }) {
+  const pending = w.status === "PENDING";
+  const [showDone, setShowDone] = useState(w.status === "COMPLETED");
+  const [showCancelled, setShowCancelled] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
+  const cancelledCount = rows.filter(lineCancelled).length;
+  const visible = showCancelled || w.status === "CANCELLED" ? rows : rows.filter((it) => !lineCancelled(it));
+  const doneCount = visible.filter(lineDone).length;
+  const listed = showDone ? visible : visible.filter((it) => !lineDone(it));
+  const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
+  const lineProps = (it: LineItem) => {
+    const head = it.kind === "pair" ? it.pick : it.task;
+    return {
+      item: it, label: `NO ${w.wave_no} #${head.seq}`, isShort: lineIds(it).some((t) => m.short.has(t.id)), wait: m.waits[head.id],
+      canPost: pending, canUndo: w.status !== "CANCELLED", canRestore: pending || w.status === "RESCHEDULED",
+      supervisor: m.supervisor, rpc: m.rpc, onDone: m.onDone,
+    };
+  };
+  const binLink = (code: string) => <BinButton code={code} className="font-semibold underline-offset-2 hover:underline">{code}</BinButton>;
+
+  return (
+    <>
+      <Table>
+        <thead><tr>{["#", "Jenis", "Dari", "Ke", "SKU", "Batch", "Exp", "Qty", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
+        <tbody>{listed.map((it) => {
+          const p = lineProps(it);
+          const t = it.kind === "pair" ? it.pick : it.task;
+          return (
+            <tr key={t.id} className={cn(t.status !== "PLANNED" && "text-steel-500", p.isShort && "bg-bad/10")}>
               <Td>{t.seq}</Td>
-              <Td>{t.task_type === "PICK" ? `Pick ${t.shipment_number}` : "Relokasi"}</Td>
-              <Td><BinButton code={t.from_bin} className="font-semibold underline-offset-2 hover:underline">{t.from_bin}</BinButton></Td>
-              <Td>{t.to_bin ? <BinButton code={t.to_bin} className="font-semibold underline-offset-2 hover:underline">{t.to_bin}</BinButton> : "Truk"}
-                {rest.has(t.id) && <span className="block text-xs">sisa: <b>{rest.get(t.id)}</b></span>}</Td>
+              <Td>{it.kind === "pair" ? <>Pick {t.shipment_number}<span className="block text-xs">+ pindah sisa palet</span></> : t.task_type === "PICK" ? `Pick ${t.shipment_number}` : "Relokasi"}</Td>
+              <Td>{binLink(t.from_bin)}</Td>
+              <Td>{it.kind === "pair"
+                ? <>Truk<span className="block text-xs">sisa → {binLink(it.move.to_bin ?? "")}</span></>
+                : <>{t.to_bin ? binLink(t.to_bin) : "Truk"}{m.rest.has(t.id) && <span className="block text-xs">sisa: <b>{m.rest.get(t.id)}</b></span>}</>}</Td>
               <Td title={t.description}>{t.sku}</Td>
               <Td>{t.batch_lot || "–"}</Td>
               <Td className="whitespace-nowrap">{fmtDate(t.expiry_date)}</Td>
-              <Td className="whitespace-nowrap text-right">{fmtNum(Number(t.quantity))} {t.uom} {t.breaks_pallet && <span title="Membuka palet utuh">*</span>}</Td>
+              <Td className="whitespace-nowrap text-right">{fmtNum(Number(t.quantity))} {t.uom}{t.breaks_pallet && " *"}
+                {it.kind === "pair" && <span className="block text-xs">sisa {fmtNum(Number(it.move.quantity))}</span>}</Td>
               <Td>
-                <StatusTag status={t.status} />{short.has(t.id) && <span className="ml-1 text-xs font-semibold text-bad">stok kurang</span>}
-                {t.completed_at && <span className="block text-xs">{t.completed_by_name} · {fmtDateTime(t.completed_at)}</span>}
-                <Actual task={t} />
-                <RowHistory ids={[t.id]} label={`NO ${w.wave_no} #${t.seq}`} />
+                <StatusTag status={t.status} />{p.isShort && <span className="ml-1 text-xs font-semibold text-bad">stok kurang</span>}
+                {t.completed_at && <span className="block text-xs">{t.picked_by_name ?? t.completed_by_name} · {fmtDateTime(t.completed_at)}</span>}
+                <Actual task={t} />{it.kind === "pair" && <Actual task={it.move} label="Sisa dipindah" />}
               </Td>
-              <Td><TaskAction task={t} isShort={short.has(t.id)} wait={waits[t.id]} canPost={pending} canUndo={w.status !== "CANCELLED"} canRestore={pending || w.status === "RESCHEDULED"} supervisor={supervisor} rpc={rpc} onDone={onDone} /></Td>
+              <Td><div className="flex items-start justify-end gap-1"><LinePrimary {...p} /><LineMenu {...p} /></div></Td>
             </tr>
-          ))(it.task))}</tbody>
-        </Table>
-      </div>
-      </>}
-
-      <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-steel-100 px-4 py-2">
-        {!active && (
-          <button className="text-sm font-semibold underline" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? "Sembunyikan baris" : `Tampilkan ${fmtNum(rows.length)} baris`}
-          </button>
-        )}
-        {show && !sheet && !picking && doneRows > 0 && doneRows < rows.length && (
-          <button className="text-sm underline" onClick={() => setHideDone((v) => !v)}>
-            {hideDone ? `Tampilkan ${fmtNum(doneRows)} yang selesai` : `${fmtNum(doneRows)} selesai — sembunyikan`}
+          );
+        })}</tbody>
+      </Table>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2">
+        {doneCount > 0 && doneCount < visible.length && (
+          <button className="text-sm underline" onClick={() => setShowDone((v) => !v)}>
+            {showDone ? `${fmtNum(doneCount)} selesai — sembunyikan` : `${fmtNum(doneCount)} selesai — tampilkan`}
           </button>
         )}
         <button className="text-sm underline" onClick={() => setShowOrders((v) => !v)}>
@@ -474,7 +421,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
                 <Td className={cn("text-right", o.status === "COMPLETED" && Number(o.quantity_picked) < Number(o.quantity_allocated) && "font-semibold text-bad")}>{fmtNum(Number(o.quantity_picked))}</Td>
                 <Td className={cn(gap > 0 && "font-semibold text-bad")}>{gap > 0 ? `${fmtNum(gap)} · ${REASON[o.shortage_reason ?? ""] ?? o.shortage_reason ?? ""}` : "–"}</Td>
                 <Td><StatusTag status={o.status} /></Td>
-                <Td>{supervisor && w.status !== "CANCELLED" && (
+                <Td>{m.supervisor && w.status !== "CANCELLED" && (
                   <OrderQtyButton waveId={w.id} shipment={o.shipment_number} sku={o.sku} description={o.description}
                     requested={Number(o.quantity_requested)} picked={Number(o.quantity_picked)} />
                 )}</Td>
@@ -483,159 +430,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
           })}</tbody>
         </Table>
       )}
-    </Card>
-  );
-}
-
-/** What really happened, when it differs from the plan. */
-function Actual({ task: t, label = "Aktual" }: { task: TaskRow; label?: string }) {
-  if (!t.deviation_reason) return null;
-  return (
-    <span className="mt-1 block text-xs font-semibold text-steel-700">
-      {label} {fmtNum(Number(t.actual_quantity))}{t.actual_from_bin && t.actual_from_bin !== t.from_bin ? ` dari ${t.actual_from_bin}` : ""}: {t.deviation_reason}
-    </span>
-  );
-}
-
-/** The wait (0038): Posting stays locked until the relocation into this bin is posted. */
-function WaitNotice({ wait, sku, supervisor, rpc }: { wait: TaskWait; sku: string; supervisor: boolean; rpc: Rpc }) {
-  const parked = wait.wait_wave_status === "RESCHEDULED";
-  return (
-    <div className="space-y-1">
-      <p className="max-w-64 rounded bg-warn/15 p-1.5 text-xs font-semibold text-steel">{waitText(wait)}{parked && " Wave itu ditunda."}</p>
-      <div className="flex flex-wrap gap-1">
-        <Button size="sm" disabled title="Posting setelah relokasinya diposting">Posting</Button>
-        {(supervisor || !parked) && (
-          <PostMoveEarlyButton moveId={wait.wait_task_id} sku={sku} to={wait.wait_to} rpc={rpc}
-            label={`Posting Bin To Bin NO ${wait.wait_wave_no} #${wait.wait_seq}`}
-            summary={`Posting Bin To Bin NO ${wait.wait_wave_no} #${wait.wait_seq} sekarang, tanpa pick-nya: ${fmtNum(Number(wait.wait_qty))} dari ${wait.wait_from} ke ${wait.wait_to}${parked ? " (wave itu ditunda; pick-nya tetap belum dikerjakan)" : ""}. Setelah itu baris ini bisa diposting.`} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-type Rpc = (fn: string, args: Record<string, unknown>) => Promise<string | null>;
-
-/** Tunda with the rows of other waves it would hold up listed first (their Bin To Bin comes from this wave). */
-function TundaButton({ wave: w, tasks, rpc }: { wave: WaveRow; tasks: TaskRow[]; rpc: Rpc }) {
-  const moves = tasks.filter((t) => t.task_type === "REPLENISH" && t.status === "PLANNED");
-  return (
-    <ConfirmButton size="sm" variant="outline" title={`Jadwal ulang NO ${w.wave_no}`}
-      summary={`Wave ditahan (tidak bisa dikerjakan) sampai diaktifkan lagi. Tugas yang sudah diposting tetap tercatat.${moves.length ? ` Wave ini masih punya ${moves.length} Bin To Bin terbuka: wave lain yang menunggunya ikut tertahan, kecuali Bin To Bin-nya diposting setelah benar-benar dipindah.` : ""}`}
-      extra={moves.length ? <ImpactNote skus={[...new Set(moves.map((m) => m.sku))]} build={() => ({ change: { kind: "park", wave: w.id }, own: [] })} /> : undefined}
-      onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "RESCHEDULED" })}>Tunda</ConfirmButton>
-  );
-}
-
-function PairAction({ pick, move, isShort, wait, canPost, canUndo, canRestore, supervisor, rpc, onDone }: {
-  pick: TaskRow; move: TaskRow; isShort: boolean; wait?: TaskWait; canPost: boolean; canUndo: boolean; canRestore: boolean; supervisor: boolean;
-  rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>; onDone: () => void;
-}) {
-  if (pick.status === "COMPLETED") return supervisor && canUndo ? <UnpostPairButton pick={pick} move={move} /> : null;
-  const moveOnly = (
-    <PostMoveEarlyButton moveId={move.id} sku={move.sku} to={move.to_bin ?? ""} rpc={rpc} label="Posting Bin To Bin saja"
-      summary={`Posting hanya Bin To Bin #${pick.seq}: ${fmtNum(Number(move.quantity))} dari ${move.from_bin} ke ${move.to_bin} sekarang. Pick ${fmtNum(Number(pick.quantity))} untuk truk tetap belum dikerjakan dan diposting nanti.`} />
-  );
-  // Stok kurang: the proposal that makes this row doable again (lib/wave-fix.ts), also on a Tunda wave.
-  const fix = isShort && supervisor && canRestore && pick.status === "PLANNED" && move.status === "PLANNED" ? <FixButton pick={pick} move={move} /> : null;
-  // A Tunda wave cannot be worked on, but its pallet rest may still go to the pickface for the waves that need it (0053).
-  if (pick.status === "PLANNED" && !canPost && canRestore && supervisor && move.status === "PLANNED") return <div className="flex flex-wrap gap-2">{fix}{moveOnly}</div>;
-  if (pick.status !== "PLANNED" || !canPost) return null;
-  // A pair is one picklist line: cancelling takes the pick and its leftover move together,
-  // so the move is never orphaned. Retrying is safe (cancelling an already-cancelled task is a no-op).
-  const cancelPair = async (): Promise<string | null> => {
-    const e1 = await rpc("set_task_status", { p_task_id: pick.id, p_status: "CANCELLED" });
-    if (e1) return e1;
-    if (move.status !== "COMPLETED") {
-      const e2 = await rpc("set_task_status", { p_task_id: move.id, p_status: "CANCELLED" });
-      if (e2) return `Pick dibatalkan, pindahan sisa gagal: ${e2}`;
-    }
-    return null;
-  };
-  return (
-    <div className="flex flex-wrap gap-2">
-      {fix}
-      {wait ? <WaitNotice wait={wait} sku={pick.sku} supervisor={supervisor} rpc={rpc} /> : <PairPostDialog pick={pick} move={move} onDone={onDone} />}
-      {supervisor && (
-        <MoreActions>
-          {/* Source and Bin To Bin in one dialog (0052), e.g. the planned pickface is full. */}
-          <EditRowButton pick={pick} move={move} mode="post" />
-          <EditRowButton pick={pick} move={move} />
-          {move.status === "PLANNED" && moveOnly}
-          {canRestore && <CancelButton run={cancelPair} />}
-        </MoreActions>
-      )}
-    </div>
-  );
-}
-
-/**
- * The supervisor's corrections behind one button, so an open row shows only
- * Posting and ⋯ on a phone. The panel opens in place (not a popover): a
- * dialog opened from it stays mounted while the panel is open.
- */
-function MoreActions({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button size="sm" variant="outline" aria-label="Koreksi" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <MoreHorizontal className="h-4 w-4" />
-      </Button>
-      {open && <div className="flex basis-full flex-wrap gap-1 rounded-md border border-steel-200 bg-steel-100/40 p-1">{children}</div>}
     </>
   );
 }
 
-/**
- * Batal without a confirmation step: cancelling is undone with one tap on
- * Pulihkan on the cancelled row, so a dialog here only slowed the floor down.
- */
-function CancelButton({ run }: { run: () => Promise<string | null> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <span className="inline-flex flex-col">
-      <Button size="sm" variant="ghost" disabled={busy}
-        onClick={async () => { setBusy(true); setError(null); const e = await run(); setBusy(false); setError(e); }}>
-        {busy ? "Membatalkan…" : "Batal"}
-      </Button>
-      {error && <span role="alert" className="text-xs text-bad">{error}</span>}
-    </span>
-  );
-}
-
-function TaskAction({ task: t, isShort, wait, canPost, canUndo, canRestore, supervisor, rpc, onDone }: {
-  task: TaskRow; isShort: boolean; wait?: TaskWait; canPost: boolean; canUndo: boolean; canRestore: boolean; supervisor: boolean;
-  rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>; onDone: () => void;
-}) {
-  // A task cancelled by mistake goes back to the plan (set_task_status allows CANCELLED -> PLANNED).
-  if (t.status === "CANCELLED") return supervisor && canRestore ? (
-    <ConfirmButton size="sm" variant="ghost" className="underline" title={`Pulihkan tugas #${t.seq}`} confirmLabel="Pulihkan"
-      summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana dan bisa diposting lagi. Pakai hanya bila dibatalkan tidak sengaja: jika jumlah order sudah diubah, tugas ini bisa membuat pick lebih.`}
-      onConfirm={() => rpc("set_task_status", { p_task_id: t.id, p_status: "PLANNED", p_reason: "dipulihkan: dibatalkan tidak sengaja" })}>
-      <Undo2 className="h-4 w-4" />Pulihkan</ConfirmButton>
-  ) : null;
-  // A pick without a Bin To Bin can get one (0045); it then pairs with the pick.
-  const addMove = supervisor && t.task_type === "PICK" && canRestore && <AddMoveButton task={t} />;
-  // A posted task can be undone and posted again (0034).
-  if (t.status === "COMPLETED") return supervisor && canUndo ? <div className="flex flex-wrap gap-1"><UnpostButton task={t} />{addMove}</div> : null;
-  // Stok kurang: the proposal that makes this row doable again (lib/wave-fix.ts), also on a Tunda wave.
-  const fix = isShort && supervisor && canRestore && t.task_type === "PICK" && t.status === "PLANNED" ? <FixButton pick={t} /> : null;
-  if (t.status !== "PLANNED" || !canPost) return fix;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {fix}
-      {wait ? <WaitNotice wait={wait} sku={t.sku} supervisor={supervisor} rpc={rpc} /> : <TaskPostDialog task={t} onDone={onDone} />}
-      {supervisor && (
-        <MoreActions>
-          {/* Source, and a Bin To Bin the plan did not make (0052). */}
-          {t.task_type === "PICK" && <EditRowButton pick={t} mode="post" />}
-          {t.task_type === "PICK" && <EditRowButton pick={t} />}
-          {t.task_type === "PICK" && Number(t.quantity) > 1 && <SplitButton task={t} />}
-          <CancelButton run={() => rpc("set_task_status", { p_task_id: t.id, p_status: "CANCELLED" })} />
-        </MoreActions>
-      )}
-    </div>
-  );
-}

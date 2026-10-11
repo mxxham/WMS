@@ -44,6 +44,7 @@ test('day: stok kurang first, waves joined in Indonesian, each named once', () =
   assert.deepEqual(dayNextStep(day, { short: [{ wave_no: '7' }, { wave_no: '8' }, { wave_no: '7' }], requests: 1, waiting: [] }),
     { text: '3 baris stok kurang di NO 7 dan NO 8 harus diperbaiki dulu.', target: { kind: 'problems' } });
   assert.match(dayNextStep(day, { short: [{ wave_no: '1' }, { wave_no: '2' }, { wave_no: '3' }], requests: 0, waiting: [] }).text, /di NO 1, NO 2 dan NO 3 /);
+  assert.match(dayNextStep(day, { short: [{ wave_no: '8' }, { wave_no: '7' }], requests: 0, waiting: [] }).text, /di NO 7 dan NO 8 /, 'waves by number, not by first mention');
 });
 test('day: then supervisor requests, then waiting Bin To Bin', () => {
   assert.deepEqual(dayNextStep(day, { short: [], requests: 1, waiting: [] }), { text: '1 permintaan dari picker menunggu supervisor.', target: { kind: 'problems' } });

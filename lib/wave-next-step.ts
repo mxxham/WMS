@@ -42,9 +42,9 @@ export function waveNextStep(w: WaveFacts): NextStep {
   }
 }
 
-/** "NO 7", "NO 7 dan NO 8", "NO 1, NO 2 dan NO 3" — each wave once, in the order first named. */
+/** "NO 7", "NO 7 dan NO 8", "NO 1, NO 2 dan NO 3" — each wave once, by number. */
 function waveList(nos: string[]): string {
-  const names = [...new Set(nos)].map((n) => `NO ${n}`);
+  const names = [...new Set(nos)].sort((a, b) => (Number(a.replace(/\D/g, "")) || 0) - (Number(b.replace(/\D/g, "")) || 0)).map((n) => `NO ${n}`);
   return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} dan ${names[names.length - 1]}`;
 }
 

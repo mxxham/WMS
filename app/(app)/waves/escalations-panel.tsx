@@ -22,8 +22,10 @@ const KIND: Record<string, string> = {
 };
 
 /** Perlu ditangani · Minta supervisor (0067): picker lines the picking screen could not post. */
-export function EscalationsPanel({ rows, supervisor, person, onOpenSheet }: {
+export function EscalationsPanel({ rows, supervisor, person, onOpenSheet, layout = "desktop" }: {
   rows: LineRequest[]; supervisor: boolean; person: string; onOpenSheet: (r: LineRequest) => void;
+  /** Isi dari picklist is desktop only: on the phone a request offers only Tutup. */
+  layout?: "desktop" | "phone";
 }) {
   const router = useRouter();
   const [note, setNote] = useState<Record<string, string>>({});
@@ -53,7 +55,7 @@ export function EscalationsPanel({ rows, supervisor, person, onOpenSheet }: {
               <p className="text-warn">{r.message}</p>
               {supervisor && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" onClick={() => onOpenSheet(r)}>Isi dari picklist</Button>
+                  {layout === "desktop" && <Button size="sm" onClick={() => onOpenSheet(r)}>Isi dari picklist</Button>}
                   <Input aria-label={`Catatan tutup ${r.wave_no} #${r.seq}`} className="h-8 w-56" placeholder="catatan (wajib untuk Tutup)"
                     value={note[r.id] ?? ""} onChange={(e) => { const v = e.target.value; setNote((n) => ({ ...n, [r.id]: v })); }} />
                   <ConfirmButton size="sm" variant="outline" disabled={!(note[r.id] ?? "").trim() || person.trim().length < 2}
