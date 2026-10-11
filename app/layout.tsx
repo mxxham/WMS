@@ -6,8 +6,14 @@ import "@fontsource/ibm-plex-sans-condensed/500.css";
 import "@fontsource/ibm-plex-sans-condensed/700.css";
 import "./globals.css";
 
-export const metadata: Metadata = { title: "K-one · CKB WSM SUB 2", description: "K-one: label bin, scan, alokasi FEFO, dan stok gudang CKB WSM SUB 2" };
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#135F45", colorScheme: "light" };
+// "only light": browser and OS auto-dark features (Android "darken web pages", Chrome auto dark mode,
+// Firefox/Zen website dark mode) leave the app alone; darkreader-lock does the same for Dark Reader engines.
+export const metadata: Metadata = {
+  title: "K-one · CKB WSM SUB 2",
+  description: "K-one: label bin, scan, alokasi FEFO, dan stok gudang CKB WSM SUB 2",
+  other: { "darkreader-lock": "lock" },
+};
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#135F45", colorScheme: "only light" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
