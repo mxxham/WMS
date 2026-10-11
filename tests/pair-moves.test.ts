@@ -9,9 +9,12 @@ function test(name: string, fn: () => void) {
 }
 console.log('\nPick + move pairs');
 
-const t = (id: string, seq: number, o: Partial<{ task_type: string; status: string; from_bin: string; batch_lot: string }> = {}) => ({
+type Over = Partial<{ task_type: string; status: string; from_bin: string; batch_lot: string; expiry_date: string;
+  actual_from_bin: string | null; actual_batch_lot: string | null; actual_expiry_date: string | null }>;
+const t = (id: string, seq: number, o: Over = {}) => ({
   id, wave_id: 'w', seq, task_type: 'PICK', status: 'PLANNED', from_bin: 'CD22E02', sku: '550069888', batch_lot: '18I26JJ',
-  expiry_date: '2030-09-18', ...o,
+  expiry_date: '2030-09-18', actual_from_bin: null as string | null, actual_batch_lot: null as string | null,
+  actual_expiry_date: null as string | null, ...o,
 });
 const shape = (items: ReturnType<typeof pairMoves>) => items.map((x) => (x.kind === 'pair' ? `${x.pick.id}+${x.move.id}` : x.task.id));
 
@@ -33,6 +36,37 @@ test('a half-posted or cancelled pair is shown as two rows', () => {
 });
 test('both posted stay paired', () => {
   assert.deepEqual(shape(pairMoves([t('p', 1, { status: 'COMPLETED' }), t('m', 2, { task_type: 'REPLENISH', status: 'COMPLETED' })])), ['p+m']);
+});
+
+// Final review C1: a line taken from two bins. split_task (0067) puts the second piece after the move.
+const done = { status: 'COMPLETED' };
+test('two sources, split after the move: pick + move one row, the second piece its own row', () => {
+  assert.deepEqual(shape(pairMoves([
+    t('p', 1, { ...done, actual_from_bin: 'CB34D02', actual_batch_lot: '18I26JJ', actual_expiry_date: '2030-09-18' }),
+    t('m', 2, { ...done, task_type: 'REPLENISH', actual_from_bin: 'CB34D02' }),
+    t('n', 3, { ...done, actual_from_bin: 'CB33E02', actual_batch_lot: 'P12', actual_expiry_date: '2030-09-12' }),
+  ].map((x) => ({ ...x, from_bin: 'CB34D02' })))), ['p+m', 'n']);
+});
+test('posted: paired by where it really came from, not by the plan (old layout: piece between pick and move)', () => {
+  // n keeps p's planned bin but was taken from CB33E02: never the move's pick.
+  assert.deepEqual(shape(pairMoves([
+    t('p', 1, { ...done, from_bin: 'CB34D02', actual_from_bin: 'CB34D02' }),
+    t('n', 2, { ...done, from_bin: 'CB34D02', actual_from_bin: 'CB33E02', actual_batch_lot: 'P12', actual_expiry_date: '2030-09-12' }),
+    t('m', 3, { ...done, from_bin: 'CB34D02', task_type: 'REPLENISH', actual_from_bin: 'CB34D02' }),
+  ])), ['p', 'n', 'm']);
+});
+test('posted from another bin than planned: pick and its move (both there) still pair', () => {
+  assert.deepEqual(shape(pairMoves([
+    t('p', 1, { ...done, actual_from_bin: 'CD22E01', actual_batch_lot: 'X', actual_expiry_date: '2030-10-01' }),
+    t('m', 2, { ...done, task_type: 'REPLENISH', actual_from_bin: 'CD22E01', actual_batch_lot: 'X', actual_expiry_date: '2030-10-01' }),
+  ])), ['p+m']);
+  assert.deepEqual(shape(pairMoves([
+    t('p', 1, { ...done, actual_from_bin: 'CD22E01' }),
+    t('m', 2, { ...done, task_type: 'REPLENISH', actual_from_bin: 'CD22E02' }),
+  ])), ['p', 'm']);
+});
+test('planned tasks ignore actual fields (none yet): same rows as before', () => {
+  assert.deepEqual(shape(pairMoves([t('p', 1), t('m', 2, { task_type: 'REPLENISH' }), t('n', 3)])), ['p+m', 'n']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
