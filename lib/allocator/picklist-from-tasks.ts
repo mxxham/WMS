@@ -3,6 +3,7 @@ import type { AllocationLine, AllocationResult, Picklist, PickType } from './typ
 import { expiryText, withConfig } from './config';
 import { lookupUom } from './uom-master';
 import { restNoteAt, type RestStep } from './picklist';
+import { movesOfPicks } from './pair-moves';
 
 /** One row of the `pick_task_detail` view. */
 export interface TaskRow {
@@ -96,11 +97,12 @@ export function restNotesFromTasks(waves: WaveRow[], tasks: TaskRow[]): Map<stri
   const steps: RestStep[] = live.map((t) => ({ key: key(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
     moveTo: t.task_type === 'REPLENISH' && carried(t) ? t.to_bin : null }));
   const out = new Map<string, string>();
+  // Its own move (right after, or right before in older plans; one pick per move, as pairMoves) means it is not "tetap".
+  const moveOf = movesOfPicks(live, { anyState: true });
   live.forEach((t, i) => {
     if (t.task_type !== 'PICK' || !t.breaks_pallet) return;
-    // Its own move (right after, or right before in older plans) means it is not "tetap".
-    const own = [live[i + 1], live[i - 1]].some((x) => x && x.task_type === 'REPLENISH' && x.wave_id === t.wave_id
-      && x.from_bin === t.from_bin && x.sku === t.sku && x.batch_lot === t.batch_lot && x.expiry_date === t.expiry_date && carried(x));
+    const mv = moveOf.get(t.id);
+    const own = !!mv && carried(mv);
     const note = own ? null : restNoteAt(steps, i, t.from_bin);
     if (note) out.set(t.id, note);
   });
@@ -135,11 +137,13 @@ export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: Stoc
   const restSteps: RestStep[] = live.map((t, k) => ({ key: src(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
     moveTo: t.task_type === 'REPLENISH' && r.moved[k] > 0 ? t.to_bin : null }));
   const out = new Map<string, { sisa: number; moveQty: number; moveTo: string | null; restNote: string | null }>();
+  // Its move: the REPLENISH right after (new plans) or right before (older plans) from the same pallet, and
+  // one pick per move, the same pairing as the wave page (pairMoves): a split piece next to the line's move
+  // never lists it a second time (residual N1).
+  const moveOf = movesOfPicks(live, { anyState: true });
   live.forEach((t, i) => {
     if (t.task_type !== 'PICK') return;
-    // Its move: the REPLENISH right after (new plans) or right before (older plans) from the same bin/batch.
-    const pair = [live[i + 1], live[i - 1]].find((x) => x && x.task_type === 'REPLENISH' && x.wave_id === t.wave_id
-      && x.from_bin === t.from_bin && x.sku === t.sku && x.batch_lot === t.batch_lot && x.expiry_date === t.expiry_date);
+    const pair = moveOf.get(t.id);
     const p = pair ? live.indexOf(pair) : -1;
     const j = Math.max(i, p);
     // What the replay really carried (less than planned when the shelf holds less now), so Sisa and Bin To Bin agree.
