@@ -160,6 +160,15 @@ export function auditCoverage(loaded: { todo: number; mismatch: number }[]): num
   return pct(loaded.filter((s) => Number(s.todo) === 0 && Number(s.mismatch) === 0).length, loaded.length);
 }
 
+/**
+ * How a posted line's bin was confirmed (0068): the rack label scanned, or typed. Rows from before 0068 carry a
+ * scanned code without a method: they were scans.
+ */
+export function binConfirm(l: { scanned_code: string | null | undefined; scan_method?: string | null }): "scan" | "ketik" | null {
+  if (!l.scanned_code) return null;
+  return l.scan_method === "ketik" ? "ketik" : "scan";
+}
+
 export function scanCompliance(scanned: boolean[]): number | null {
   return pct(scanned.filter(Boolean).length, scanned.length);
 }
