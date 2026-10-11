@@ -256,6 +256,14 @@ select pg_temp.check('the move''s bin as second source, another bin first: other
   and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC03A01', '550071397') = 10);
 
+create temp table rg as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
+  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', '', 30), 'Ani', 'x') as r;
+select pg_temp.check('blank move_to with everything else matching the other''s move: other_picker, move still COMPLETED, stock unchanged',
+  (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rg)
+  and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
+  and (select status from pick_tasks where id = (select a from ids3)) = 'PLANNED'
+  and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 6);
+
 create temp table rf as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
   '[{"bin":" cc02a01 ","batch":"S1","expiry":"2030-09-01","qty":6}]', ' cc02a02', 30), 'Ani', 'x') as r;
 select pg_temp.check('move_to and bin differing only by case/whitespace read as unchanged: pick posts next to the other''s move',

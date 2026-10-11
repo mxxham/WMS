@@ -463,6 +463,7 @@ returns table (bin_code text, batch text, expiry date) language sql immutable as
   order by (jsonb_array_length(p_row->'sources') > 1 and coalesce((x.s->>'qty')::numeric, 0) <= 0), x.n
   limit 1
 $$;
+revoke execute on function public.pick_line_first_source(jsonb) from public, anon, authenticated;
 
 create or replace function public.post_pick_line(p_wave_id uuid, p_row jsonb, p_by_name text, p_reason text, p_scanned text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -489,8 +490,8 @@ begin
     if m.id is null or m.wave_id <> w.id or m.task_type = 'PICK' then raise exception 'Bin To Bin ini bukan milik wave NO %', w.wave_no; end if;
   end if;
   if t.id is null and m.id is null then raise exception 'Baris tanpa tugas'; end if;
-  if t.id is not null and m.id is not null and not (m.item_id = t.item_id
-      and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id) then
+  if t.id is not null and m.id is not null and not coalesce(m.item_id = t.item_id
+      and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id, false) then
     raise exception 'Bin To Bin ini bukan milik baris ini';
   end if;
 
@@ -522,12 +523,14 @@ begin
       -- Mirrors the engine's v_same. The row is read the way the engine reads it (pick_line_first_source, move_to, move_qty).
       -- The batch is compared as written, not as the engine maps it to the bin's own: that errs toward refusing.
       select f.bin_code, f.batch, f.expiry into v_fbin, v_fbatch, v_fexp from public.pick_line_first_source(p_row) f;
-      v_unchanged := v_fbin is not null
-        and nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') = (select bin_code from public.bins where id = m.to_bin_id)
+      -- Two-valued on purpose: a NULL here (e.g. a blank move_to) must read as "changed", never as "allowed".
+      v_unchanged := coalesce(v_fbin is not null
+        and nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') is not distinct from (select bin_code from public.bins where id = m.to_bin_id)
+        and nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') is not null
         and coalesce((p_row->>'move_qty')::numeric, 0) = coalesce(m.actual_quantity, m.quantity)
-        and v_fbin = (select bin_code from public.bins where id = coalesce(m.actual_from_bin_id, m.from_bin_id))
+        and v_fbin is not distinct from (select bin_code from public.bins where id = coalesce(m.actual_from_bin_id, m.from_bin_id))
         and v_fbatch = coalesce(m.actual_batch_lot, m.batch_lot, '')
-        and v_fexp is not distinct from coalesce(m.actual_expiry_date, m.expiry_date);
+        and v_fexp is not distinct from coalesce(m.actual_expiry_date, m.expiry_date), false);
     end if;
     if t.status = 'COMPLETED' and not public.same_person(t.picked_by_name, v_name) then
       v_kind := 'other_picker';
