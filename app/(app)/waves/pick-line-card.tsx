@@ -7,8 +7,8 @@ import { Input, Label } from "@/components/ui/input";
 import { ItemScanInput } from "@/components/app/item-scan-input";
 import { BinScanInput } from "@/components/app/bin-scan-input";
 import { BinLeftCheck } from "./bin-left-check";
-import { leftoverAfter, type SheetLine, type SheetStock } from "@/lib/wave-sheet";
-import { linePayload, lineProblem, lineSummary } from "@/lib/pick-line";
+import type { SheetLine, SheetStock } from "@/lib/wave-sheet";
+import { draftNotes, isPlannedSource, linePayload, lineProblem, lineSummary, restAtOpen, samePerson } from "@/lib/pick-line";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 
 const REASONS = ["bin kosong / kurang", "palet terhalang", "karton rusak", "pickface penuh", "lain"];
@@ -18,8 +18,8 @@ const REASONS = ["bin kosong / kurang", "palet terhalang", "karton rusak", "pick
  * planned, Berbeda to post what really happened, Ubah on one's own posted line.
  * Editor state lives here, keyed by the line, so a page refresh never wipes it.
  */
-export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted }: {
-  line: SheetLine; unit: string; stock: SheetStock[]; bins: Set<string> | null; person: string; waveId: string; onPosted: () => void;
+export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, waveId, onPosted }: {
+  line: SheetLine; unit: string; stock: SheetStock[]; stockLoaded: boolean; bins: Set<string> | null; person: string; waveId: string; onPosted: () => void;
 }) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm" | "check">("view");
   // Sesuai = the plan as is; Berbeda / Ubah = edited (decides the default reason).
@@ -33,16 +33,25 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
 
   const posted = line.posted;
   const by = line.pick?.picked_by_name ?? line.move?.picked_by_name ?? null;
-  const own = !by || by.trim().toLowerCase() === person.trim().toLowerCase();
+  // Own line = the same typed name (same_person); a line posted without a name is a supervisor's.
+  const own = samePerson(by, person);
   const sources = stock.filter((s) => s.sku === line.sku && s.qty > 0)
     .sort((a, b) => (a.expiry ?? "9999").localeCompare(b.expiry ?? "9999") || a.bin.localeCompare(b.bin));
   const problem = lineProblem(draft, bins);
   const asPlanned = mode !== "edit" && mode !== "confirm";
   const sentence = lineSummary(asPlanned ? line : draft, unit);
+  // Isi dari picklist's notes for this line, and the rest against the system: shown before Posting, never blocking.
+  const notes = asPlanned ? [] : draftNotes(draft, line, stock, bins, unit, stockLoaded);
+  const noteList = notes.length > 0 && (
+    <ul className="space-y-0.5 text-xs">{notes.map((n, i) => (
+      <li key={i} className={cn(n.tone === "bad" ? "text-bad" : n.tone === "warn" ? "rounded bg-warn/10 px-1 text-warn" : "text-steel-500")}>{n.text}</li>
+    ))}</ul>
+  );
 
   function open(edit: boolean) {
     const d = structuredClone(line);
-    if (!line.posted && line.move) d.moveQty = String(leftoverAfter(d, stock) || Number(line.move.quantity));
+    // The rest the pallet really keeps, once the stock has loaded; the plan only until then.
+    d.moveQty = restAtOpen(d, stock, stockLoaded);
     setDraft(d); setReason(""); setMessage(null); setEdited(edit);
     setMode(edit ? "edit" : "confirm");
   }
@@ -102,7 +111,7 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
           <span className="font-semibold text-ok"><Check className="mr-1 inline h-4 w-4" />Diposting{by && ` oleh ${by}`}{line.pick?.completed_at && ` · ${new Date(line.pick.completed_at).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })}`}</span>
           <Button size="sm" variant="outline" disabled={!own || person.trim().length < 2} onClick={() => open(true)}
             title={own ? "Ubah baris yang Anda posting" : "Baris orang lain: minta supervisor"}><Pencil className="h-4 w-4" />Ubah</Button>
-          {!own && <span className="w-full text-xs text-steel-500">Diposting {by}: minta supervisor untuk mengubah.</span>}
+          {!own && <span className="w-full text-xs text-steel-500">Diposting {by ? `oleh ${by}` : "tanpa nama"}: minta supervisor untuk mengubah.</span>}
         </div>
       )}
 
@@ -131,7 +140,7 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
               {i > 0 ? <Button size="sm" variant="ghost" aria-label="Hapus bin ini" onClick={() => setDraft((d) => ({ ...d, sources: d.sources.filter((_, j) => j !== i) }))}><X className="h-4 w-4" /></Button> : <span />}
             </div>
           ))}
-          <datalist id={`stock-${line.key}`}>{sources.map((r) => <option key={`${r.bin}|${r.batch}|${r.expiry}`} value={r.bin}>{`${r.batch} · ${fmtDate(r.expiry)} · ${fmtNum(r.qty)} ${unit}`}</option>)}</datalist>
+          <datalist id={`stock-${line.key}`}>{sources.map((r) => <option key={`${r.bin}|${r.batch}|${r.expiry}`} value={r.bin}>{`${r.batch} · ${fmtDate(r.expiry)} · ${fmtNum(r.qty)} ${unit}${isPlannedSource(r, line) ? " · rencana" : ""}`}</option>)}</datalist>
           {line.pick && draft.sources.length < 3 && (
             <Button size="sm" variant="ghost" onClick={() => setDraft((d) => ({ ...d, sources: [...d.sources, { bin: "", batch: "", expiry: "", qty: "0" }] }))}><Plus className="h-4 w-4" />bin lain</Button>
           )}
@@ -146,6 +155,7 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
           <div className="flex flex-wrap gap-1">{REASONS.map((r) => (
             <button key={r} type="button" onClick={() => setReason(r)} className={cn("rounded-full border px-2 py-0.5 text-xs", reason === r ? "border-ckb bg-ckb text-white" : "border-steel-300")}>{r}</button>
           ))}</div>
+          {noteList}
           {problem && <p role="alert" className="text-sm text-bad">{problem}</p>}
           <div className="flex gap-2">
             <Button disabled={!!problem || !reason} onClick={() => setMode("confirm")}>Lanjut</Button>
@@ -157,20 +167,22 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
       {mode === "confirm" && (
         <div className="space-y-3 rounded-md border border-ckb/40 bg-ckb/5 p-3">
           <p className="text-sm font-semibold">{sentence}</p>
+          {noteList}
+          {problem && <p role="alert" className="text-sm text-bad">{problem}{!edited && " — pakai Berbeda."}</p>}
           {line.pick && !line.posted && (
             <div><Label htmlFor={`scan-${line.key}`}>Scan barcode barang atau ketik SKU</Label>
               <ItemScanInput id={`scan-${line.key}`} value={scan} onChange={setScan} onItem={(it) => setScanned(it?.sku ?? null)} placeholder="scan / ketik SKU" />
               {scanned && scanned !== line.sku && <p className="text-sm text-bad">Barang salah: {scanned}, baris ini {line.sku}</p>}</div>
           )}
           <div className="flex gap-2">
-            <Button disabled={busy || (scanned !== null && scanned !== line.sku)} onClick={() => void post(draft)}>{busy ? "Memposting…" : "Posting"}</Button>
+            <Button disabled={busy || !!problem || (scanned !== null && scanned !== line.sku)} onClick={() => void post(draft)}>{busy ? "Memposting…" : "Posting"}</Button>
             <Button variant="outline" disabled={busy} onClick={() => setMode("view")}>Batal</Button>
           </div>
         </div>
       )}
 
       {mode === "check" && line.pick && (
-        <BinLeftCheck taskId={line.pick.id} person={person} onDone={() => { setMode("view"); onPosted(); }} />
+        <BinLeftCheck taskId={line.pick.id} person={person} unit={unit} onDone={() => { setMode("view"); onPosted(); }} />
       )}
 
       {message && <p role="alert" className={cn("text-sm", message.tone === "bad" ? "text-bad" : "text-warn")}>{message.text}</p>}

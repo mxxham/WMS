@@ -1,7 +1,7 @@
 import { uomLabel } from "./allocator/picklist";
 import { lookupUom } from "./allocator/uom-master";
 import type { TaskRow } from "./allocator/picklist-from-tasks";
-import { sheetRow, type SheetLine, type SheetRow } from "./wave-sheet";
+import { leftoverAfter, sheetNotes, sheetRow, type SheetLine, type SheetNote, type SheetRow, type SheetStock } from "./wave-sheet";
 
 /**
  * Paperless picking (0067): one line of a wave as the picker posts it at the
@@ -53,6 +53,52 @@ export function lineSummary(l: SheetLine, unit: string): string {
   const rest = to ? `${Number(l.moveQty)} ${unit} ke ${to}` : "";
   const parts = l.sources.map((s, i) => `${Number(s.qty)} ${unit}${i === 0 ? ` ${l.sku}` : ""} dari ${up(s.bin)}`);
   return `Ambil ${parts.join(" + ")}${rest ? `, sisa ${rest}` : ""}.`;
+}
+
+/** Own line: the typed names compared as same_person (0016) does; a line without a name is nobody's. */
+export function samePerson(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (x: string | null | undefined) => (x ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return norm(a) !== "" && norm(a) === norm(b);
+}
+
+const day = (d: string | null | undefined) => (d ?? "").slice(0, 10);
+
+/** The stock row the line was planned from (marked "rencana" in the source suggestions). */
+export function isPlannedSource(r: SheetStock, l: SheetLine): boolean {
+  const plan = l.pick ?? l.move;
+  return !!plan && r.bin === plan.from_bin && r.sku === l.sku && r.batch === plan.batch_lot && day(r.expiry) === day(plan.expiry_date);
+}
+
+/**
+ * Qty sisa an open line's editor starts with: what the pallet really keeps after this pick
+ * (leftoverAfter) once the stock has loaded, the plan only before that. A posted line keeps what was posted.
+ */
+export function restAtOpen(l: SheetLine, stock: SheetStock[], stockLoaded: boolean): string {
+  if (l.posted || !l.move) return l.moveQty;
+  return String(stockLoaded ? leftoverAfter(l, stock) : Number(l.move.quantity));
+}
+
+/**
+ * The notes for the line being edited: what sheetNotes says (Isi dari picklist's own notes, replayed against the
+ * system's stock once it has loaded), plus the rest against what the system says the pallet keeps. Warnings only:
+ * the floor may know better; lineProblem decides what blocks Posting.
+ */
+export function draftNotes(draft: SheetLine, line: SheetLine, stock: SheetStock[], bins: Set<string> | null, unit: string,
+  stockLoaded: boolean): SheetNote[] {
+  // Before the stock has loaded, nothing is replayed (it would read every bin as empty).
+  const l = stockLoaded ? { ...draft, done: true } : { ...draft, posted: false, done: false };
+  const notes = [...(sheetNotes([l], new Map([[line.key, line]]), stockLoaded ? stock : [], bins).get(line.key) ?? [])];
+  if (stockLoaded && line.move && !line.posted) {
+    const left = leftoverAfter(draft, stock);
+    const planned = Number(line.move.quantity);
+    const bin = up(draft.sources[0].bin);
+    if (left !== planned) notes.push({ tone: "warn", text: `Sistem: sisa di ${bin} setelah pick ini ${left} ${unit}, rencana ${planned} ${unit}.` });
+    const mq = Number(draft.moveQty);
+    if (up(draft.moveTo) && mq > left) {
+      notes.push({ tone: "warn", text: `Qty sisa ${mq} ${unit} lebih dari sisa di sistem (${left} ${unit}): selisihnya dicatat sebagai koreksi picklist, ${bin} dihitung ulang.` });
+    }
+  }
+  return notes;
 }
 
 /** The p_row for post_pick_line. */

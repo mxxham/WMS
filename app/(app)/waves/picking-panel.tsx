@@ -38,6 +38,8 @@ export function PickingPanel({ wave: w, tasks, orders, onClose }: {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
   const [stock, setStock] = useState<SheetStock[]>([]);
+  // The editor starts its Qty sisa from the stock only once it has loaded (never from an empty list).
+  const [stockLoaded, setStockLoaded] = useState(false);
   const [bins, setBins] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lines = useMemo(() => buildSheet(tasks).lines, [tasks]);
@@ -54,6 +56,7 @@ export function PickingPanel({ wave: w, tasks, orders, onClose }: {
         bins ? Promise.resolve(null) : fetchAll<{ bin_code: string }>((a, b) => db.from("bins").select("bin_code").neq("status", "blocked").order("bin_code").range(a, b)),
       ]);
       setStock(inv.map((r) => ({ bin: r.bin_code, sku: r.sku, batch: r.batch_lot, expiry: r.expiry_date, qty: Number(r.quantity) })));
+      setStockLoaded(true);
       if (all) setBins(new Set(all.map((b) => b.bin_code)));
     } catch (e) { setError((e as Error).message); }
   }
@@ -118,7 +121,7 @@ export function PickingPanel({ wave: w, tasks, orders, onClose }: {
         const lastOpen = !l.posted && order && order.openLines === 1 && order.picked + Number(l.pick?.quantity ?? 0) < order.needed;
         return (
           <div key={l.key}>
-            <PickLineCard line={l} unit={unitOf(l.sku, l.uom)} stock={stock} bins={bins} person={person} waveId={w.id} onPosted={() => posted(l.key)} />
+            <PickLineCard line={l} unit={unitOf(l.sku, l.uom)} stock={stock} stockLoaded={stockLoaded} bins={bins} person={person} waveId={w.id} onPosted={() => posted(l.key)} />
             {lastOpen && <p className="px-1 pt-1 text-xs font-semibold text-bad">masih kurang {fmtNum(order.needed - order.picked - Number(l.pick?.quantity ?? 0))} {order.unit} untuk order ini</p>}
           </div>
         );

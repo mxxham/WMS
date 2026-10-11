@@ -1,7 +1,7 @@
 /** Paperless picking: one line's validation, sentence and payload, and the wave's progress (database side: supabase/tests/39_pick_line.sql). */
 import { strict as assert } from 'node:assert';
 import { buildSheet } from '../lib/wave-sheet';
-import { lineProblem, linePayload, lineSummary, unitOf, waveProgress, type OrderLine } from '../lib/pick-line';
+import { draftNotes, lineProblem, linePayload, lineSummary, isPlannedSource, restAtOpen, samePerson, unitOf, waveProgress, type OrderLine } from '../lib/pick-line';
 import type { TaskRow } from '../lib/allocator/picklist-from-tasks';
 
 let passed = 0, failed = 0;
@@ -123,6 +123,56 @@ test('two order lines for one shipment and SKU add up, not overwrite', () => {
   assert.equal(p.orders.length, 1);
   assert.equal(p.orders[0]!.needed, 40);
   assert.equal(p.orders[0]!.shortageReason, 'NO_STOCK');
+});
+
+// Final review I3 + minors: the editor's notes, the rest it starts with, own line.
+const STOCK = [
+  { bin: 'CB34D02', sku: '550070614', batch: '11I26JJ', expiry: '2030-09-11', qty: 36 },
+  { bin: 'CB33E02', sku: '550070614', batch: '11I26JJ', expiry: '2030-09-11', qty: 2 },
+];
+test("own line: names compared like same_person; no name is nobody's line", () => {
+  assert.equal(samePerson('  Ani  Sari ', 'ani sari'), true);
+  assert.equal(samePerson('Ani', 'Budi'), false);
+  assert.equal(samePerson(null, 'Ani'), false);
+  assert.equal(samePerson('', ''), false);
+});
+test('rest at open: the plan until stock has loaded, then what the bin really keeps (0 included)', () => {
+  const l = line();
+  assert.equal(restAtOpen(l, [], false), '23');
+  assert.equal(restAtOpen(l, STOCK, true), '23');
+  assert.equal(restAtOpen(l, [{ ...STOCK[0], qty: 30 }], true), '17');
+  assert.equal(restAtOpen(l, [], true), '0');
+});
+test('editor notes: sheetNotes for the line plus the rest against the system', () => {
+  const l = line();
+  // As planned against a pallet of 36: no warning.
+  assert.deepEqual(draftNotes(l, l, STOCK, BINS, 'Carton', true).filter((n) => n.tone !== 'info'), []);
+  // Second source with 3 where the system has 2: a correction, in yellow.
+  const two = structuredClone(l);
+  two.sources = [{ ...l.sources[0], qty: '10' }, { bin: 'CB33E02', batch: '11I26JJ', expiry: '2030-09-11', qty: '3' }];
+  two.moveQty = '26';
+  const n2 = draftNotes(two, l, STOCK, BINS, 'Carton', true);
+  assert.ok(n2.some((n) => n.tone === 'warn' && n.text.includes('koreksi picklist') && n.text.includes('CB33E02')), JSON.stringify(n2));
+  assert.ok(!n2.some((n) => n.text.startsWith('Qty sisa')), 'rest 26 = 36 - 10 is not above the bin');
+  // Rest above what the bin keeps: a yellow warning, not a block.
+  const over = structuredClone(l); over.moveQty = '30';
+  const n3 = draftNotes(over, l, STOCK, BINS, 'Carton', true);
+  assert.ok(n3.some((n) => n.tone === 'warn' && n.text.startsWith('Qty sisa 30 Carton lebih dari')), JSON.stringify(n3));
+  assert.equal(lineProblem(over, BINS), null);
+  // The system's rest differs from the plan: said once stock has loaded, not before.
+  const short = [{ ...STOCK[0], qty: 30 }];
+  assert.ok(draftNotes(l, l, short, BINS, 'Carton', true).some((n) => n.text.includes('rencana 23')));
+  assert.ok(!draftNotes(l, l, [], BINS, 'Carton', false).some((n) => n.text.startsWith('Sistem: sisa')));
+  // An unknown bin is red.
+  const typo = structuredClone(l); typo.sources[0].bin = 'CB99Z99';
+  assert.ok(draftNotes(typo, l, STOCK, BINS, 'Carton', true).some((n) => n.tone === 'bad'));
+});
+test('source suggestions mark the planned row', () => {
+  const l = line();
+  assert.equal(isPlannedSource(STOCK[0], l), true);
+  assert.equal(isPlannedSource(STOCK[1], l), false);
+  assert.equal(isPlannedSource({ ...STOCK[0], batch: 'X' }, l), false);
+  assert.equal(isPlannedSource({ ...STOCK[0], expiry: '2030-09-11T00:00:00' }, l), true);
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

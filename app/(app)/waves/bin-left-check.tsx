@@ -12,7 +12,11 @@ import { Input } from "@/components/ui/input";
  * answer opens a count on the bin; stock is not changed by it. Asked only
  * when bin_left_after says so; otherwise the dialog closes straight away.
  */
-export function BinLeftCheck({ taskId, person, onDone }: { taskId: string; person: string; onDone: () => void }) {
+export function BinLeftCheck({ taskId, person, unit = "karton", onDone }: {
+  taskId: string; person: string; onDone: () => void;
+  /** the item's unit (the picking screen passes unitOf(sku, uom)); other dialogs keep "karton" */
+  unit?: string;
+}) {
   const [info, setInfo] = useState<{ bin: string; sku: string; batch: string } | null>(null);
   const [seen, setSeen] = useState("");
   const [busy, setBusy] = useState(false);
@@ -67,14 +71,14 @@ export function BinLeftCheck({ taskId, person, onDone }: { taskId: string; perso
       <p className="rounded-md bg-ok/10 p-3 text-sm font-semibold text-ok">Posting tersimpan.</p>
       <div className="space-y-1">
         <p className="text-base">
-          Masih ada berapa karton di <span className="rounded-plate border border-plate-dark/40 bg-plate/40 px-2 py-0.5 font-cond font-semibold">{info.bin}</span>?
+          Masih ada berapa {unit} di <span className="rounded-plate border border-plate-dark/40 bg-plate/40 px-2 py-0.5 font-cond font-semibold">{info.bin}</span>?
         </p>
         <p className="text-sm text-steel-500">SKU {info.sku} batch {info.batch || "–"}. Hitung yang terlihat di bin sekarang, tanpa melihat sistem.</p>
       </div>
       <Button size="lg" variant="outline" className="h-16 w-full text-lg" disabled={busy} onClick={() => void save(0)}>Kosong (0)</Button>
       <div className="flex gap-2">
-        <Input type="number" inputMode="numeric" min={0} value={seen} onChange={(e) => setSeen(e.target.value)} placeholder="jumlah karton"
-          aria-label={`Sisa karton di ${info.bin}`} className="h-14 flex-1 text-center text-xl" />
+        <Input type="number" inputMode="numeric" min={0} value={seen} onChange={(e) => setSeen(e.target.value)} placeholder={`jumlah ${unit}`}
+          aria-label={`Sisa ${unit} di ${info.bin}`} className="h-14 flex-1 text-center text-xl" />
         <Button size="lg" className="h-14" disabled={busy || !valid} onClick={() => void save(n)}>{busy ? "Menyimpan…" : "Simpan"}</Button>
       </div>
       {error && <p role="alert" className="text-sm text-bad">{error}</p>}
