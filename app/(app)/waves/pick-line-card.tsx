@@ -4,11 +4,11 @@ import { Check, Pencil, Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { ItemScanInput } from "@/components/app/item-scan-input";
 import { BinScanInput } from "@/components/app/bin-scan-input";
+import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { BinLeftCheck } from "./bin-left-check";
 import type { SheetLine, SheetStock } from "@/lib/wave-sheet";
-import { draftNotes, isPlannedSource, linePayload, lineProblem, lineSummary, restAtOpen, samePerson } from "@/lib/pick-line";
+import { draftNotes, isPlannedSource, linePayload, lineProblem, lineSummary, restAtOpen, samePerson, scanTarget, takeFrom } from "@/lib/pick-line";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 
 const REASONS = ["bin kosong / kurang", "palet terhalang", "karton rusak", "pickface penuh", "lain"];
@@ -16,6 +16,8 @@ const REASONS = ["bin kosong / kurang", "palet terhalang", "karton rusak", "pick
 /**
  * One line of the picking screen (0067): the plan, Sesuai to post it as
  * planned, Berbeda to post what really happened, Ubah on one's own posted line.
+ * Posting needs the rack scan (0068): the label of the bin the line takes from,
+ * scanned or typed; the scan button and Posting sit at the bottom, in thumb reach.
  * Editor state lives here, keyed by the line, so a page refresh never wipes it.
  */
 export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, waveId, onPosted }: {
@@ -26,8 +28,8 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
   const [edited, setEdited] = useState(false);
   const [draft, setDraft] = useState<SheetLine>(line);
   const [reason, setReason] = useState("");
-  const [scan, setScan] = useState("");
-  const [scanned, setScanned] = useState<string | null>(null);
+  // The rack label read for this line (0068); it stays across Sesuai / Berbeda until posted.
+  const [rack, setRack] = useState<RackConfirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "bad" | "warn"; text: string } | null>(null);
 
@@ -48,12 +50,19 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
     ))}</ul>
   );
 
-  function open(edit: boolean) {
-    const d = structuredClone(line);
+  function open(edit: boolean, from: SheetLine = line) {
+    const d = structuredClone(from);
     // The rest the pallet really keeps, once the stock has loaded; the plan only until then.
     d.moveQty = restAtOpen(d, stock, stockLoaded);
     setDraft(d); setReason(""); setMessage(null); setEdited(edit);
     setMode(edit ? "edit" : "confirm");
+  }
+  // Ambil dari <scanned>: Berbeda with the scanned bin as the first source (batch/expiry when it holds one batch).
+  const takeScanned = (code: string) => open(true, takeFrom(line, code, stock));
+  // A scan on the open card: the right bin goes straight to Posting as planned; a wrong one stays here, in red.
+  function scannedInView(v: RackConfirm | null) {
+    setRack(v);
+    if (v && rackMatches(scanTarget(line), v)) open(false);
   }
   const setSource = (i: number, patch: Partial<SheetLine["sources"][number]>) => setDraft((d) => {
     const x = structuredClone(d);
@@ -70,11 +79,13 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
     setBusy(true); setMessage(null);
     const { data, error } = await createClient().rpc("post_pick_line", {
       p_wave_id: waveId, p_row: linePayload(target), p_by_name: person,
-      p_reason: reason.trim() || (edited ? "berbeda di lapangan" : "sesuai picklist"), p_scanned: scanned,
+      p_reason: reason.trim() || (edited ? "berbeda di lapangan" : "sesuai picklist"),
+      p_scanned: rack?.code ?? null, p_scan_mode: rack?.method ?? "scan",
     });
     setBusy(false);
     if (error) { setMessage({ tone: "bad", text: error.message }); return; }
     const r = data as { result: "posted" | "refused"; message?: string; corrections?: number };
+    setRack(null);
     if (r.result === "refused") {
       setMessage({ tone: "warn", text: `${r.message} — dikirim ke supervisor, lanjut ke baris berikutnya.` });
       setMode("view");
@@ -116,28 +127,37 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
       )}
 
       {!posted && mode === "view" && (
-        <div className="flex gap-2">
-          <Button className="flex-1" disabled={person.trim().length < 2} onClick={() => open(false)}><Check className="h-4 w-4" />Sesuai</Button>
-          <Button className="flex-1" variant="outline" disabled={person.trim().length < 2} onClick={() => open(true)}><Pencil className="h-4 w-4" />Berbeda</Button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Button className="flex-1" variant="outline" disabled={person.trim().length < 2} onClick={() => open(false)}><Check className="h-4 w-4" />Sesuai</Button>
+            <Button className="flex-1" variant="outline" disabled={person.trim().length < 2} onClick={() => open(true)}><Pencil className="h-4 w-4" />Berbeda</Button>
+          </div>
+          {person.trim().length >= 2
+            ? <RackScan id={`rack-${line.key}`} target={scanTarget(line)} value={rack} onChange={scannedInView} onTakeFrom={takeScanned} />
+            : <p className="text-center text-xs text-steel-500">Isi nama picker dulu, lalu scan label bin.</p>}
         </div>
       )}
 
       {mode === "edit" && (
         <div className="space-y-3 rounded-md border border-warn/40 bg-warn/5 p-3">
           {draft.sources.map((s, i) => (
-            <div key={i} className="grid grid-cols-[1fr_5rem_auto] items-end gap-2">
+            <div key={i} className="space-y-1">
               <div>
                 <Label htmlFor={`bin-${line.key}-${i}`}>{i === 0 ? "Bin asal (scan label / ketik)" : "Bin lain"}</Label>
                 <BinScanInput id={`bin-${line.key}-${i}`} list={`stock-${line.key}`} value={s.bin} onChange={(v) => setSource(i, { bin: v })} />
                 <p className="mt-0.5 text-[11px] text-steel-500">batch {s.batch || "–"} · exp {fmtDate(s.expiry)}</p>
               </div>
-              {line.pick && (
-                <div>
-                  <Label htmlFor={`qty-${line.key}-${i}`}>Qty ({unit})</Label>
-                  <Input id={`qty-${line.key}-${i}`} inputMode="numeric" value={s.qty} onChange={(e) => setSource(i, { qty: e.target.value })} />
+              {(line.pick || i > 0) && (
+                <div className="flex items-end gap-2">
+                  {line.pick && (
+                    <div className="w-28">
+                      <Label htmlFor={`qty-${line.key}-${i}`}>Qty ({unit})</Label>
+                      <Input id={`qty-${line.key}-${i}`} inputMode="numeric" className="h-11" value={s.qty} onChange={(e) => setSource(i, { qty: e.target.value })} />
+                    </div>
+                  )}
+                  {i > 0 && <Button variant="ghost" className="ml-auto h-11" aria-label="Hapus bin ini" onClick={() => setDraft((d) => ({ ...d, sources: d.sources.filter((_, j) => j !== i) }))}><X className="h-4 w-4" />hapus</Button>}
                 </div>
               )}
-              {i > 0 ? <Button size="sm" variant="ghost" aria-label="Hapus bin ini" onClick={() => setDraft((d) => ({ ...d, sources: d.sources.filter((_, j) => j !== i) }))}><X className="h-4 w-4" /></Button> : <span />}
             </div>
           ))}
           <datalist id={`stock-${line.key}`}>{sources.map((r) => <option key={`${r.bin}|${r.batch}|${r.expiry}`} value={r.bin}>{`${r.batch} · ${fmtDate(r.expiry)} · ${fmtNum(r.qty)} ${unit}${isPlannedSource(r, line) ? " · rencana" : ""}`}</option>)}</datalist>
@@ -145,11 +165,11 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
             <Button size="sm" variant="ghost" onClick={() => setDraft((d) => ({ ...d, sources: [...d.sources, { bin: "", batch: "", expiry: "", qty: "0" }] }))}><Plus className="h-4 w-4" />bin lain</Button>
           )}
           {line.move && (
-            <div className="grid grid-cols-[1fr_5rem] gap-2">
+            <div className="space-y-1">
               <div><Label htmlFor={`to-${line.key}`}>Sisa dipindah ke (scan label / ketik; kosong = tetap di bin)</Label>
                 <BinScanInput id={`to-${line.key}`} value={draft.moveTo} onChange={(v) => setDraft((d) => ({ ...d, moveTo: v }))} /></div>
-              <div><Label htmlFor={`mq-${line.key}`}>Qty sisa</Label>
-                <Input id={`mq-${line.key}`} inputMode="numeric" value={draft.moveQty} onChange={(e) => setDraft((d) => ({ ...d, moveQty: e.target.value }))} /></div>
+              <div className="w-28"><Label htmlFor={`mq-${line.key}`}>Qty sisa</Label>
+                <Input id={`mq-${line.key}`} inputMode="numeric" className="h-11" value={draft.moveQty} onChange={(e) => setDraft((d) => ({ ...d, moveQty: e.target.value }))} /></div>
             </div>
           )}
           <div className="flex flex-wrap gap-1">{REASONS.map((r) => (
@@ -158,8 +178,8 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
           {noteList}
           {problem && <p role="alert" className="text-sm text-bad">{problem}</p>}
           <div className="flex gap-2">
-            <Button disabled={!!problem || !reason} onClick={() => setMode("confirm")}>Lanjut</Button>
-            <Button variant="outline" onClick={() => setMode("view")}>Batal</Button>
+            <Button variant="outline" className="h-14" onClick={() => setMode("view")}>Batal</Button>
+            <Button className="h-14 flex-1 text-base" disabled={!!problem || !reason} onClick={() => setMode("confirm")}>Lanjut</Button>
           </div>
         </div>
       )}
@@ -169,14 +189,13 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
           <p className="text-sm font-semibold">{sentence}</p>
           {noteList}
           {problem && <p role="alert" className="text-sm text-bad">{problem}{!edited && " — pakai Berbeda."}</p>}
-          {line.pick && !line.posted && (
-            <div><Label htmlFor={`scan-${line.key}`}>Scan barcode barang atau ketik SKU</Label>
-              <ItemScanInput id={`scan-${line.key}`} value={scan} onChange={setScan} onItem={(it) => setScanned(it?.sku ?? null)} placeholder="scan / ketik SKU" />
-              {scanned && scanned !== line.sku && <p className="text-sm text-bad">Barang salah: {scanned}, baris ini {line.sku}</p>}</div>
-          )}
+          <RackScan id={`rack-c-${line.key}`} target={scanTarget(draft)} value={rack} onChange={setRack}
+            onTakeFrom={(code) => { setDraft(takeFrom(draft, code, stock)); setEdited(true); setMode("edit"); }}
+            hideButton={rackMatches(scanTarget(draft), rack)} />
+          {!rackMatches(scanTarget(draft), rack) && <p className="text-center text-xs text-steel-500">Scan label {scanTarget(draft)} dulu untuk Posting.</p>}
           <div className="flex gap-2">
-            <Button disabled={busy || !!problem || (scanned !== null && scanned !== line.sku)} onClick={() => void post(draft)}>{busy ? "Memposting…" : "Posting"}</Button>
-            <Button variant="outline" disabled={busy} onClick={() => setMode("view")}>Batal</Button>
+            <Button variant="outline" className="h-14" disabled={busy} onClick={() => setMode("view")}>Batal</Button>
+            <Button className="h-14 flex-1 text-base" disabled={busy || !!problem || !rackMatches(scanTarget(draft), rack)} onClick={() => void post(draft)}>{busy ? "Memposting…" : "Posting"}</Button>
           </div>
         </div>
       )}

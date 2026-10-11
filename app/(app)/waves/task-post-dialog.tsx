@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { BinLeftCheck } from "./bin-left-check";
-import { ItemScanInput } from "@/components/app/item-scan-input";
+import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
 import { DEFAULT_CONFIG } from "@/lib/allocator/config";
@@ -87,10 +87,8 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [person, setPerson] = usePersonName();
   // After a successful posting: Cek sisa bin (0058) before the dialog closes.
   const [checking, setChecking] = useState(false);
-  const [scan, setScan] = useState("");
-  const [scanned, setScanned] = useState<string | null>(null);
-  // Scan rules: whether this SKU has a barcode and whether the policy requires the scan.
-  const [scanRule, setScanRule] = useState<{ hasEan: boolean; required: boolean } | null>(null);
+  // The rack label of the bin this posting takes from (0068): scanned or typed, always required.
+  const [rack, setRack] = useState<RackConfirm | null>(null);
   // Optional Bin To Bin (0045) offered with the pick: where what the chosen source keeps goes.
   const [moveTo, setMoveTo] = useState("");
   const [moveQty, setMoveQty] = useState("");
@@ -105,12 +103,6 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
     const { data } = await createClient().from("inventory_detail").select("quantity")
       .eq("bin_code", t.from_bin).eq("sku", t.sku).eq("batch_lot", t.batch_lot);
     setLeft((data ?? []).reduce((a, r) => a + Number(r.quantity), 0));
-  }
-  async function loadScanRule() {
-    const db = createClient();
-    const [{ data: item }, { data: pol }] = await Promise.all([db.from("items").select("ean").eq("sku", t.sku).maybeSingle(), db.rpc("inventory_policy")]);
-    const hasEan = !!item?.ean;
-    setScanRule({ hasEan, required: hasEan && t.task_type === "PICK" && !!(pol as { require_scan_on_pick?: boolean } | null)?.require_scan_on_pick });
   }
 
   const planned = `${t.from_bin}|${t.batch_lot}|${t.expiry_date}`;
@@ -167,12 +159,13 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
     }
     if (different && source === "other") {
       const { error } = await createClient().rpc("post_task_found_elsewhere", {
-        p_task_id: t.id, p_bin: otherBin.trim().toUpperCase(), p_qty: Number(qty), p_reason: reason.trim(), p_by_name: person, p_scanned: scanned,
+        p_task_id: t.id, p_bin: otherBin.trim().toUpperCase(), p_qty: Number(qty), p_reason: reason.trim(), p_by_name: person,
+        p_scanned: rack?.code ?? null, p_scan_mode: rack?.method ?? "scan",
       });
       if (error) { setBusy(false); return setError(error.message); }
       return afterPost();
     }
-    const args: Record<string, unknown> = { p_task_id: t.id, p_by_name: person, p_scanned: scanned };
+    const args: Record<string, unknown> = { p_task_id: t.id, p_by_name: person, p_scanned: rack?.code ?? null, p_scan_mode: rack?.method ?? "scan" };
     if (different) {
       const src = sources?.[Number(source)];
       args.p_actual_qty = Number(qty);
@@ -194,11 +187,13 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const n = Number(qty);
   // A pick takes at most the planned cartons; a relocation at most what the chosen bin holds.
   const maxQty = relocate ? Number(sources?.[Number(source)]?.quantity ?? left ?? t.quantity) : Number(t.quantity);
-  const wrongItem = scanned !== null && scanned !== t.sku;
   // Optional Bin To Bin: only a PICK, only when the chosen source keeps something after this pick.
   const srcBin = source === "other" ? otherBin.trim().toUpperCase() : (chosen?.bin_code ?? "");
   const haveLeft = source === "other" ? otherHave : (chosen ? Number(chosen.quantity) : null);
   const leftover = haveLeft === null || !Number.isFinite(n) ? 0 : Math.max(haveLeft - n, 0);
+  // The bin to confirm: where this posting takes from (the chosen source, the typed other bin, else the plan).
+  const rackBin = !different ? t.from_bin : srcBin;
+  const rackOk = rackMatches(rackBin, rack);
   const showMove = !relocate && different && n > 0 && leftover > 0;
   const moveDest = moveTo.trim().toUpperCase();
   const moveN = Number(moveQty);
@@ -209,7 +204,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
     : !/^[A-Z0-9_]{3,20}$/.test(moveDest) ? "Format bin tujuan tidak valid (huruf, angka, atau _)." : null;
   const invalid = (different && (!Number.isFinite(n) || n < 0 || n > maxQty || !reason.trim()))
     || (different && source === "other" && (otherHave === null || n <= 0))
-    || person.trim().length < 2 || wrongItem || (!!scanRule?.required && scanned !== t.sku)
+    || person.trim().length < 2 || !rackOk
     || moveDestErr !== null
     || (showMove && moveQty.trim() !== "" && !Number.isFinite(moveN))
     || (wantsMove && moveN > leftover);
@@ -230,7 +225,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   }, [showMove, srcBin, t.sku]);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setChecking(false); setDifferent(false); setQty(String(t.quantity)); setReason(""); setScan(""); setScanned(null); setOtherBin(""); setOtherHave(null); setSource("0"); setMoveTo(""); setMoveQty(""); setMoveSuggest([]); setMoveLoaded(false); moveTouched.current = false; loadScanRule(); loadLeft(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setChecking(false); setDifferent(false); setQty(String(t.quantity)); setReason(""); setRack(null); setOtherBin(""); setOtherHave(null); setSource("0"); setMoveTo(""); setMoveQty(""); setMoveSuggest([]); setMoveLoaded(false); moveTouched.current = false; loadLeft(); } }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting tugas" description={`NO ${t.wave_no} · #${t.seq}`}>
         {checking ? <BinLeftCheck taskId={t.id} person={person} onDone={() => { setOpen(false); onDone(); }} /> : (
@@ -340,13 +335,12 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
               <p className="text-xs text-steel-500">Stok dipotong dari bin yang dipilih. Jika wave lain jadi tidak cocok, supervisor bisa menghitung ulang wave yang belum dikerjakan.</p>
             </div>
           )}
-          <div>
-            <Label htmlFor={`scan-${t.id}`}>Scan barcode karton {scanRule?.required ? "(wajib)" : scanRule?.hasEan ? "(disarankan)" : "(SKU belum punya barcode)"}</Label>
-            <ItemScanInput id={`scan-${t.id}`} value={scan} onChange={setScan} onItem={(it) => setScanned(it?.sku ?? null)} placeholder="scan karton / ketik SKU" />
-            {scanned === t.sku && <p className="mt-1 text-xs font-semibold text-ok">Barang sesuai: {t.sku}</p>}
-            {wrongItem && <p className="mt-1 rounded-md bg-bad/10 p-2 text-sm font-semibold text-bad">Barang salah: yang di-scan {scanned}, tugas ini {t.sku}. Jangan diambil.</p>}
-          </div>
           <PersonNameField id={`picker-${t.id}`} value={person} onChange={setPerson} label="Nama picker" />
+          <div>
+            <Label htmlFor={`rack-${t.id}`}>Scan label bin {rackBin || "asal"} (wajib)</Label>
+            {rackBin ? <RackScan id={`rack-${t.id}`} target={rackBin} value={rack} onChange={setRack} hideButton={rackOk} />
+              : <p className="text-xs text-steel-500">Pilih atau ketik bin asal dulu.</p>}
+          </div>
           {error && <p role="alert" className="text-sm text-bad">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>Batal</Button>

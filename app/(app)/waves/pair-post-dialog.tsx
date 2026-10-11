@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { BinLeftCheck } from "./bin-left-check";
-import { ItemScanInput } from "@/components/app/item-scan-input";
+import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 import { fmtNum } from "@/lib/utils";
@@ -26,8 +26,8 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
   const [person, setPerson] = usePersonName();
   // After a successful posting: Cek sisa bin (0058) — is the pallet bin really empty now?
   const [checking, setChecking] = useState(false);
-  const [scan, setScan] = useState("");
-  const [scanned, setScanned] = useState<string | null>(null);
+  // The pallet bin's rack label (0068): scanned or typed, always required.
+  const [rack, setRack] = useState<RackConfirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,8 +44,8 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
   const rest = left === null ? plannedMove : Math.max(left - pk, 0);
   const mv = different ? Number(moveQty) : rest;
   const deviates = pk !== plannedPick || mv !== plannedMove;
-  const wrongItem = scanned !== null && scanned !== p.sku;
-  const invalid = person.trim().length < 2 || wrongItem || left === null
+  const rackOk = rackMatches(p.from_bin, rack);
+  const invalid = person.trim().length < 2 || !rackOk || left === null
     || !Number.isFinite(pk) || pk < 0 || pk > plannedPick || pk > left
     || !Number.isFinite(mv) || mv < 0 || mv > left - pk
     || (deviates && different && !reason.trim());
@@ -57,7 +57,7 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
       p_pick_qty: pk === plannedPick ? null : pk, p_move_qty: mv === plannedMove ? null : mv,
       // Posting as planned with a different real rest: say why the move changed.
       p_reason: deviates ? (reason.trim() || `sisa palet sebenarnya ${fmtNum(left ?? 0)}`) : null,
-      p_by_name: person, p_scanned: scanned,
+      p_by_name: person, p_scanned: rack?.code ?? null, p_scan_mode: rack?.method ?? "scan",
     });
     setBusy(false);
     if (error) return setError(error.message);
@@ -67,7 +67,7 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
   return (
     <Dialog open={open} onOpenChange={(o) => {
       setOpen(o); setError(null);
-      if (o) { setChecking(false); setDifferent(false); setPickQty(String(p.quantity)); setReason(""); setScan(""); setScanned(null); setLeft(null); loadLeft(); }
+      if (o) { setChecking(false); setDifferent(false); setPickQty(String(p.quantity)); setReason(""); setRack(null); setLeft(null); loadLeft(); }
     }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting pick + pindah sisa palet" description={`NO ${p.wave_no} · #${p.seq}`}>
@@ -108,13 +108,11 @@ export function PairPostDialog({ pick: p, move: m, onDone }: { pick: TaskRow; mo
               </div>
             </div>
           )}
-          <div>
-            <Label htmlFor={`pp-scan-${p.id}`}>Scan barcode karton (disarankan)</Label>
-            <ItemScanInput id={`pp-scan-${p.id}`} value={scan} onChange={setScan} onItem={(it) => setScanned(it?.sku ?? null)} placeholder="scan karton / ketik SKU" />
-            {scanned === p.sku && <p className="mt-1 text-xs font-semibold text-ok">Barang sesuai: {p.sku}</p>}
-            {wrongItem && <p className="mt-1 rounded-md bg-bad/10 p-2 text-sm font-semibold text-bad">Barang salah: yang di-scan {scanned}, tugas ini {p.sku}.</p>}
-          </div>
           <PersonNameField id={`pp-person-${p.id}`} value={person} onChange={setPerson} label="Nama picker" />
+          <div>
+            <Label htmlFor={`pp-rack-${p.id}`}>Scan label bin {p.from_bin} (wajib)</Label>
+            <RackScan id={`pp-rack-${p.id}`} target={p.from_bin} value={rack} onChange={setRack} hideButton={rackOk} />
+          </div>
           {error && <p role="alert" className="text-sm text-bad">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>Batal</Button>

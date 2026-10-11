@@ -1,7 +1,8 @@
 /** Paperless picking: one line's validation, sentence and payload, and the wave's progress (database side: supabase/tests/39_pick_line.sql). */
 import { strict as assert } from 'node:assert';
 import { buildSheet } from '../lib/wave-sheet';
-import { draftNotes, lineProblem, linePayload, lineSummary, isPlannedSource, restAtOpen, samePerson, unitOf, waveProgress, type OrderLine } from '../lib/pick-line';
+import { draftNotes, lineProblem, linePayload, lineSummary, isPlannedSource, restAtOpen, samePerson, unitOf, waveProgress, type OrderLine,
+  normBin, scanCheck, scanMatches, scanTarget, takeFrom } from '../lib/pick-line';
 import type { TaskRow } from '../lib/allocator/picklist-from-tasks';
 
 let passed = 0, failed = 0;
@@ -173,6 +174,49 @@ test('source suggestions mark the planned row', () => {
   assert.equal(isPlannedSource(STOCK[1], l), false);
   assert.equal(isPlannedSource({ ...STOCK[0], batch: 'X' }, l), false);
   assert.equal(isPlannedSource({ ...STOCK[0], expiry: '2030-09-11T00:00:00' }, l), true);
+});
+
+// Rack scan (0068): the bin label confirms the line, the same first source post_pick_line checks.
+test('scan target: the first source as the engine reads it; a move-only line its pallet', () => {
+  assert.equal(scanTarget(line()), 'CB34D02');
+  const berbeda = line(); berbeda.sources[0].bin = ' cb33e02 ';
+  assert.equal(scanTarget(berbeda), 'CB33E02');
+  const zeroFirst = line();
+  zeroFirst.sources = [{ ...zeroFirst.sources[0], qty: '0' }, { bin: 'CB33E02', batch: '11I26JJ', expiry: '2030-09-11', qty: '13' }];
+  assert.equal(scanTarget(zeroFirst), 'CB33E02', 'a first source with 0 is skipped when there are several');
+  const allZero = line(); allZero.sources = [{ ...allZero.sources[0], qty: '0' }];
+  assert.equal(scanTarget(allZero), 'CB34D02', 'a single source with 0 is still the source');
+  assert.equal(scanTarget(buildSheet([move]).lines[0]), 'CB34D02', 'move-only: its source, never the destination');
+});
+test('scan match: case and spaces ignored; the neighbouring level, an item code or nothing do not match', () => {
+  const l = line();
+  assert.equal(normBin(' cb34 d02\n'), 'CB34D02');
+  assert.equal(scanMatches(l, ' cb34d02 '), true);
+  assert.equal(scanMatches(l, 'CB34C02'), false);
+  assert.equal(scanMatches(l, 'CB34E02'), false);
+  assert.equal(scanMatches(l, '550070614'), false);
+  assert.equal(scanMatches(l, ''), false);
+  assert.equal(scanMatches(l, null), false);
+});
+test('scan messages: green with the bin, red naming both bins', () => {
+  const l = line();
+  assert.deepEqual(scanCheck(l, 'cb34d02'), { ok: true, bin: 'CB34D02', text: '✓ CB34D02' });
+  assert.deepEqual(scanCheck(l, 'cb34c02'), { ok: false, bin: 'CB34D02', scanned: 'CB34C02', text: 'Bin salah: kamu scan CB34C02, baris ini CB34D02' });
+  assert.equal(scanCheck(l, '  '), null);
+});
+test('Ambil dari the scanned bin: it becomes the first source, batch and expiry filled when the bin holds one batch', () => {
+  const l = line();
+  const stock = [...STOCK, { bin: 'CB34C02', sku: '550070614', batch: 'X9', expiry: '2030-10-01', qty: 20 },
+    { bin: 'CB34E02', sku: '550070614', batch: 'A1', expiry: '2030-08-01', qty: 5 }, { bin: 'CB34E02', sku: '550070614', batch: 'A2', expiry: '2030-08-02', qty: 5 },
+    { bin: 'CB34C02', sku: '999', batch: 'Z', expiry: null, qty: 1 }];
+  const d = takeFrom(l, ' cb34c02 ', stock);
+  assert.deepEqual(d.sources, [{ bin: 'CB34C02', batch: 'X9', expiry: '2030-10-01', qty: '13' }]);
+  assert.equal(scanMatches(d, 'CB34C02'), true);
+  assert.deepEqual(l.sources[0].bin, 'CB34D02', 'the line itself is not changed');
+  const two = takeFrom(l, 'CB34E02', stock);
+  assert.deepEqual(two.sources[0], { bin: 'CB34E02', batch: '11I26JJ', expiry: '2030-09-11', qty: '13' }, 'two batches: the plan stays, the picker picks');
+  const mo = takeFrom(buildSheet([move]).lines[0], 'CB34C02', stock);
+  assert.equal(mo.sources[0].bin, 'CB34C02');
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

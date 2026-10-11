@@ -101,6 +101,50 @@ export function draftNotes(draft: SheetLine, line: SheetLine, stock: SheetStock[
   return notes;
 }
 
+/** A bin label as post_pick_line compares it (0068): upper case, no whitespace anywhere. */
+export function normBin(code: string | null | undefined): string {
+  return (code ?? "").replace(/\s/g, "").toUpperCase();
+}
+
+/**
+ * The bin the rack scan must confirm (0068): the row's first source exactly as post_pick_line reads it
+ * (pick_line_first_source): with several sources a 0-carton one is skipped; for a move-only line, its pallet.
+ */
+export function scanTarget(l: SheetLine): string {
+  const src = sheetRow(l).sources;
+  const first = src.length > 1 ? (src.find((s) => s.qty > 0) ?? src[0]) : src[0];
+  return normBin(first?.bin);
+}
+
+export function scanMatches(l: SheetLine, code: string | null | undefined): boolean {
+  const c = normBin(code);
+  return c !== "" && c === scanTarget(l);
+}
+
+export type ScanCheck = { ok: true; bin: string; text: string } | { ok: false; bin: string; scanned: string; text: string };
+
+/** The card's line under the scan: green with the bin, or red naming both bins. Nothing scanned: null. */
+export function scanCheck(l: SheetLine, code: string | null | undefined): ScanCheck | null {
+  const c = normBin(code);
+  if (!c) return null;
+  const bin = scanTarget(l);
+  return c === bin ? { ok: true, bin, text: `✓ ${bin}` } : { ok: false, bin, scanned: c, text: `Bin salah: kamu scan ${c}, baris ini ${bin}` };
+}
+
+/**
+ * Ambil dari <scanned>: the line with the scanned bin as its first source (the Berbeda editor's start).
+ * Batch and expiry are filled when that bin holds one batch of the SKU, as the editor does on a typed bin.
+ */
+export function takeFrom(l: SheetLine, code: string, stock: SheetStock[]): SheetLine {
+  const d = structuredClone(l);
+  const bin = normBin(code);
+  const here = stock.filter((r) => r.bin === bin && r.sku === l.sku && r.qty > 0);
+  const s = { ...d.sources[0], bin };
+  if (here.length === 1) { s.batch = here[0].batch; s.expiry = day(here[0].expiry); }
+  d.sources[0] = s;
+  return d;
+}
+
 /** The p_row for post_pick_line. */
 export function linePayload(l: SheetLine): SheetRow {
   return sheetRow(l);

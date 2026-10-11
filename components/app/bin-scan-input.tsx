@@ -17,10 +17,11 @@ export function BinScanInput({ id, value, onChange, list, placeholder = "scan la
   const [camera, setCamera] = useState(false);
   return (
     <div>
-      <div className="flex gap-1">
-        <Input id={id} value={value} list={list} placeholder={placeholder} className="font-cond uppercase"
+      {/* The camera button is thumb-sized and on the right edge, where the right thumb already is. */}
+      <div className="flex gap-2">
+        <Input id={id} value={value} list={list} placeholder={placeholder} className="h-11 font-cond text-base uppercase"
           onChange={(e) => onChange(e.target.value.toUpperCase())} />
-        <Button type="button" size="icon" variant="outline" aria-label="Scan label bin dengan kamera" onClick={() => setCamera((c) => !c)}><Camera className="h-4 w-4" /></Button>
+        <Button type="button" variant="outline" className="h-11 w-11 shrink-0 p-0" aria-label="Scan label bin dengan kamera" onClick={() => setCamera((c) => !c)}><Camera className="h-5 w-5" /></Button>
       </div>
       {camera && <div className="mt-2"><CameraScanner onResult={(t) => { setCamera(false); onChange(t.trim().toUpperCase()); }} /></div>}
     </div>
