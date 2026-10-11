@@ -18,6 +18,11 @@
 --    (app.sheet_engine, set only inside post_wave_sheet_rows), so an
 --    operator's two-bin line or own re-post works.
 --  · pick_task_detail shows picked_by_name (the typed name of the posting).
+--  · split_task puts the new piece after the pick's own Bin To Bin, so a
+--    line's pick and its move stay neighbours (a piece between them re-paired
+--    the move with the wrong source and re-posted it from there).
+--  · A line posted from the phone is not bulk: post_pick_line sets
+--    app.pick_line and the scan; the engine then leaves app.pick_bulk off.
 -- =====================================================================
 
 create or replace function public.post_wave_sheet_rows(p_wave_id uuid, p_rows jsonb, p_by_name text, p_reason text)
@@ -33,6 +38,11 @@ declare
   v_out jsonb := '[]'::jsonb; n_rows int := 0; v_skip uuid[]; v_rb text; v_re date;
   v_order int[] := '{}'; v_idx int; v_n int; v_item uuid; r_i jsonb; r_j jsonb; j int;
   v_pieces jsonb; pc jsonb; k int; v_h numeric; v_left numeric; v_take numeric; v_first_q numeric; ob record;
+  -- 0067: a line posted at the bin (post_pick_line) is not bulk; its scan goes on its picks only.
+  v_line boolean := coalesce(current_setting('app.pick_line', true), '') = 'on';
+  v_bulk text := case when coalesce(current_setting('app.pick_line', true), '') = 'on' then '' else 'on' end;
+  v_scan text := case when coalesce(current_setting('app.pick_line', true), '') = 'on'
+                      then coalesce(current_setting('app.pick_scanned', true), '') else null end;
 begin
   -- 0067: split_task / unpost_task accept the engine's own calls (post_wave_sheet, post_pick_line).
   perform set_config('app.sheet_engine', 'on', true);
@@ -218,7 +228,8 @@ begin
           v_out := v_out || public.sheet_ensure_stock(b_id, t.item_id, pc->>'batch', (pc->>'expiry')::date,
             (pc->>'qty')::numeric + case when i = 1 and k = 0 and v_to is not null and v_mq > 0
               and (m.id is null or m.status <> 'COMPLETED') then v_mq else 0 end, v_note, v_skip, true);
-          perform set_config('app.pick_bulk', 'on', true);
+          perform set_config('app.pick_bulk', v_bulk, true);
+          if v_line then perform set_config('app.pick_scanned', v_scan, true); end if;
           perform public.post_task((pc->>'id')::uuid, (pc->>'qty')::numeric, src->>'bin', pc->>'batch', (pc->>'expiry')::date, v_rr);
           perform set_config('app.pick_bulk', '', true);
         end loop;
@@ -245,9 +256,12 @@ begin
           batch_lot = v_first_batch, expiry_date = v_first_exp where id = m.id;
       end if;
       v_out := v_out || public.sheet_ensure_stock(v_first_bin, m.item_id, v_first_batch, v_first_exp, v_mq, v_note || ' Bin To Bin', v_skip, t.id is null);
-      perform set_config('app.pick_bulk', 'on', true);
+      perform set_config('app.pick_bulk', v_bulk, true);
+      -- The scan was of the carton picked, not of the pallet rest moved.
+      if v_line then perform set_config('app.pick_scanned', '', true); end if;
       perform public.post_task(m.id, null, null, null, null, null);
       perform set_config('app.pick_bulk', '', true);
+      if v_line then perform set_config('app.pick_scanned', v_scan, true); end if;
     end if;
   end loop;
 
@@ -350,7 +364,7 @@ end $$;
 
 create or replace function public.split_task(p_task_id uuid, p_keep numeric, p_by_name text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare t public.pick_tasks%rowtype; w public.waves%rowtype; v_id uuid; v_name text;
+declare t public.pick_tasks%rowtype; w public.waves%rowtype; v_id uuid; v_name text; v_at int;
 begin
   if not public.has_role(array['supervisor','admin']::public.user_role[])
      and coalesce(current_setting('app.sheet_engine', true), '') <> 'on' then
@@ -366,16 +380,25 @@ begin
     raise exception 'Jumlah yang tetap di tugas ini harus 1 sampai %', t.quantity - 1;
   end if;
 
-  update public.pick_tasks set seq = seq + 1 where wave_id = t.wave_id and seq > t.seq;
+  -- 0067: the pick's own Bin To Bin (the move right after it, from the same pallet) stays its
+  -- neighbour: the new piece goes after that move. A piece between them made the wave page pair
+  -- the move with the piece, whose real source is another bin (final review C1).
+  v_at := t.seq + 1;
+  if exists (select 1 from public.pick_tasks x where x.wave_id = t.wave_id and x.seq = t.seq + 1 and x.task_type <> 'PICK'
+               and x.item_id = t.item_id and x.from_bin_id = t.from_bin_id and x.batch_lot = t.batch_lot
+               and x.expiry_date is not distinct from t.expiry_date) then
+    v_at := t.seq + 2;
+  end if;
+  update public.pick_tasks set seq = seq + 1 where wave_id = t.wave_id and seq >= v_at;
   update public.pick_tasks set quantity = p_keep, breaks_pallet = false where id = t.id;
   insert into public.pick_tasks (wave_id, shipment_number, task_type, item_id, from_bin_id, to_bin_id,
                                  batch_lot, expiry_date, quantity, pick_type, breaks_pallet, seq)
   values (t.wave_id, t.shipment_number, 'PICK', t.item_id, t.from_bin_id, null,
-          t.batch_lot, t.expiry_date, t.quantity - p_keep, 'CASE', false, t.seq + 1)
+          t.batch_lot, t.expiry_date, t.quantity - p_keep, 'CASE', false, v_at)
   returning id into v_id;
   perform public.log_execution_event('TASK', t.id, 'PLANNED', 'PLANNED',
     format('dipecah oleh %s: %s + %s', v_name, p_keep, t.quantity - p_keep));
-  return jsonb_build_object('kept', p_keep, 'new_task', v_id, 'new_qty', t.quantity - p_keep, 'new_seq', t.seq + 1);
+  return jsonb_build_object('kept', p_keep, 'new_task', v_id, 'new_qty', t.quantity - p_keep, 'new_seq', v_at);
 end $$;
 
 -- The typed name of the posting, for the picking screen (own line) and Perlu ditangani.
@@ -478,15 +501,16 @@ begin
     raise exception 'Masuk dulu untuk posting';
   end if;
   v_name := public.person_name(p_by_name, 'Nama picker');
-  -- Lock first: two pickers posting the same line are decided one after the other (the engine re-locks the row).
+  -- Lock first: two pickers posting the same line are decided one after the other. The tasks are locked too:
+  -- post_task / post_task_by lock only the task, never the wave.
   select * into w from public.waves where id = p_wave_id for update;
   if w.id is null then raise exception 'Wave tidak ditemukan'; end if;
   if nullif(p_row->>'pick_id', '') is not null then
-    select * into t from public.pick_tasks where id = (p_row->>'pick_id')::uuid;
+    select * into t from public.pick_tasks where id = (p_row->>'pick_id')::uuid for update;
     if t.id is null or t.wave_id <> w.id or t.task_type <> 'PICK' then raise exception 'Baris ini bukan pick wave NO %', w.wave_no; end if;
   end if;
   if nullif(p_row->>'move_id', '') is not null then
-    select * into m from public.pick_tasks where id = (p_row->>'move_id')::uuid;
+    select * into m from public.pick_tasks where id = (p_row->>'move_id')::uuid for update;
     if m.id is null or m.wave_id <> w.id or m.task_type = 'PICK' then raise exception 'Bin To Bin ini bukan milik wave NO %', w.wave_no; end if;
   end if;
   if t.id is null and m.id is null then raise exception 'Baris tanpa tugas'; end if;
@@ -497,6 +521,14 @@ begin
   end if;
   if t.id is not null and m.id is not null and not coalesce(m.item_id = t.item_id
       and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id, false) then
+    raise exception 'Bin To Bin ini bukan milik baris ini';
+  end if;
+  -- A posted pick or move: the move must have left from where the pick really was taken (bin, batch, expiry),
+  -- else it is another line's move (e.g. a split piece's neighbour) and re-posting it would move it. Two-valued.
+  if t.id is not null and m.id is not null and (t.status = 'COMPLETED' or m.status = 'COMPLETED')
+     and not coalesce(coalesce(m.actual_from_bin_id, m.from_bin_id) = coalesce(t.actual_from_bin_id, t.from_bin_id)
+       and coalesce(m.actual_batch_lot, m.batch_lot) = coalesce(t.actual_batch_lot, t.batch_lot)
+       and coalesce(m.actual_expiry_date, m.expiry_date) is not distinct from coalesce(t.actual_expiry_date, t.expiry_date), false) then
     raise exception 'Bin To Bin ini bukan milik baris ini';
   end if;
 
@@ -553,6 +585,9 @@ begin
   end if;
 
   if v_kind is null then
+    -- Posted at the bin, one line: not bulk, with the scan (normalised as post_task_by does). Reset below.
+    perform set_config('app.pick_line', 'on', true);
+    perform set_config('app.pick_scanned', regexp_replace(coalesce(p_scanned, ''), '\s', '', 'g'), true);
     begin
       v_res := public.post_wave_sheet_rows(p_wave_id, jsonb_build_array(p_row), v_name,
                                            coalesce(nullif(trim(p_reason), ''), 'picking'));
@@ -569,6 +604,8 @@ begin
     exception when sqlstate 'PL001' then
       v_res := null;  -- the savepoint rolled the whole line back; v_kind / v_msg stay set
     end;
+    perform set_config('app.pick_line', '', true);
+    perform set_config('app.pick_scanned', '', true);
   end if;
 
   if v_kind is not null then

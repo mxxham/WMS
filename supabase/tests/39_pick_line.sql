@@ -66,6 +66,8 @@ create temp table r1 as select post_pick_line(pg_temp.wave(), pg_temp.row((selec
 select pg_temp.check('as planned: posted by an operator, CB18A02 16 -> 0, picked_by_name Ani',
   (select r->>'result' = 'posted' from r1) and pg_temp.qty('CB18A02', '550070614') = 0
   and (select picked_by_name from pick_tasks where id = (select p1 from ids)) = 'Ani');
+select pg_temp.check('a line posted without a scan is not bulk: bulk_posted false, scanned_code empty',
+  (select not bulk_posted and coalesce(scanned_code, '') = '' from pick_tasks where id = (select p1 from ids)));
 
 create temp table r2 as select post_pick_line(pg_temp.wave(), pg_temp.row((select p2 from ids), (select m3 from ids),
   '[{"bin":"CB34D02","batch":"P11","expiry":"2030-09-11","qty":13}]', 'CB18A01', 23), 'Ani', 'pickface penuh') as r;
@@ -159,6 +161,8 @@ select post_wave_sheet(pg_temp.wave(), jsonb_build_array(pg_temp.row((select p6 
   '[{"bin":"CE01A01","batch":"R1","expiry":"2030-09-01","qty":40}]', null, null)), 'Supervisor', 'dicek') \g /dev/null
 select pg_temp.check('posted by the supervisor: the line''s requests leave the open list',
   not exists (select 1 from pick_line_requests_open where pick_id = (select p6 from ids)));
+select pg_temp.check('Isi dari picklist still records its lines as bulk (no scan)',
+  (select bulk_posted from pick_tasks where id = (select p6 from ids)));
 
 do $$ begin
   perform close_pick_line_request((select id from pick_line_requests where kind = 'other_picker' limit 1), 'Supervisor', ' ');
@@ -311,4 +315,70 @@ select pg_temp.check('those mistakes write no request and leave the Bin To Bin P
   pg_temp.requests() = (select n from req_mo)
   and (select status from pick_tasks where id = (select mo from ids4)) = 'PLANNED'
   and pg_temp.qty('CC04A01', '550071397') = 5 and pg_temp.qty('CC04A02', '550071397') = 0);
+-- Final review C1: a line with two sources and a Bin To Bin. The split piece goes after the move, so the
+-- line's pick and its move stay neighbours; a move is never re-posted from another line's source.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+reset role;
+drop table if exists _seen, _replace, _wave_ids;
+delete from inventory v using bins b where b.id = v.bin_id and b.bin_code in ('CC06A01','CC06A02','CC07A01');
+set role authenticated;
+select import_snapshot('[
+ {"bin_code":"CC06A01","zone":"CC","rack":"06","level":"A","position":"01","sku":"550070614","batch_lot":"P11","quantity":36,"expiry_date":"2030-09-11"},
+ {"bin_code":"CC07A01","zone":"CC","rack":"07","level":"A","position":"01","sku":"550070614","batch_lot":"P12","quantity":36,"expiry_date":"2030-09-12"}]'::jsonb, false, 'uji') \g /dev/null
+select save_plan('2026-11-09', '{
+  "waves":[{"wave_no":"1","shipment_numbers":["SH9"],"planned_slot":"08:00"}],
+  "tasks":[
+   {"wave_no":"1","shipment_number":"SH9","task_type":"PICK","sku":"550070614","from_bin":"CC06A01","batch_lot":"P11","expiry_date":"2030-09-11","quantity":13,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"1","task_type":"REPLENISH","sku":"550070614","from_bin":"CC06A01","to_bin":"CC06A02","batch_lot":"P11","expiry_date":"2030-09-11","quantity":23,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb) \g /dev/null
+create temp table ids9 as select (select id from waves where planned_date = '2026-11-09') w,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-09' and t.seq = 1) p,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-09' and t.seq = 2) m;
+create or replace function pg_temp.batches(p_bin text) returns text language sql as $$
+  select string_agg(v.batch_lot || ':' || v.quantity, ',' order by v.batch_lot) from inventory v join bins b on b.id = v.bin_id
+  join items i on i.id = v.item_id where b.bin_code = p_bin and i.sku = '550070614' $$;
+grant execute on function pg_temp.batches(text) to authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+
+create temp table r9 as select post_pick_line((select w from ids9), pg_temp.row((select p from ids9), (select m from ids9),
+  '[{"bin":"CC06A01","batch":"P11","expiry":"2030-09-11","qty":10},{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":3}]', 'CC06A02', 26),
+  'Ani', 'palet terhalang', ' 550070614 ') as r;
+select pg_temp.check('two sources + rest to the pickface: CC06A01 0, CC07A01 33, CC06A02 26 of P11',
+  (select r->>'result' = 'posted' from r9) and pg_temp.qty('CC06A01', '550070614') = 0
+  and pg_temp.qty('CC07A01', '550070614') = 33 and pg_temp.batches('CC06A02') = 'P11:26');
+select pg_temp.check('the split piece goes after the line''s Bin To Bin: pick #1, move #2, second source #3',
+  (select string_agg(t.task_type || '@' || t.seq || ':' || coalesce(ab.bin_code, fb.bin_code), ',' order by t.seq)
+   from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id
+   where t.wave_id = (select w from ids9)) = 'PICK@1:CC06A01,REPLENISH@2:CC06A01,PICK@3:CC07A01'
+  and (select seq from pick_tasks where id = (select m from ids9)) = 2);
+select pg_temp.check('a scanned line is not bulk: both picks carry the scan (whitespace removed), the move no scan',
+  (select bool_and(not bulk_posted and scanned_code = '550070614') from pick_tasks
+   where wave_id = (select w from ids9) and task_type = 'PICK')
+  and (select not bulk_posted and coalesce(scanned_code, '') = '' from pick_tasks where id = (select m from ids9)));
+
+do $$ begin
+  perform post_pick_line((select w from ids9), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids9) and t.seq = 3),
+    (select m from ids9), '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', 'CC06A02', 26), 'Ani', 'salah ketik');
+  raise notice 'FAIL the second source''s piece with the line''s posted move is refused';
+exception when others then
+  if sqlerrm = 'Bin To Bin ini bukan milik baris ini' then raise notice 'PASS the second source''s piece with the line''s posted move is refused';
+  else raise notice 'FAIL the second source''s piece with the line''s posted move is refused: %', sqlerrm; end if;
+end $$;
+select pg_temp.check('that refusal changes no stock',
+  pg_temp.qty('CC06A01', '550070614') = 0 and pg_temp.qty('CC07A01', '550070614') = 33 and pg_temp.batches('CC06A02') = 'P11:26');
+
+create temp table r9b as select post_pick_line((select w from ids9), pg_temp.row((select t.id from pick_tasks t where t.wave_id = (select w from ids9) and t.seq = 3),
+  null, '[{"bin":"CC07A01","batch":"P12","expiry":"2030-09-12","qty":2}]', null, null), 'Ani', 'salah ketik') as r;
+select pg_temp.check('Ubah on the second source alone (3 -> 2): CC07A01 34, CC06A01 0, CC06A02 still 26 of P11',
+  (select r->>'result' = 'posted' from r9b) and pg_temp.qty('CC06A01', '550070614') = 0
+  and pg_temp.qty('CC07A01', '550070614') = 34 and pg_temp.batches('CC06A02') = 'P11:26');
+
+create temp table r9c as select post_pick_line((select w from ids9), pg_temp.row((select p from ids9), (select m from ids9),
+  '[{"bin":"CC06A01","batch":"P11","expiry":"2030-09-11","qty":9}]', 'CC06A02', 26), 'Ani', 'salah ketik') as r;
+select pg_temp.check('Ubah on the pick + move (10 -> 9): CC06A01 1, CC07A01 34, CC06A02 26 of P11, nothing invented',
+  (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from r9c) and pg_temp.qty('CC06A01', '550070614') = 1
+  and pg_temp.qty('CC07A01', '550070614') = 34 and pg_temp.batches('CC06A02') = 'P11:26'
+  and (select string_agg(coalesce(ab.bin_code, fb.bin_code) || ':' || coalesce(t.actual_batch_lot, t.batch_lot), ',' order by t.seq)
+       from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id
+       where t.wave_id = (select w from ids9)) = 'CC06A01:P11,CC06A01:P11,CC07A01:P12'
+  and not exists (select 1 from movements x join bins b on b.id = x.to_bin_id where b.bin_code in ('CC06A01','CC06A02','CC07A01') and x.reason_code = 'FOUND'));
 rollback;
