@@ -36,6 +36,9 @@ const Placeholder = ({ label }: { label: string }) => (
 );
 const AddOrder = dynamic(() => import("./add-order").then((m) => m.AddOrder), { ssr: false, loading: () => <Placeholder label="Tambah order" /> });
 const AddItems = dynamic(() => import("./add-order").then((m) => m.AddItems), { ssr: false, loading: () => <Placeholder label="Tambah item" /> });
+const PickingPanel = dynamic(() => import("./picking-panel").then((m) => m.PickingPanel), {
+  ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka layar picking…</p>,
+});
 const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSheetPanel), {
   ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka lembar picklist…</p>,
 });
@@ -242,10 +245,13 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
   const [expanded, setExpanded] = useState(!finished);
   // Isi dari picklist (0057) opens in place of the table, for this wave only.
   const [sheet, setSheet] = useState(false);
+  // Picking (0067): the wave line by line for the floor, any role.
+  const [picking, setPicking] = useState(false);
+  const canPick = w.status === "PENDING" && live > 0;
   const [hideDone, setHideDone] = useState(false);
   const canSheet = supervisor && w.status !== "CANCELLED" && live > 0;
-  if (active && rows.length === 0 && !sheet) return null;
-  const show = expanded || active || sheet;
+  if (active && rows.length === 0 && !sheet && !picking) return null;
+  const show = expanded || active || sheet || picking;
   // Rows already done can fold away inside a wave still being worked on.
   const isDone = (it: (typeof allRows)[number]) => it.kind === "pair"
     ? it.pick.status === "COMPLETED" && it.move.status === "COMPLETED" : it.task.status === "COMPLETED";
@@ -258,7 +264,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
 
   return (
     <Card>
-      <CardHeader className={cn("flex flex-wrap items-start justify-between gap-3", show && !sheet && "lg:sticky lg:top-0 lg:z-20 lg:rounded-t-lg lg:border-b lg:border-steel-100 lg:bg-white/95 lg:backdrop-blur")}>
+      <CardHeader className={cn("flex flex-wrap items-start justify-between gap-3", show && !sheet && !picking && "lg:sticky lg:top-0 lg:z-20 lg:rounded-t-lg lg:border-b lg:border-steel-100 lg:bg-white/95 lg:backdrop-blur")}>
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-cond text-xl font-semibold">NO {w.wave_no}</h2>
@@ -308,6 +314,11 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
               <CheckCheck className="h-4 w-4" />Tutup wave
             </ConfirmButton>
           )}
+          {canPick && !picking && !sheet && (
+            <Button size="sm" onClick={() => setPicking(true)} title="Picking tanpa kertas: posting baris demi baris di bin">
+              <ClipboardList className="h-4 w-4" />Mulai picking
+            </Button>
+          )}
           {canSheet && !sheet && (
             <Button size="sm" variant={open.length > 0 ? "default" : "outline"} onClick={() => setSheet(true)}
               title="Salin picklist kertas yang sudah diisi, lalu posting semua baris sekaligus">
@@ -329,7 +340,10 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
       </CardHeader>
 
       {sheet && <WaveSheetPanel wave={w} tasks={tasks} onClose={() => setSheet(false)} />}
-      {show && !sheet && <>
+      {picking && <PickingPanel wave={w} tasks={tasks}
+        orders={outbound.map((o) => ({ shipment_number: o.shipment_number, sku: o.sku, description: o.description, quantity_requested: Number(o.quantity_requested), shortage_reason: o.shortage_reason }))}
+        onClose={() => setPicking(false)} />}
+      {show && !sheet && !picking && <>
       {/* Mobile: one card per task, big tap target. Desktop: table. */}
       <ul className="divide-y divide-steel-100 lg:hidden">
         {listed.map((it) => it.kind === "pair" ? (
@@ -418,7 +432,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
             {expanded ? "Sembunyikan baris" : `Tampilkan ${fmtNum(rows.length)} baris`}
           </button>
         )}
-        {show && !sheet && doneRows > 0 && doneRows < rows.length && (
+        {show && !sheet && !picking && doneRows > 0 && doneRows < rows.length && (
           <button className="text-sm underline" onClick={() => setHideDone((v) => !v)}>
             {hideDone ? `Tampilkan ${fmtNum(doneRows)} yang selesai` : `${fmtNum(doneRows)} selesai — sembunyikan`}
           </button>
