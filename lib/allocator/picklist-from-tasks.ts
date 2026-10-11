@@ -32,6 +32,8 @@ export interface TaskRow {
   actual_batch_lot: string | null;
   actual_expiry_date: string | null;
   deviation_reason: string | null;
+  /** typed name of the posting (0024; on pick_task_detail since 0067) */
+  picked_by_name?: string | null;
 }
 
 export interface WaveRow {

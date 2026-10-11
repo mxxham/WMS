@@ -101,19 +101,28 @@ export function buildSheet(tasks: TaskRow[]): { lines: SheetLine[]; cancelled: T
 
 export const lineChanged = (l: SheetLine, initial: SheetLine) => shape(l) !== shape(initial);
 
+/** One line as post_wave_sheet / post_pick_line take it. */
+export type SheetRow = {
+  pick_id: string | null; move_id: string | null;
+  sources: { bin: string; batch: string; expiry: string | null; qty: number }[];
+  move_to: string | null; move_qty: number | null;
+};
+
+export function sheetRow(l: SheetLine): SheetRow {
+  const to = up(l.moveTo);
+  const sources = l.sources.filter((s, i) => i === 0 || up(s.bin) !== "" || Number(s.qty) > 0);
+  return {
+    pick_id: l.pick?.id ?? null,
+    move_id: l.move?.id ?? null,
+    sources: sources.map((s) => ({ bin: up(s.bin), batch: s.batch.trim(), expiry: day(s.expiry) || null, qty: l.pick ? Number(s.qty) || 0 : 0 })),
+    move_to: to || null,
+    move_qty: to ? Number(l.moveQty) || 0 : null,
+  };
+}
+
 /** The post_wave_sheet payload: open lines marked done, and posted lines whose paper differs. */
 export function sheetPayload(lines: SheetLine[], initial: Map<string, SheetLine>) {
-  return lines.filter((l) => (l.posted ? lineChanged(l, initial.get(l.key)!) : l.done)).map((l) => {
-    const to = up(l.moveTo);
-    const sources = l.sources.filter((s, i) => i === 0 || up(s.bin) !== "" || Number(s.qty) > 0);
-    return {
-      pick_id: l.pick?.id ?? null,
-      move_id: l.move?.id ?? null,
-      sources: sources.map((s) => ({ bin: up(s.bin), batch: s.batch.trim(), expiry: day(s.expiry) || null, qty: l.pick ? Number(s.qty) || 0 : 0 })),
-      move_to: to || null,
-      move_qty: to ? Number(l.moveQty) || 0 : null,
-    };
-  });
+  return lines.filter((l) => (l.posted ? lineChanged(l, initial.get(l.key)!) : l.done)).map(sheetRow);
 }
 
 /**
