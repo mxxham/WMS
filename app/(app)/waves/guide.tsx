@@ -51,9 +51,15 @@ export function WaveGuide({ variant }: { variant: "desktop" | "phone" }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <button type="button" className="inline-flex h-11 items-center gap-1 rounded-md px-2 text-sm font-medium text-steel-700 hover:bg-steel-100">
-          <CircleHelp className="h-4 w-4" />Cara pakai
-        </button>
+        {variant === "phone" ? (
+          <button type="button" aria-label="Cara pakai" className="inline-flex h-11 w-11 items-center justify-center rounded-md text-steel-700 hover:bg-steel-100">
+            <CircleHelp className="h-5 w-5" />
+          </button>
+        ) : (
+          <button type="button" className="inline-flex h-11 items-center gap-1 rounded-md px-2 text-sm font-medium text-steel-700 hover:bg-steel-100">
+            <CircleHelp className="h-4 w-4" />Cara pakai
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent title="Cara pakai halaman Wave" className="bg-white text-steel sm:w-[34rem]">
         <div className="space-y-4">

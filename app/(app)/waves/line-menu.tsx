@@ -96,7 +96,11 @@ export function lineMenuRows({ item, isShort, canPost, canUndo, canRestore, supe
   return rows;
 }
 
-export function LineMenu(props: LineProps & { open?: boolean; onOpenChange?: (o: boolean) => void; trigger?: React.ReactNode }) {
+export function LineMenu(props: LineProps & {
+  open?: boolean; onOpenChange?: (o: boolean) => void; trigger?: React.ReactNode;
+  /** rows only this layout needs, first (the phone's Isi bin rows, where the bin code is not a link) */
+  extra?: React.ReactNode;
+}) {
   const { item, label } = props;
   const ids = item.kind === "pair" ? [item.pick.id, item.move.id] : [item.task.id];
   const rows = lineMenuRows(props);
@@ -108,6 +112,7 @@ export function LineMenu(props: LineProps & { open?: boolean; onOpenChange?: (o:
         ? <Button variant="ghost" size="icon" className="h-10 w-10 text-steel-700" aria-label={`Lainnya ${label}`}><MoreHorizontal className="h-5 w-5" /></Button>
         : props.trigger}>
       <MenuSection>
+        {props.extra}
         {main.map((r) => <div key={r.key}>{r.node}</div>)}
         <div><RowHistory ids={ids} label={label} /></div>
       </MenuSection>

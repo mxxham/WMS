@@ -106,7 +106,7 @@ export function WaitNotice({ wait, sku, supervisor, rpc }: { wait: TaskWait; sku
 export function TundaButton({ wave: w, tasks, rpc }: { wave: WaveRow; tasks: TaskRow[]; rpc: Rpc }) {
   const moves = tasks.filter((t) => t.task_type === "REPLENISH" && t.status === "PLANNED");
   return (
-    <ConfirmButton size="sm" variant="outline" title={`Jadwal ulang NO ${w.wave_no}`}
+    <ConfirmButton size="sm" variant="outline" title={`Tunda NO ${w.wave_no}`}
       summary={`Wave ditahan (tidak bisa dikerjakan) sampai diaktifkan lagi. Tugas yang sudah diposting tetap tercatat.${moves.length ? ` Wave ini masih punya ${moves.length} Bin To Bin terbuka: wave lain yang menunggunya ikut tertahan, kecuali Bin To Bin-nya diposting setelah benar-benar dipindah.` : ""}`}
       extra={moves.length ? <ImpactNote skus={[...new Set(moves.map((m) => m.sku))]} build={() => ({ change: { kind: "park", wave: w.id }, own: [] })} /> : undefined}
       onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "RESCHEDULED" })}>Tunda</ConfirmButton>

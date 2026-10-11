@@ -13,13 +13,15 @@ export function dayLabel(date: string) {
 /** Previous / next planned day, and a calendar for any other. */
 export function DayNav({ date, prevDate, nextDate, compact = false }: { date: string; prevDate: string | null; nextDate: string | null; compact?: boolean }) {
   const router = useRouter();
+  // On a phone the arrows are narrower (still 44 px tall) so the date, search, guide and menu fit one row.
+  const w = compact ? "w-9" : "w-11";
   const arrow = (to: string | null, label: string, Icon: typeof ChevronLeft) => to
-    ? <Link href={`/waves?date=${to}`} aria-label={label} className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-steel-100"><Icon className="h-5 w-5" /></Link>
-    : <span className="inline-flex h-11 w-11 items-center justify-center text-steel-300" aria-hidden><Icon className="h-5 w-5" /></span>;
+    ? <Link href={`/waves?date=${to}`} aria-label={label} className={cn("inline-flex h-11 items-center justify-center rounded-md hover:bg-steel-100", w)}><Icon className="h-5 w-5" /></Link>
+    : <span className={cn("inline-flex h-11 items-center justify-center text-steel-300", w)} aria-hidden><Icon className="h-5 w-5" /></span>;
   return (
-    <div className="flex items-center gap-1">
+    <div className={cn("flex items-center", !compact && "gap-1")}>
       {arrow(prevDate, "Hari rencana sebelumnya", ChevronLeft)}
-      <h1 className={cn("font-cond font-semibold capitalize", compact ? "text-lg" : "text-2xl")}>{dayLabel(date)}</h1>
+      <h1 className={cn("whitespace-nowrap font-cond font-semibold capitalize", compact ? "text-lg" : "text-2xl")}>{dayLabel(date)}</h1>
       {arrow(nextDate, "Hari rencana berikutnya", ChevronRight)}
       <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md hover:bg-steel-100" title="Pilih tanggal">
         <CalendarDays className="h-5 w-5" />

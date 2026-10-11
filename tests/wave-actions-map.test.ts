@@ -52,5 +52,21 @@ for (const h of homes) {
   });
 }
 
+// The phone layout (spec §2.3): every wave and line action through the same menus, Isi dari
+// picklist nowhere.
+test('phone: wave menu in its phone layout, without Isi dari picklist', () => {
+  const screen = src('mobile/wave-screen.tsx');
+  assert.match(screen, /<WaveMenu[^>]*layout="phone"/, 'wave-screen does not use WaveMenu layout="phone"');
+  for (const f of ['mobile/phone-layout.tsx', 'mobile/day-screen.tsx', 'mobile/wave-screen.tsx']) {
+    assert.ok(!src(f).includes('onOpenSheet') && !src(f).includes('Isi dari picklist'), `${f} reaches Isi dari picklist`);
+  }
+  assert.ok(src('wave-menu.tsx').includes('layout === "desktop"'), 'wave-menu does not gate Isi dari picklist on the desktop layout');
+});
+test('phone: lines use the same LineMenu and LinePrimary, panels the phone layout', () => {
+  const screen = src('mobile/wave-screen.tsx');
+  assert.ok(screen.includes('<LineMenu') && screen.includes('<LinePrimary'), 'wave-screen does not use LineMenu / LinePrimary');
+  assert.ok(src('mobile/phone-layout.tsx').includes('m.panels("phone")'), 'phone-layout does not render the phone panels');
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

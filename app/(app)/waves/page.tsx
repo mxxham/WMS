@@ -49,7 +49,6 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           date={date}
           prevDate={prevDate}
           nextDate={nextDate}
-          openWave={sp.wave ?? null}
           role={user.role}
           waves={(waves ?? []) as WaveRow[]}
           tasks={tasks}

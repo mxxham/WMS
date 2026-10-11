@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronUp, ClipboardList, FileText, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronDown, ChevronUp, FileText, MoreHorizontal, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -26,57 +26,32 @@ import { EscalationsPanel, type LineRequest } from "./escalations-panel";
 import { ProblemsPanel, type OpenCount } from "./problems-panel";
 import { Actual, AddOrder, REASON, StatusTag, printBinToBin, printPicklists, type OutboundDetail, type Rpc, type TaskWait } from "./wave-parts";
 import { LineMenu, LinePrimary, type LineItem } from "./line-menu";
-import { CompleteWaveButton, WaveMenu } from "./wave-menu";
+import { WaveMenu } from "./wave-menu";
 import { DayBar } from "./day-bar";
 import { ProblemsSummary, type ProblemCounts } from "./problems-summary";
 import { useIsPhone } from "./use-is-phone";
+import { NO_FILTER, filterActive, lineCancelled, lineDone, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
+import { WavePrimary } from "./wave-primary";
 
 export type { OutboundDetail, TaskWait } from "./wave-parts";
+export { rowMatches, lineIds, lineDone, lineCancelled, type RowFilter, type WaveModel } from "./wave-model";
 
 const PickingPanel = dynamic(() => import("./picking-panel").then((m) => m.PickingPanel), {
   ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka layar picking…</p>,
+});
+const WavesPhone = dynamic(() => import("./mobile/phone-layout").then((m) => m.WavesPhone), {
+  ssr: false, loading: () => <p className="p-4 text-sm text-steel-500">Membuka…</p>,
 });
 const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSheetPanel), {
   ssr: false, loading: () => <p className="border-t border-steel-100 p-4 text-sm text-steel-500">Membuka lembar picklist…</p>,
 });
 
-/** Search: free text on SKU / bin / description, only open lines, only lines with a problem. */
-export type RowFilter = { q: string; onlyOpen: boolean; onlyProblems: boolean };
-const filterActive = (f: RowFilter) => f.q.trim() !== "" || f.onlyOpen || f.onlyProblems;
-export function rowMatches(it: LineItem, f: RowFilter, short: Set<string>, waits: Record<string, TaskWait>): boolean {
-  const ts = it.kind === "pair" ? [it.pick, it.move] : [it.task];
-  const q = f.q.trim().toUpperCase();
-  if (q && !ts.some((t) => [t.sku, t.from_bin, t.to_bin ?? "", t.description ?? ""].some((v) => v.toUpperCase().includes(q)))) return false;
-  if (f.onlyOpen && !ts.some((t) => t.status === "PLANNED")) return false;
-  if (f.onlyProblems && !ts.some((t) => short.has(t.id) || !!waits[t.id])) return false;
-  return true;
-}
-
-export const lineIds = (it: LineItem) => (it.kind === "pair" ? [it.pick, it.move] : [it.task]);
-export const lineDone = (it: LineItem) => lineIds(it).every((t) => t.status === "COMPLETED");
-export const lineCancelled = (it: LineItem) => lineIds(it).every((t) => t.status === "CANCELLED");
-
-/** Everything both layouts need about the day, computed once. */
-export type WaveModel = {
-  date: string; prevDate: string | null; nextDate: string | null;
-  waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
-  supervisor: boolean; rpc: Rpc; onDone: () => void;
-  short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
-  facts: Map<string, WaveFacts>; ordered: WaveRow[]; step: DayStep; problems: ProblemCounts;
-  posted: number; total: number;
-  /** the existing Perlu ditangani panels, unchanged */
-  panels: (layout: "desktop" | "phone") => React.ReactNode;
-  /** the day's menu: Tambah order, the PDFs, Hitung ulang */
-  dayMenu: React.ReactNode;
-  printWave: (w: WaveRow) => void;
-};
-
 /**
  * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
  * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, prevDate, nextDate, openWave = null, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
-  date: string; prevDate: string | null; nextDate: string | null; openWave?: string | null;
+export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
+  date: string; prevDate: string | null; nextDate: string | null;
   role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
@@ -95,6 +70,10 @@ export function WavesClient({ date, prevDate, nextDate, openWave = null, role, w
 }) {
   const router = useRouter();
   const phone = useIsPhone();
+  // The open wave lives in the address (?wave=), written with history.pushState / replaceState so
+  // opening a wave needs no server round trip, browser back closes it, and both layouts agree.
+  const params = useSearchParams();
+  const openWave = params.get("wave");
   const [person, setPerson] = usePersonName();
   const supervisor = role === "supervisor" || role === "admin";
   // The request whose line the sheet opens at (Isi dari picklist, desktop only).
@@ -164,8 +143,10 @@ export function WavesClient({ date, prevDate, nextDate, openWave = null, role, w
         <CorrectionsPanel date={date} rows={corrections} canAdjust={supervisor} />
       </>
     ),
-    dayMenu: (
-      <ActionMenu title="Hari ini">
+    dayMenu: (iconOnly) => (
+      <ActionMenu title="Hari ini" trigger={iconOnly
+        ? <Button variant="ghost" size="icon" className="h-11 w-11 text-steel-700" aria-label="Menu hari ini"><MoreHorizontal className="h-5 w-5" /></Button>
+        : undefined}>
         <MenuSection>
           {supervisor && <div><AddOrder date={date} /></div>}
           {supervisor && untouched.length > 0 && short.size === 0 && <div>{replanButton("outline")}</div>}
@@ -179,8 +160,7 @@ export function WavesClient({ date, prevDate, nextDate, openWave = null, role, w
     printWave: (w) => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`),
   };
 
-  // The phone layout (Task 7) replaces this branch; until then both widths get the desktop layout.
-  if (phone) return <WavesDesktop model={model} openWave={openWave} sheetAt={sheetAt} onSheetAtDone={() => setSheetAt(null)} />;
+  if (phone) return <WavesPhone model={model} openWave={openWave} picking={params.get("pick") === "1"} />;
   return <WavesDesktop model={model} openWave={openWave} sheetAt={sheetAt} onSheetAtDone={() => setSheetAt(null)} />;
 }
 
@@ -190,7 +170,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(openWave);
   const [problemsOpen, setProblemsOpen] = useState(false);
-  const [filter, setFilter] = useState<RowFilter>({ q: "", onlyOpen: false, onlyProblems: false });
+  const [filter, setFilter] = useState<RowFilter>(NO_FILTER);
   const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => { setOpenId(openWave); }, [openWave]);
@@ -199,7 +179,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
 
   function open(id: string | null) {
     setOpenId(id);
-    router.replace(`/waves?date=${m.date}${id ? `&wave=${id}` : ""}`, { scroll: false });
+    window.history.replaceState(null, "", waveHref(m.date, id));
   }
   function goStep() {
     const t = m.step.target;
@@ -216,7 +196,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
   const active = filterActive(filter);
   return (
     <>
-      <DayBar date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} posted={m.posted} total={m.total} step={m.step} onStep={goStep} dayMenu={m.dayMenu} />
+      <DayBar date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} posted={m.posted} total={m.total} step={m.step} onStep={goStep} dayMenu={m.dayMenu()} />
       <ProblemsSummary counts={m.problems} open={problemsOpen} onOpenChange={setProblemsOpen}>{m.panels("desktop")}</ProblemsSummary>
 
       {m.waves.length === 0 ? (
@@ -241,7 +221,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
                 <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyProblems} onChange={(e) => setFilter({ ...filter, onlyProblems: e.target.checked })} />Hanya yang bermasalah</label>
               </div>
             )}
-            {active && <button className="text-sm underline" onClick={() => setFilter({ q: "", onlyOpen: false, onlyProblems: false })}>Hapus filter</button>}
+            {active && <button className="text-sm underline" onClick={() => setFilter(NO_FILTER)}>Hapus filter</button>}
           </div>
           <div className="space-y-2">
             {m.ordered.map((w) => (
@@ -267,7 +247,6 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
   const outbound = m.outbound.filter((o) => o.wave_id === w.id);
   const f = m.facts.get(w.id)!;
   const next = waveNextStep(f);
-  const openTasks = tasks.filter((t) => t.status === "PLANNED");
   // Isi dari picklist (0057) and Mulai picking (0067) open in place of the lines, for this wave only.
   const [sheet, setSheet] = useState(false);
   const [sheetFromRequest, setSheetFromRequest] = useState(false);
@@ -283,20 +262,8 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
   if (active && matching.length === 0 && !sheet && !picking) return null;
   const expanded = open || sheet || picking;
 
-  const primary = (() => {
-    switch (next.primary) {
-      case "mulai": return <Button onClick={(e) => { e.stopPropagation(); setPicking(true); if (!open) onToggle(); }}><ClipboardList className="h-4 w-4" />Mulai picking</Button>;
-      case "lihat": return <Button variant="outline" className="border-bad text-bad" onClick={(e) => { e.stopPropagation(); onShowProblems(); }}>Lihat</Button>;
-      case "tutup": return <span onClick={(e) => e.stopPropagation()}><CompleteWaveButton wave={w} open={openTasks} rpc={m.rpc} variant="default" size="sm" className="h-10 px-4 text-sm" /></span>;
-      case "aktifkan": return m.supervisor ? (
-        <span onClick={(e) => e.stopPropagation()}>
-          <ConfirmButton title={`Aktifkan NO ${w.wave_no}`} summary="Wave kembali bisa dikerjakan."
-            onConfirm={() => m.rpc("set_wave_status", { p_wave_id: w.id, p_status: "PENDING" })}>Aktifkan</ConfirmButton>
-        </span>
-      ) : null;
-      default: return null;
-    }
-  })();
+  const primary = <WavePrimary model={m} wave={w} primary={next.primary} layout="desktop"
+    onStart={() => { setPicking(true); if (!open) onToggle(); }} onShowProblems={onShowProblems} />;
 
   return (
     <Card id={`wave-${w.id}`} className={cn(expanded && "ring-1 ring-steel-300")}>
@@ -344,7 +311,6 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
 
 /** The open wave's lines: the table as before, with only the line's next action and its menu. */
 function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel; wave: WaveRow; rows: LineItem[]; outbound: (OutboundRow & OutboundDetail)[] }) {
-  const pending = w.status === "PENDING";
   const [showDone, setShowDone] = useState(w.status === "COMPLETED");
   const [showCancelled, setShowCancelled] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -353,14 +319,6 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
   const doneCount = visible.filter(lineDone).length;
   const listed = showDone ? visible : visible.filter((it) => !lineDone(it));
   const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
-  const lineProps = (it: LineItem) => {
-    const head = it.kind === "pair" ? it.pick : it.task;
-    return {
-      item: it, label: `NO ${w.wave_no} #${head.seq}`, isShort: lineIds(it).some((t) => m.short.has(t.id)), wait: m.waits[head.id],
-      canPost: pending, canUndo: w.status !== "CANCELLED", canRestore: pending || w.status === "RESCHEDULED",
-      supervisor: m.supervisor, rpc: m.rpc, onDone: m.onDone,
-    };
-  };
   const binLink = (code: string) => <BinButton code={code} className="font-semibold underline-offset-2 hover:underline">{code}</BinButton>;
 
   return (
@@ -368,7 +326,7 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
       <Table>
         <thead><tr>{["#", "Jenis", "Dari", "Ke", "SKU", "Batch", "Exp", "Qty", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
         <tbody>{listed.map((it) => {
-          const p = lineProps(it);
+          const p = lineProps(m, w, it);
           const t = it.kind === "pair" ? it.pick : it.task;
           return (
             <tr key={t.id} className={cn(t.status !== "PLANNED" && "text-steel-500", p.isShort && "bg-bad/10")}>
