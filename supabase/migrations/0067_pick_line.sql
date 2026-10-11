@@ -458,15 +458,17 @@ create or replace function public.post_pick_line(p_wave_id uuid, p_row jsonb, p_
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_name text; w public.waves%rowtype; t public.pick_tasks%rowtype; m public.pick_tasks%rowtype;
-  v_total numeric; v_sku text; v_ean text; v_scan_sku text; v_posted_by text;
-  v_limit numeric := (public.inventory_policy()->>'adjust_approval_qty')::numeric;
+  v_total numeric; v_sku text; v_ean text; v_scan_sku text;
+  v_limit numeric := coalesce((public.inventory_policy()->>'adjust_approval_qty')::numeric, 20);
+  v_unchanged boolean := false;
   v_kind text; v_msg text; v_res jsonb; c jsonb; v_req uuid; v_corr int := 0;
 begin
   if not public.has_role(array['operator','supervisor','admin']::public.user_role[]) then
     raise exception 'Masuk dulu untuk posting';
   end if;
   v_name := public.person_name(p_by_name, 'Nama picker');
-  select * into w from public.waves where id = p_wave_id;
+  -- Lock first: two pickers posting the same line are decided one after the other (the engine re-locks the row).
+  select * into w from public.waves where id = p_wave_id for update;
   if w.id is null then raise exception 'Wave tidak ditemukan'; end if;
   if nullif(p_row->>'pick_id', '') is not null then
     select * into t from public.pick_tasks where id = (p_row->>'pick_id')::uuid;
@@ -477,6 +479,10 @@ begin
     if m.id is null or m.wave_id <> w.id or m.task_type = 'PICK' then raise exception 'Bin To Bin ini bukan milik wave NO %', w.wave_no; end if;
   end if;
   if t.id is null and m.id is null then raise exception 'Baris tanpa tugas'; end if;
+  if t.id is not null and m.id is not null and not (m.item_id = t.item_id
+      and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id) then
+    raise exception 'Bin To Bin ini bukan milik baris ini';
+  end if;
 
   -- Input the picker fixes on the card: never recorded.
   select coalesce(sum(coalesce((s->>'qty')::numeric, 0)), 0) into v_total
@@ -500,15 +506,26 @@ begin
     v_kind := 'wave_not_pending';
     v_msg := format('Wave NO %s sedang %s: minta supervisor', w.wave_no,
                     case w.status when 'RESCHEDULED' then 'Tunda' when 'COMPLETED' then 'selesai' else 'dibatalkan' end);
-  elsif t.status = 'COMPLETED' or (t.id is null and m.status = 'COMPLETED') then
-    v_posted_by := coalesce(t.picked_by_name, m.picked_by_name);
-    if not public.same_person(v_posted_by, v_name) then
+  elsif t.status = 'COMPLETED' or m.status = 'COMPLETED' then
+    -- An open pick may be posted next to another picker's completed move as long as the row leaves that move as posted.
+    if t.id is not null and t.status <> 'COMPLETED' and m.status = 'COMPLETED' then
+      v_unchanged :=
+        upper(trim(coalesce(p_row->>'move_to', ''))) = (select bin_code from public.bins where id = m.to_bin_id)
+        and coalesce(nullif(p_row->>'move_qty', '')::numeric, 0) = coalesce(m.actual_quantity, m.quantity)
+        and (jsonb_array_length(coalesce(p_row->'sources', '[]'::jsonb)) = 0
+             or exists (select 1 from jsonb_array_elements(p_row->'sources') s
+                        where upper(trim(s->>'bin')) = (select bin_code from public.bins where id = coalesce(m.actual_from_bin_id, m.from_bin_id))));
+    end if;
+    if t.status = 'COMPLETED' and not public.same_person(t.picked_by_name, v_name) then
       v_kind := 'other_picker';
-      v_msg := format('Baris ini diposting oleh %s: minta supervisor', coalesce(v_posted_by, 'orang lain'));
-    elsif t.id is not null and exists (select 1 from public.pick_audits where task_id = t.id) then
+      v_msg := format('Baris ini diposting oleh %s: minta supervisor', coalesce(t.picked_by_name, 'orang lain'));
+    elsif m.status = 'COMPLETED' and not public.same_person(m.picked_by_name, v_name) and not v_unchanged then
+      v_kind := 'other_picker';
+      v_msg := format('Bin To Bin baris ini diposting oleh %s: minta supervisor', coalesce(m.picked_by_name, 'orang lain'));
+    elsif t.status = 'COMPLETED' and exists (select 1 from public.pick_audits where task_id = t.id) then
       v_kind := 'audited';
       v_msg := 'Baris ini sudah diaudit picking: minta supervisor';
-    elsif t.id is not null and exists (select 1 from public.shipment_loads where wave_id = t.wave_id and shipment_number = t.shipment_number) then
+    elsif t.status = 'COMPLETED' and exists (select 1 from public.shipment_loads where wave_id = t.wave_id and shipment_number = t.shipment_number) then
       v_kind := 'loaded';
       v_msg := format('Shipment %s sudah dimuat: minta supervisor', t.shipment_number);
     end if;

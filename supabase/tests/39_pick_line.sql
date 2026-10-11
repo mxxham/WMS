@@ -196,4 +196,49 @@ select pg_temp.check('pick posted after its move was posted early keeps the move
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rm) and pg_temp.qty('CC01A02', '550071397') = 30
   and pg_temp.qty('CC01A01', '550071397') = 0
   and not exists (select 1 from movements m join bins b on b.id = m.to_bin_id where b.bin_code = 'CC01A01' and m.reason_code = 'FOUND'));
+
+-- The early-move case above is also: an open pick posted next to a move someone else posted (post_task by the
+-- supervisor session, no picker name), the row leaving that move as posted -> allowed.
+
+-- Review focus: a move that is not the pick's own, and another picker's completed move.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+reset role;
+drop table if exists _seen, _replace, _wave_ids;
+delete from inventory v using bins b where b.id = v.bin_id and b.bin_code in ('CC02A01','CC02A02','CC03A01');
+set role authenticated;
+select import_snapshot('[
+ {"bin_code":"CC02A01","zone":"CC","rack":"02","level":"A","position":"01","sku":"550071397","batch_lot":"S1","quantity":36,"expiry_date":"2030-09-01"},
+ {"bin_code":"CC03A01","zone":"CC","rack":"03","level":"A","position":"01","sku":"550071397","batch_lot":"S1","quantity":10,"expiry_date":"2030-09-01"}]'::jsonb, false, 'uji') \g /dev/null
+select save_plan('2026-11-04', '{
+  "waves":[{"wave_no":"1","shipment_numbers":["SH3"],"planned_slot":"08:00"}],
+  "tasks":[
+   {"wave_no":"1","shipment_number":"SH3","task_type":"PICK","sku":"550071397","from_bin":"CC02A01","batch_lot":"S1","expiry_date":"2030-09-01","quantity":6,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"1","task_type":"REPLENISH","sku":"550071397","from_bin":"CC02A01","to_bin":"CC02A02","batch_lot":"S1","expiry_date":"2030-09-01","quantity":30,"pick_type":"CASE","breaks_pallet":true,"seq":2},
+   {"wave_no":"1","shipment_number":"SH3","task_type":"PICK","sku":"550071397","from_bin":"CC03A01","batch_lot":"S1","expiry_date":"2030-09-01","quantity":4,"pick_type":"CASE","seq":3}]}'::jsonb) \g /dev/null
+create temp table ids3 as select
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-04' and t.seq = 1) a,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-04' and t.seq = 2) m,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-04' and t.seq = 3) b,
+  (select id from waves where planned_date = '2026-11-04') w;
+select post_task((select m from ids3), 30, null, null, null, null) \g /dev/null
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+
+create temp table req_before as select pg_temp.requests() n;
+do $$ begin
+  perform post_pick_line((select w from ids3), pg_temp.row((select b from ids3), (select m from ids3),
+    '[{"bin":"CC03A01","batch":"S1","expiry":"2030-09-01","qty":4}]', 'CC02A02', 30), 'Ani', 'x');
+  raise notice 'FAIL a move that is not the pick''s own is refused';
+exception when others then raise notice 'PASS a move that is not the pick''s own is refused'; end $$;
+select pg_temp.check('that mistake writes no request and posts nothing',
+  pg_temp.requests() = (select n from req_before)
+  and (select status from pick_tasks where id = (select b from ids3)) = 'PLANNED'
+  and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED');
+
+create temp table rc as select post_pick_line((select w from ids3), pg_temp.row((select a from ids3), (select m from ids3),
+  '[{"bin":"CC02A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC02A02', 20), 'Ani', 'x') as r;
+select pg_temp.check('changing a move someone else posted (pick still open): request other_picker, move stays as posted',
+  (select r->>'result' = 'refused' and r->>'kind' = 'other_picker' from rc)
+  and (select status from pick_tasks where id = (select m from ids3)) = 'COMPLETED'
+  and (select status from pick_tasks where id = (select a from ids3)) = 'PLANNED'
+  and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 6);
 rollback;
