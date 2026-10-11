@@ -33,6 +33,11 @@ export function lineProblem(l: SheetLine, bins: Set<string> | null): string | nu
   }
   if (l.pick && total > Number(l.pick.quantity)) return `Qty paling banyak ${Number(l.pick.quantity)} ${unit} (order baris ini)`;
   const to = up(l.moveTo);
+  // A move with no pick: a blank destination or quantity would cancel the planned Bin To Bin, so both are required.
+  if (!l.pick && l.move) {
+    if (!to) return "Isi bin tujuan";
+    if (!isQty(l.moveQty) || Number(l.moveQty) <= 0) return "Isi Qty sisa yang dipindah";
+  }
   if (to) {
     if (!BIN.test(to) || (bins && !bins.has(to))) return `Bin ${to} tidak ada`;
     if (l.sources.some((s) => up(s.bin) === to)) return `Bin To Bin: tujuan ${to} sama dengan bin asal`;
@@ -44,8 +49,8 @@ export function lineProblem(l: SheetLine, bins: Set<string> | null): string | nu
 /** The confirmation sentence, e.g. "Ambil 13 Carton 550070614 dari CB34D02, sisa 23 Carton ke CB18A02." */
 export function lineSummary(l: SheetLine, unit: string): string {
   const to = up(l.moveTo);
+  if (!l.pick) return `Pindah ${Number(l.moveQty)} ${unit} ${l.sku} dari ${up(l.sources[0].bin)} ke ${to}.`;
   const rest = to ? `${Number(l.moveQty)} ${unit} ke ${to}` : "";
-  if (!l.pick) return `Pindah ${rest.replace(" ke ", ` ${l.sku} dari ${up(l.sources[0].bin)} ke `)}.`;
   const parts = l.sources.map((s, i) => `${Number(s.qty)} ${unit}${i === 0 ? ` ${l.sku}` : ""} dari ${up(s.bin)}`);
   return `Ambil ${parts.join(" + ")}${rest ? `, sisa ${rest}` : ""}.`;
 }
@@ -84,7 +89,17 @@ export function waveProgress(tasks: TaskRow[], orders: OrderLine[]): WaveProgres
   const info = new Map(live.map((t) => [t.sku, t]));
 
   const keys = new Map<string, OrderLine>();
-  for (const o of orders) keys.set(`${o.shipment_number}|${o.sku}`, o);
+  // Two outbound rows for one shipment and SKU are one order line: quantities add, the first non-null text wins.
+  for (const o of orders) {
+    const k = `${o.shipment_number}|${o.sku}`;
+    const prev = keys.get(k);
+    keys.set(k, prev ? {
+      ...prev,
+      quantity_requested: Number(prev.quantity_requested) + Number(o.quantity_requested),
+      description: prev.description ?? o.description,
+      shortage_reason: prev.shortage_reason ?? o.shortage_reason,
+    } : o);
+  }
   for (const t of picks) {
     const k = `${t.shipment_number ?? "-"}|${t.sku}`;
     if (!keys.has(k)) keys.set(k, { shipment_number: t.shipment_number ?? "-", sku: t.sku, quantity_requested: 0 });

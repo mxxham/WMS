@@ -102,5 +102,28 @@ test('progress: units never summed, short pick vs shortage, two shipments, per p
   assert.deepEqual(p.pickers, [{ name: 'Ani', lines: 1, units: { Carton: 10 } }, { name: 'Budi', lines: 1, units: { Drum: 4 } }]);
 });
 
+test('a move-only line needs its destination and quantity; valid one reads as a Pindah sentence', () => {
+  const mo = buildSheet([move]).lines[0];
+  assert.equal(mo.pick, null);
+  mo.moveTo = '';
+  assert.equal(lineProblem(mo, BINS), 'Isi bin tujuan');
+  mo.moveTo = 'CB18A02'; mo.moveQty = '0';
+  assert.match(lineProblem(mo, BINS)!, /Isi Qty sisa/);
+  mo.moveQty = '23';
+  assert.equal(lineProblem(mo, BINS), null);
+  assert.equal(lineSummary(mo, 'Carton'), 'Pindah 23 Carton 550070614 dari CB34D02 ke CB18A02.');
+});
+
+test('two order lines for one shipment and SKU add up, not overwrite', () => {
+  const t1: TaskRow = { ...base, id: 'a', seq: 1, shipment_number: 'S1', quantity: 13, status: 'PLANNED' };
+  const p = waveProgress([t1], [
+    { shipment_number: 'S1', sku: '550070614', quantity_requested: 25 },
+    { shipment_number: 'S1', sku: '550070614', quantity_requested: 15, shortage_reason: 'NO_STOCK' },
+  ]);
+  assert.equal(p.orders.length, 1);
+  assert.equal(p.orders[0]!.needed, 40);
+  assert.equal(p.orders[0]!.shortageReason, 'NO_STOCK');
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

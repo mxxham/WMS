@@ -270,4 +270,45 @@ select pg_temp.check('move_to and bin differing only by case/whitespace read as 
   (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rf)
   and (select status from pick_tasks where id = (select a from ids3)) = 'COMPLETED'
   and pg_temp.qty('CC02A02', '550071397') = 30 and pg_temp.qty('CC02A01', '550071397') = 0);
+-- Move-only line (a Bin To Bin with no pick on its line): a blank destination or quantity must be refused,
+-- because the engine would cancel the planned move. Fixture: a wave whose only move has no pick.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+reset role;
+drop table if exists _seen, _replace, _wave_ids;
+delete from inventory v using bins b where b.id = v.bin_id and b.bin_code in ('CC04A01','CC04A02','CC05A01');
+set role authenticated;
+select import_snapshot('[
+ {"bin_code":"CC04A01","zone":"CC","rack":"04","level":"A","position":"01","sku":"550071397","batch_lot":"S1","quantity":5,"expiry_date":"2030-09-01"},
+ {"bin_code":"CC05A01","zone":"CC","rack":"05","level":"A","position":"01","sku":"550071397","batch_lot":"S1","quantity":2,"expiry_date":"2030-09-01"}]'::jsonb, false, 'uji') \g /dev/null
+select save_plan('2026-11-05', '{
+  "waves":[{"wave_no":"1","shipment_numbers":["SH4"],"planned_slot":"08:00"}],
+  "tasks":[
+   {"wave_no":"1","shipment_number":"SH4","task_type":"PICK","sku":"550071397","from_bin":"CC05A01","batch_lot":"S1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","seq":1},
+   {"wave_no":"1","task_type":"REPLENISH","sku":"550071397","from_bin":"CC04A01","to_bin":"CC04A02","batch_lot":"S1","expiry_date":"2030-09-01","quantity":5,"pick_type":"CASE","seq":2}]}'::jsonb) \g /dev/null
+create temp table ids4 as select
+  (select id from waves where planned_date = '2026-11-05') w,
+  (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-05' and t.seq = 2) mo;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+
+create temp table req_mo as select pg_temp.requests() n;
+do $$ begin
+  perform post_pick_line((select w from ids4), pg_temp.row(null, (select mo from ids4),
+    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', '', 5), 'Ani', 'x');
+  raise notice 'FAIL a move-only row with a blank destination is refused';
+exception when others then
+  if sqlerrm like 'Isi bin tujuan dan Qty sisa%' then raise notice 'PASS a move-only row with a blank destination is refused';
+  else raise notice 'FAIL a move-only row with a blank destination is refused: %', sqlerrm; end if;
+end $$;
+do $$ begin
+  perform post_pick_line((select w from ids4), pg_temp.row(null, (select mo from ids4),
+    '[{"bin":"CC04A01","batch":"S1","expiry":"2030-09-01","qty":5}]', 'CC04A02', 0), 'Ani', 'x');
+  raise notice 'FAIL a move-only row with zero Qty sisa is refused';
+exception when others then
+  if sqlerrm like 'Isi bin tujuan dan Qty sisa%' then raise notice 'PASS a move-only row with zero Qty sisa is refused';
+  else raise notice 'FAIL a move-only row with zero Qty sisa is refused: %', sqlerrm; end if;
+end $$;
+select pg_temp.check('those mistakes write no request and leave the Bin To Bin PLANNED, stock unchanged',
+  pg_temp.requests() = (select n from req_mo)
+  and (select status from pick_tasks where id = (select mo from ids4)) = 'PLANNED'
+  and pg_temp.qty('CC04A01', '550071397') = 5 and pg_temp.qty('CC04A02', '550071397') = 0);
 rollback;

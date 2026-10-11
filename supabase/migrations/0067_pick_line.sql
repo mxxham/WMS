@@ -490,6 +490,11 @@ begin
     if m.id is null or m.wave_id <> w.id or m.task_type = 'PICK' then raise exception 'Bin To Bin ini bukan milik wave NO %', w.wave_no; end if;
   end if;
   if t.id is null and m.id is null then raise exception 'Baris tanpa tugas'; end if;
+  -- A move with no pick: a blank destination or quantity would cancel the planned Bin To Bin, so refuse before anything is written.
+  if nullif(p_row->>'pick_id', '') is null and nullif(p_row->>'move_id', '') is not null
+     and (nullif(upper(trim(coalesce(p_row->>'move_to', ''))), '') is null or coalesce((p_row->>'move_qty')::numeric, 0) <= 0) then
+    raise exception 'Isi bin tujuan dan Qty sisa untuk Bin To Bin ini';
+  end if;
   if t.id is not null and m.id is not null and not coalesce(m.item_id = t.item_id
       and m.batch_lot is not distinct from t.batch_lot and m.from_bin_id = t.from_bin_id, false) then
     raise exception 'Bin To Bin ini bukan milik baris ini';
