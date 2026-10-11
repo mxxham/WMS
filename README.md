@@ -194,6 +194,7 @@ psql -f supabase/tests/31_post_as_done.sql               # Posting sesuai lapang
 psql -f supabase/tests/32_post_wave_sheet.sql            # Isi dari picklist (0057), same
 psql -f supabase/tests/33_bin_checks.sql                 # Cek sisa bin (0058), same
 psql -f supabase/tests/34_putaway_moved_in.sql           # putaway of a pallet rest already moved in (0059), same
+psql -f supabase/tests/38_putaway_fix.sql                # Sheet benar and Riwayat putaway (0066), same
 ```
 Or all of them at once against a temporary local database: `scripts/sql-test.sh`.
 
@@ -362,6 +363,7 @@ Everything here exists because of something that happened on the floor; each mig
 - `0058` **`Cek sisa bin`**: after a phone Posting that leaves at most `bin_check_max_qty` cartons (default 5, Pengaturan) of the SKU + batch in the bin, the dialog asks how many are left, blind (`Kosong (0)` / a number / `Lewati`). Answers are logged in `bin_checks`; one that differs from the system opens a count task on the bin. Stock is not changed by the answer.
 - `0059` **Putaway of a pallet rest already moved in**: a `data putaway` row into a bin that received the same SKU by Bin To Bin in the last two days is a `moved_in` conflict (shown with that move). It posts only with `Palet baru: tetap posting`; left alone it becomes a count task, so a pallet rest is never counted twice.
 - `0060` re-applies 0057's final version (`post_wave_sheet`, `picklist_corrections`): 0057 reached live as a draft before it was finished, and an applied migration never runs again.
+- `0066` **`Sheet benar: betulkan isi bin`** on `Putaway`: for a conflict where the sheet is right and the system's bin is wrong (8 Oct: CA06C01 held 4 IAGO drums, the system 36 Helix that were really in CA02D02), every line the system holds in the bin gets a decision — `Tetap`, `Jumlah sebenarnya`, `Tidak ada (hapus)` or `Pindah ke bin` — then the sheet's pallet is put away. Moves post as transfers; adjustments within `adjust_approval_qty` post as `COUNT_VARIANCE`, larger ones wait in `Adjust stok` for a second person. A fix is refused per row (and becomes a count task) when the bin changed since the check, or the stock is reserved for an open wave or held. Posting asks for a name and confirms with one sentence per bin. **`Riwayat putaway`** (`putaway_log`) keeps every posted sheet line for 30 days on the page: what the sheet said, the conflict, the bin as the system had it at that moment, the decision and its result, with links to the request and count task, so a conflict stays visible after it is resolved.
 - **`Bandingkan dengan sistem`** (Import page, after validation): the WMS file against the system's stock now, nothing imported. Per bin and SKU: same, batch/expiry name only, moved to another bin (the SKU total agrees), quantity differs, only in the file, only in the system; filter chips and `Unduh selisih`. The way to run the system next to the WMS sheet until they agree every morning.
 - **Undoing a posted Bin To Bin** asks for confirmation that the cartons physically went back; a move that happened (to another bin or quantity) is corrected with `Isi dari picklist` or `Mutasi`, not undone.
 

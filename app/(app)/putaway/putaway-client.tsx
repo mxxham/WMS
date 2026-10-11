@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
@@ -9,13 +9,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
-import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, parsePutawaySheet, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
+import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawaySheet, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
 import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { PutawayFixPanel } from "./putaway-fix-panel";
+import { PutawayHistory } from "./putaway-history";
 
 type Step = "upload" | "review" | "done";
 type Status = PutawayVerdict["status"] | "error";
-type Result = { rows: PutawayVerdict[]; movements: number; count_tasks?: number; set_over_limit?: number[] };
+type Result = { rows: PutawayVerdict[]; movements: number; count_tasks?: number; set_over_limit?: number[]; requests?: number };
 
 const STATUS: Record<Status, { label: string; card: string; row: string }> = {
   new: { label: "Baru (akan diposting)", card: "border-ok", row: "" },
@@ -26,6 +28,7 @@ const STATUS: Record<Status, { label: string; card: string; row: string }> = {
 
 function actionLabel(kind: PutawayKind, a: PutawayAction) {
   if (a === "set") return "Samakan qty bin dengan sheet";
+  if (a === "fix") return "Sheet benar: betulkan isi bin";
   if (kind === "moved_in") return "Palet baru: tetap posting";
   return kind === "bin_occupied" ? "Taruh di samping stok lain" : "Tambahkan qty sheet ke bin";
 }
@@ -45,10 +48,22 @@ export function PutawayClient() {
   const [result, setResult] = useState<Result | null>(null);
   // "Pindah ke bin lain": the bin typed per line (0042).
   const [moveTo, setMoveTo] = useState<Record<number, string>>({});
+  // "Sheet benar" (0066): a decision per line the bin holds, the name on the posting, the confirmation step.
+  const [fixes, setFixes] = useState<Record<number, FixLine[]>>({});
+  const [name, setName] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [limit, setLimit] = useState(20);
+  const [historyKey, setHistoryKey] = useState(0);
+
+  useEffect(() => {
+    createClient().rpc("inventory_policy").then(({ data }) => setLimit(Number((data as { adjust_approval_qty?: number } | null)?.adjust_approval_qty ?? 20)));
+  }, []);
 
   async function call(apply: boolean, acts: typeof actions, sheetRows = rows): Promise<Result | null> {
-    const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({ ...r, action: acts[r.line] ?? null }));
-    const { data, error } = await createClient().rpc("putaway_import", { p_rows: body, p_source: fileName, p_apply: apply });
+    const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({
+      ...r, action: acts[r.line] ?? null, fix: acts[r.line] === "fix" ? fixPayload(fixes[r.line] ?? []) : undefined,
+    }));
+    const { data, error } = await createClient().rpc("putaway_import", { p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null });
     if (error) { setError(error.message); return null; }
     return data as Result;
   }
@@ -57,7 +72,7 @@ export function PutawayClient() {
     setError(null); setBusy(true); setSheet(name);
     try {
       const parsed = parsePutawaySheet(readSheet(book, name));
-      setRows(parsed); setActions({});
+      setRows(parsed); setActions({}); setFixes({}); setConfirming(false);
       const res = await call(false, {}, parsed);
       if (!res) return;
       setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
@@ -90,6 +105,7 @@ export function PutawayClient() {
     setBusy(false);
     if (!res) return;
     setRows(next); setActions(acts); setMoveTo((m) => ({ ...m, [line]: "" }));
+    setFixes(({ [line]: _, ...rest }) => rest);
     setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
   }
 
@@ -99,7 +115,23 @@ export function PutawayClient() {
     setBusy(false);
     if (!res) return;
     setResult(res); setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
-    setStep("done");
+    setStep("done"); setConfirming(false); setHistoryKey((k) => k + 1);
+  }
+
+  /** Before the confirmation: the database checks every "Sheet benar" again (reserved, held, bin changed). */
+  async function review() {
+    setBusy(true); setError(null);
+    const res = await call(false, actions);
+    setBusy(false);
+    if (!res) return;
+    setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
+    if (!res.rows.some((v) => v.fix_error && actions[v.line] === "fix")) setConfirming(true);
+  }
+
+  function choose(r: PutawayRow, a: PutawayAction | undefined) {
+    setActions({ ...actions, [r.line]: a });
+    if (a === "fix" && !fixes[r.line]) setFixes({ ...fixes, [r.line]: fixLinesFor(verdicts.get(r.line)?.current ?? []) });
+    setConfirming(false);
   }
 
   const statusOf = (r: PutawayRow): Status => (r.error ? "error" : verdicts.get(r.line)?.status ?? "error");
@@ -107,6 +139,8 @@ export function PutawayClient() {
   for (const r of rows) counts[statusOf(r)]++;
   const resolved = rows.filter((r) => statusOf(r) === "conflict" && actions[r.line]).length;
   const toPost = counts.new + resolved;
+  const fixRows = rows.filter((r) => statusOf(r) === "conflict" && actions[r.line] === "fix");
+  const fixOpen = fixRows.filter((r) => fixProblem(r.bin_code, fixes[r.line] ?? [])).length;
   // Unresolved qty/occupied conflicts become count tasks when posted (0010).
   const toCount = rows.filter((r) => { const v = verdicts.get(r.line); return v?.status === "conflict" && !actions[r.line] && (v.kind === "qty_differs" || v.kind === "bin_occupied" || v.kind === "moved_in"); }).length;
   const shown = filter === "all" ? rows : rows.filter((r) => statusOf(r) === filter);
@@ -149,7 +183,7 @@ export function PutawayClient() {
     XLSX.writeFile(book, `konflik-putaway-${fileName.replace(/\.\w+$/, "")}.xlsx`);
   }
 
-  function reset() { setStep("upload"); setRows([]); setVerdicts(new Map()); setActions({}); setResult(null); setError(null); }
+  function reset() { setStep("upload"); setRows([]); setVerdicts(new Map()); setActions({}); setFixes({}); setConfirming(false); setResult(null); setError(null); }
 
   return (
     <div className="space-y-6 p-4 lg:p-8">
@@ -181,6 +215,7 @@ export function PutawayClient() {
               <p className="font-cond text-xl font-semibold">Putaway diposting</p>
               <p className="text-sm">{fmtNum(result.movements)} mutasi dibuat dan tercatat di <Link className="underline" href="/movements">Riwayat mutasi</Link>. Konflik tanpa keputusan dan baris error tidak diposting.</p>
               {!!result.count_tasks && <p className="text-sm"><b>{fmtNum(result.count_tasks)}</b> bin dengan konflik qty/isi masuk daftar <Link className="underline" href="/counts">Hitung stok</Link> untuk dihitung ulang.</p>}
+              {!!result.requests && <p className="text-sm"><b>{fmtNum(result.requests)}</b> adjustment di atas batas {fmtNum(limit)} karton menunggu persetujuan orang kedua di <Link className="underline" href="/adjust">Adjust stok</Link>.</p>}
               {!!result.set_over_limit?.length && <p className="text-sm">Baris {result.set_over_limit.join(", ")}: &quot;samakan dengan sheet&quot; melebihi batas adjustment, jadi tidak diposting dan dihitung ulang dulu.</p>}
               {result.rows.some((v) => v.expiry_expected) && <p className="text-sm text-warn">{fmtNum(result.rows.filter((v) => v.expiry_expected).length)} baris punya expired yang tidak cocok dengan kode batch: cek label, lalu perbaiki di <Link className="underline" href="/data-quality#expiry_vs_batch">Kualitas data</Link>.</p>}
               <p className="text-sm text-steel-500">Stok berubah: rencana wave yang belum dikerjakan bisa dihitung ulang di halaman <Link className="underline" href="/waves">Wave</Link> (Hitung ulang wave tersisa).</p>
@@ -221,7 +256,7 @@ export function PutawayClient() {
             </CardHeader>
             <CardContent>
               <Table>
-                <thead><tr><Th>Baris</Th><Th>Bin</Th><Th>SKU</Th><Th>Batch</Th><Th className="text-right">Qty</Th><Th>Expired</Th><Th>Masalah</Th><Th>Isi bin sekarang</Th><Th>Keputusan</Th></tr></thead>
+                <thead><tr><Th>Baris</Th><Th>Bin</Th><Th>SKU</Th><Th>Batch</Th><Th className="text-right">Qty</Th><Th>Expired</Th><Th>Masalah</Th><Th>{step === "done" ? "Isi bin saat diperiksa" : "Isi bin sekarang"}</Th><Th>Keputusan</Th></tr></thead>
                 <tbody>{shown.map((r) => {
                   const st = statusOf(r); const v = verdicts.get(r.line); const opts = v?.kind ? ACTIONS[v.kind] : [];
                   return (
@@ -234,11 +269,20 @@ export function PutawayClient() {
                       <Td className="text-xs">{v?.current.length ? v.current.map((c, i) => <div key={i}>{c.sku} · {c.batch_lot || "–"} · {fmtDate(c.expiry_date)} · <b>{fmtNum(c.quantity)}</b></div>) : st === "new" ? "Kosong" : ""}</Td>
                       <Td>
                         {st === "conflict" && step === "review" && (opts.length ? (
-                          <Select aria-label={`Keputusan baris ${r.line}`} value={actions[r.line] ?? ""} onChange={(e) => setActions({ ...actions, [r.line]: (e.target.value || undefined) as PutawayAction | undefined })}>
+                          <Select aria-label={`Keputusan baris ${r.line}`} value={actions[r.line] ?? ""} onChange={(e) => choose(r, (e.target.value || undefined) as PutawayAction | undefined)}>
                             <option value="">Lewati</option>
                             {opts.map((a) => <option key={a} value={a}>{actionLabel(v!.kind!, a)}</option>)}
                           </Select>
                         ) : v?.kind === "sku_unknown" ? <span className="text-xs text-steel-500">Tambahkan SKU ke master (di atas)</span> : null)}
+                        {st === "conflict" && step === "review" && actions[r.line] === "fix" && (
+                          <PutawayFixPanel bin={r.bin_code} lines={fixes[r.line] ?? []} limit={limit} error={v?.fix_error}
+                            onChange={(lines) => {
+                              setFixes({ ...fixes, [r.line]: lines }); setConfirming(false);
+                              // A changed decision is checked again on the next Posting.
+                              if (v?.fix_error) setVerdicts(new Map(verdicts).set(r.line, { ...v, fix_error: null }));
+                            }} />
+                        )}
+                        {step === "review" && v?.fix_error && actions[r.line] !== "fix" && <p className="mt-1 text-xs text-bad">{v.fix_error}</p>}
                         {step === "review" && (st === "conflict" || r.sheet_bin) && v?.kind !== "sku_unknown" && (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             <Input aria-label={`Bin sebenarnya baris ${r.line}`} className="h-8 w-28" placeholder="bin lain" value={moveTo[r.line] ?? ""}
@@ -248,7 +292,9 @@ export function PutawayClient() {
                             {r.sheet_bin && <Button size="sm" variant="ghost" className="underline" disabled={busy} onClick={() => redirect(r.line, null)}>Kembali ke {r.sheet_bin}</Button>}
                           </div>
                         )}
-                        {step === "done" && (v?.status === "new" || v?.action ? <span className="text-xs font-semibold text-ok">Diposting</span> : <span className="text-xs text-steel-500">Tidak diposting</span>)}
+                        {step === "done" && (v?.status === "new" || v?.action
+                          ? <span className="text-xs font-semibold text-ok">{v?.action === "fix" ? "Diposting, isi bin dibetulkan" : "Diposting"}</span>
+                          : <span className="text-xs text-steel-500">Tidak diposting{v?.fix_error && <span className="block text-bad">{v.fix_error}</span>}</span>)}
                       </Td>
                     </tr>
                   );
@@ -257,16 +303,38 @@ export function PutawayClient() {
             </CardContent>
           </Card>
 
-          {step === "review" && (
+          {step === "review" && !confirming && (
             <Card><CardContent className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm">{fmtNum(counts.new)} baris baru{resolved > 0 && ` + ${fmtNum(resolved)} konflik yang diputuskan`} akan diposting sebagai mutasi putaway. {counts.conflict - resolved > 0 && `${fmtNum(counts.conflict - resolved)} konflik dilewati; yang qty/isinya berbeda masuk daftar Hitung stok.`}</p>
-              <Button onClick={post} disabled={busy || toPost + toCount === 0}><Upload className="h-4 w-4" />{busy ? "Memposting…" : toPost ? `Posting ${fmtNum(toPost)} baris` : `Buat ${fmtNum(toCount)} tugas hitung`}</Button>
+              <p className="text-sm">{fmtNum(counts.new)} baris baru{resolved > 0 && ` + ${fmtNum(resolved)} konflik yang diputuskan`} akan diposting sebagai mutasi putaway. {counts.conflict - resolved > 0 && `${fmtNum(counts.conflict - resolved)} konflik dilewati; yang qty/isinya berbeda masuk daftar Hitung stok.`}
+                {fixOpen > 0 && <span className="block text-bad">{fmtNum(fixOpen)} baris &quot;Sheet benar&quot; belum lengkap.</span>}</p>
+              <Button onClick={() => void review()} disabled={busy || toPost + toCount === 0 || fixOpen > 0}><Upload className="h-4 w-4" />{busy ? "Memeriksa…" : toPost ? `Posting ${fmtNum(toPost)} baris…` : `Buat ${fmtNum(toCount)} tugas hitung…`}</Button>
+            </CardContent></Card>
+          )}
+
+          {step === "review" && confirming && (
+            <Card className="border-l-4 border-ckb"><CardContent className="space-y-3 text-sm">
+              <p className="font-cond text-lg font-semibold">Konfirmasi posting</p>
+              <p>{fmtNum(toPost)} baris diposting sebagai putaway{toCount > 0 && `, ${fmtNum(toCount)} konflik menjadi tugas Hitung stok`}.</p>
+              {fixRows.length > 0 && (
+                <div className="space-y-1">
+                  <p className="font-semibold">Isi bin dibetulkan (sheet benar):</p>
+                  <ul className="list-disc pl-5">{fixRows.map((r) => <li key={r.line}>Baris {r.line} · {fixSummary(r, fixes[r.line] ?? [], limit)}</li>)}</ul>
+                </div>
+              )}
+              <div className="max-w-xs"><Label htmlFor="putaway-name">Nama Anda{fixRows.length > 0 ? " (wajib)" : ""}</Label>
+                <Input id="putaway-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="nama yang memposting" /></div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={post} disabled={busy || (fixRows.length > 0 && name.trim().length < 2)}><Upload className="h-4 w-4" />{busy ? "Memposting…" : "Ya, posting"}</Button>
+                <Button variant="outline" onClick={() => setConfirming(false)} disabled={busy}>Batal</Button>
+              </div>
             </CardContent></Card>
           )}
         </>
       )}
 
       {step === "done" && <Button onClick={reset}>Upload sheet lain</Button>}
+
+      {step !== "review" && <PutawayHistory key={historyKey} />}
     </div>
   );
 }
