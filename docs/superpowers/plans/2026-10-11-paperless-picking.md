@@ -91,6 +91,11 @@ rows = sheet.replace('create or replace function public.post_wave_sheet(', 'crea
 rows = rows.replace(role62, """  -- 0067: split_task / unpost_task accept the engine's own calls (post_wave_sheet, post_pick_line).
   perform set_config('app.sheet_engine', 'on', true);
 """)
+# Ruling (pre-flight): a pallet whose Bin To Bin was already posted (Posting Bin To Bin saja) no longer
+# holds the rest, so the pick needs only its own quantity there; adding the rest booked a FOUND correction.
+bug = "(pc->>'qty')::numeric + case when i = 1 and k = 0 and v_to is not null and v_mq > 0 then v_mq else 0 end"
+assert rows.count(bug) == 1
+rows = rows.replace(bug, "(pc->>'qty')::numeric + case when i = 1 and k = 0 and v_to is not null and v_mq > 0\n              and (m.id is null or m.status <> 'COMPLETED') then v_mq else 0 end")
 assert rows.count("  return jsonb_build_object('rows', n_rows, 'auto', v_out);\n") == 1
 rows = rows.replace("  return jsonb_build_object('rows', n_rows, 'auto', v_out);\n",
                     "  perform set_config('app.sheet_engine', '', true);\n  return jsonb_build_object('rows', n_rows, 'auto', v_out);\n")
@@ -118,6 +123,9 @@ out = """-- ====================================================================
 --
 --  · post_wave_sheet's body is post_wave_sheet_rows (no role check, not
 --    callable by clients); post_wave_sheet = supervisor check + call.
+--  · Fix: a pick whose pallet rest was already moved (Posting Bin To Bin
+--    saja) no longer asks the pallet to hold that rest too, which booked
+--    the rest again as a Koreksi picklist (FOUND).
 --  · split_task / unpost_task also accept the engine's own calls
 --    (app.sheet_engine, set only inside post_wave_sheet_rows), so an
 --    operator's two-bin line or own re-post works.
@@ -393,9 +401,10 @@ select post_task((select m from ids2), 30, null, null, null, null) \g /dev/null
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 create temp table rm as select post_pick_line((select w from ids2), pg_temp.row((select p from ids2), (select m from ids2),
   '[{"bin":"CC01A01","batch":"S1","expiry":"2030-09-01","qty":6}]', 'CC01A02', 30), 'Ani', 'sesuai') as r;
-select pg_temp.check('pick posted after its move was posted early keeps the move: CC01A02 30, CC01A01 0',
-  (select r->>'result' from rm) in ('posted', 'refused') and pg_temp.qty('CC01A02', '550071397') = 30
-  and pg_temp.qty('CC01A01', '550071397') = (case (select r->>'result' from rm) when 'posted' then 0 else 6 end));
+select pg_temp.check('pick posted after its move was posted early keeps the move: CC01A02 30, CC01A01 0, nothing invented',
+  (select r->>'result' = 'posted' and (r->>'corrections')::int = 0 from rm) and pg_temp.qty('CC01A02', '550071397') = 30
+  and pg_temp.qty('CC01A01', '550071397') = 0
+  and not exists (select 1 from movements m join bins b on b.id = m.to_bin_id where b.bin_code = 'CC01A01' and m.reason_code = 'FOUND'));
 rollback;
 ```
 
@@ -569,7 +578,7 @@ grant execute on function public.post_pick_line(uuid, jsonb, text, text, text) t
 - [ ] **Step 4: Run test 39 and the sheet tests**
 
 Run: `PGUSER=postgres scripts/sql-test.sh supabase/tests/39_pick_line.sql supabase/tests/32_post_wave_sheet.sql supabase/tests/36_sheet_pallet_first.sql`
-Expected: `39_pick_line.sql: 21 PASS, 0 FAIL` (17 checks + 4 refusals), 32 and 36 unchanged and all PASS. If "pick posted after its move was posted early" fails, read the `rm` result: `post_wave_sheet_rows` must not undo a COMPLETED move that matches the row (its step 1 compares and keeps it).
+Expected: `39_pick_line.sql: 21 PASS, 0 FAIL` (17 checks + 4 refusals), 32 and 36 unchanged and all PASS. "pick posted after its move was posted early" depends on Task 1's engine fix (the rest is not required again once the move is posted).
 
 - [ ] **Step 5: Commit**
 
@@ -675,7 +684,7 @@ test('problems: above the order, empty or unknown bin, destination = source, res
   const over = line(); over.sources[0].qty = '14';
   assert.match(lineProblem(over, BINS)!, /paling banyak 13/);
   const empty = line(); empty.sources[0].bin = ' ';
-  assert.match(lineProblem(empty, BINS)!, /isi bin/);
+  assert.match(lineProblem(empty, BINS)!, /Isi bin asal/);
   const unknown = line(); unknown.sources[0].bin = 'CX99A01';
   assert.match(lineProblem(unknown, BINS)!, /CX99A01 tidak ada/);
   const same = line(); same.moveTo = 'cb34d02';
@@ -999,6 +1008,8 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
   line: SheetLine; unit: string; stock: SheetStock[]; bins: Set<string> | null; person: string; waveId: string; onPosted: () => void;
 }) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm" | "check">("view");
+  // Sesuai = the plan as is; Berbeda / Ubah = edited (decides the default reason).
+  const [edited, setEdited] = useState(false);
   const [draft, setDraft] = useState<SheetLine>(line);
   const [reason, setReason] = useState("");
   const [scan, setScan] = useState("");
@@ -1018,7 +1029,7 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
   function open(edit: boolean) {
     const d = structuredClone(line);
     if (!line.posted && line.move) d.moveQty = String(leftoverAfter(d, stock) || Number(line.move.quantity));
-    setDraft(d); setReason(""); setMessage(null);
+    setDraft(d); setReason(""); setMessage(null); setEdited(edit);
     setMode(edit ? "edit" : "confirm");
   }
   const setSource = (i: number, patch: Partial<SheetLine["sources"][number]>) => setDraft((d) => {
@@ -1036,7 +1047,7 @@ export function PickLineCard({ line, unit, stock, bins, person, waveId, onPosted
     setBusy(true); setMessage(null);
     const { data, error } = await createClient().rpc("post_pick_line", {
       p_wave_id: waveId, p_row: linePayload(target), p_by_name: person,
-      p_reason: reason.trim() || (target === line ? "sesuai picklist" : "berbeda di lapangan"), p_scanned: scanned,
+      p_reason: reason.trim() || (edited ? "berbeda di lapangan" : "sesuai picklist"), p_scanned: scanned,
     });
     setBusy(false);
     if (error) { setMessage({ tone: "bad", text: error.message }); return; }
