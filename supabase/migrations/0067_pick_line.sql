@@ -395,3 +395,306 @@ join public.bins fb on fb.id = t.from_bin_id
 left join public.bins tb on tb.id = t.to_bin_id
 left join public.profiles p on p.id = t.completed_by
 left join public.bins ab on ab.id = t.actual_from_bin_id;
+
+-- ---------------------------------------------------------------------
+-- Minta supervisor: a picker's line that needs a supervisor (0067)
+-- ---------------------------------------------------------------------
+create table public.pick_line_requests (
+  id             uuid primary key default gen_random_uuid(),
+  wave_id        uuid not null references public.waves(id) on delete cascade,
+  pick_id        uuid references public.pick_tasks(id) on delete cascade,
+  move_id        uuid references public.pick_tasks(id) on delete cascade,
+  row            jsonb not null,
+  by_name        text not null,
+  kind           text not null check (kind in ('correction_over_limit', 'other_picker', 'audited', 'loaded', 'wave_not_pending')),
+  message        text not null,
+  -- The line as it was when refused: it drops off the open list once posted (again) after that.
+  task_post_no   int not null,
+  task_was_done  boolean not null,
+  created_at     timestamptz not null default now(),
+  status         text not null default 'OPEN' check (status in ('OPEN', 'CLOSED')),
+  closed_by_name text,
+  closed_at      timestamptz,
+  close_note     text
+);
+create index pick_line_requests_open_idx on public.pick_line_requests (wave_id, created_at) where status = 'OPEN';
+alter table public.pick_line_requests enable row level security;
+create policy "pick_line_requests: read" on public.pick_line_requests for select to authenticated using (true);
+grant select on public.pick_line_requests to authenticated;
+
+-- Open requests whose line has not been posted (again) since: a supervisor posting it makes it drop off.
+-- Compared on the task's posting counter, not on time (one transaction has one now()).
+create or replace view public.pick_line_requests_open with (security_invoker = true) as
+select r.*, w.wave_no, w.planned_date, t.seq, t.shipment_number, it.sku, it.description, it.uom, fb.bin_code as from_bin
+from public.pick_line_requests r
+join public.waves w on w.id = r.wave_id
+left join public.pick_tasks t on t.id = coalesce(r.pick_id, r.move_id)
+left join public.items it on it.id = t.item_id
+left join public.bins fb on fb.id = t.from_bin_id
+where r.status = 'OPEN' and w.status <> 'CANCELLED'
+  and not (t.status = 'COMPLETED' and (not r.task_was_done or t.post_no > r.task_post_no));
+grant select on public.pick_line_requests_open to authenticated;
+
+create or replace function public.close_pick_line_request(p_id uuid, p_by_name text, p_note text)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if not public.has_role(array['supervisor','admin']::public.user_role[]) then
+    raise exception 'Hanya supervisor atau admin yang bisa menutup permintaan';
+  end if;
+  v_name := public.person_name(p_by_name, 'Nama Anda');
+  if nullif(trim(p_note), '') is null then raise exception 'Catatan wajib diisi'; end if;
+  update public.pick_line_requests set status = 'CLOSED', closed_by_name = v_name, closed_at = now(), close_note = trim(p_note)
+  where id = p_id and status = 'OPEN';
+  if not found then raise exception 'Permintaan tidak ada atau sudah ditutup'; end if;
+end $$;
+revoke execute on function public.close_pick_line_request(uuid, text, text) from public, anon;
+grant execute on function public.close_pick_line_request(uuid, text, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- post_pick_line: one line from the picking screen, any role (0067)
+-- ---------------------------------------------------------------------
+create or replace function public.post_pick_line(p_wave_id uuid, p_row jsonb, p_by_name text, p_reason text, p_scanned text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_name text; w public.waves%rowtype; t public.pick_tasks%rowtype; m public.pick_tasks%rowtype;
+  v_total numeric; v_sku text; v_ean text; v_scan_sku text; v_posted_by text;
+  v_limit numeric := (public.inventory_policy()->>'adjust_approval_qty')::numeric;
+  v_kind text; v_msg text; v_res jsonb; c jsonb; v_req uuid; v_corr int := 0;
+begin
+  if not public.has_role(array['operator','supervisor','admin']::public.user_role[]) then
+    raise exception 'Masuk dulu untuk posting';
+  end if;
+  v_name := public.person_name(p_by_name, 'Nama picker');
+  select * into w from public.waves where id = p_wave_id;
+  if w.id is null then raise exception 'Wave tidak ditemukan'; end if;
+  if nullif(p_row->>'pick_id', '') is not null then
+    select * into t from public.pick_tasks where id = (p_row->>'pick_id')::uuid;
+    if t.id is null or t.wave_id <> w.id or t.task_type <> 'PICK' then raise exception 'Baris ini bukan pick wave NO %', w.wave_no; end if;
+  end if;
+  if nullif(p_row->>'move_id', '') is not null then
+    select * into m from public.pick_tasks where id = (p_row->>'move_id')::uuid;
+    if m.id is null or m.wave_id <> w.id or m.task_type = 'PICK' then raise exception 'Bin To Bin ini bukan milik wave NO %', w.wave_no; end if;
+  end if;
+  if t.id is null and m.id is null then raise exception 'Baris tanpa tugas'; end if;
+
+  -- Input the picker fixes on the card: never recorded.
+  select coalesce(sum(coalesce((s->>'qty')::numeric, 0)), 0) into v_total
+  from jsonb_array_elements(coalesce(p_row->'sources', '[]'::jsonb)) s;
+  if t.id is not null and v_total > t.quantity then
+    raise exception 'Lebih dari order: paling banyak % untuk baris ini', t.quantity;
+  end if;
+  if t.id is not null then
+    select sku, ean into v_sku, v_ean from public.items where id = t.item_id;
+    if nullif(trim(p_scanned), '') is not null then
+      select sku into v_scan_sku from public.item_by_barcode(p_scanned) limit 1;
+      if v_scan_sku is null then raise exception 'Barcode % tidak dikenal di master item', trim(p_scanned); end if;
+      if v_scan_sku <> v_sku then raise exception 'Barang salah: yang di-scan SKU %, baris ini SKU %', v_scan_sku, v_sku; end if;
+    elsif t.status = 'PLANNED' and v_ean is not null and coalesce((public.inventory_policy()->>'require_scan_on_pick')::boolean, false) then
+      raise exception 'Scan barcode SKU % dulu (atau ketik SKU-nya)', v_sku;
+    end if;
+  end if;
+
+  -- What only a supervisor may do: recorded, nothing posted.
+  if w.status <> 'PENDING' then
+    v_kind := 'wave_not_pending';
+    v_msg := format('Wave NO %s sedang %s: minta supervisor', w.wave_no,
+                    case w.status when 'RESCHEDULED' then 'Tunda' when 'COMPLETED' then 'selesai' else 'dibatalkan' end);
+  elsif t.status = 'COMPLETED' or (t.id is null and m.status = 'COMPLETED') then
+    v_posted_by := coalesce(t.picked_by_name, m.picked_by_name);
+    if not public.same_person(v_posted_by, v_name) then
+      v_kind := 'other_picker';
+      v_msg := format('Baris ini diposting oleh %s: minta supervisor', coalesce(v_posted_by, 'orang lain'));
+    elsif t.id is not null and exists (select 1 from public.pick_audits where task_id = t.id) then
+      v_kind := 'audited';
+      v_msg := 'Baris ini sudah diaudit picking: minta supervisor';
+    elsif t.id is not null and exists (select 1 from public.shipment_loads where wave_id = t.wave_id and shipment_number = t.shipment_number) then
+      v_kind := 'loaded';
+      v_msg := format('Shipment %s sudah dimuat: minta supervisor', t.shipment_number);
+    end if;
+  end if;
+
+  if v_kind is null then
+    begin
+      v_res := public.post_wave_sheet_rows(p_wave_id, jsonb_build_array(p_row), v_name,
+                                           coalesce(nullif(trim(p_reason), ''), 'picking'));
+      for c in select e from jsonb_array_elements(coalesce(v_res->'auto', '[]'::jsonb)) e where e->>'kind' = 'correction' loop
+        v_corr := v_corr + 1;
+        if (c->>'qty')::numeric > v_limit then
+          v_kind := 'correction_over_limit';
+          v_msg := format('Sistem hanya punya %s di %s untuk SKU %s batch %s, diambil %s: minta supervisor',
+                          c->>'had', c->>'bin', c->>'sku', coalesce(nullif(c->>'batch', ''), '–'),
+                          (c->>'had')::numeric + (c->>'qty')::numeric);
+          raise exception using errcode = 'PL001', message = v_msg;
+        end if;
+      end loop;
+    exception when sqlstate 'PL001' then
+      v_res := null;  -- the savepoint rolled the whole line back; v_kind / v_msg stay set
+    end;
+  end if;
+
+  if v_kind is not null then
+    -- One open request per line: a retry updates it.
+    update public.pick_line_requests set row = p_row, by_name = v_name, kind = v_kind, message = v_msg, created_at = now(),
+      task_post_no = coalesce(t.post_no, m.post_no), task_was_done = coalesce(t.status, m.status) = 'COMPLETED'
+    where status = 'OPEN' and pick_id is not distinct from t.id and move_id is not distinct from m.id
+    returning id into v_req;
+    if v_req is null then
+      insert into public.pick_line_requests (wave_id, pick_id, move_id, row, by_name, kind, message, task_post_no, task_was_done)
+      values (w.id, t.id, m.id, p_row, v_name, v_kind, v_msg, coalesce(t.post_no, m.post_no), coalesce(t.status, m.status) = 'COMPLETED')
+      returning id into v_req;
+    end if;
+    return jsonb_build_object('result', 'refused', 'kind', v_kind, 'message', v_msg, 'request_id', v_req);
+  end if;
+
+  return jsonb_build_object('result', 'posted', 'posted_by', v_name, 'corrections', v_corr,
+                            'auto', v_res->'auto', 'rows', v_res->'rows');
+end $$;
+revoke execute on function public.post_pick_line(uuid, jsonb, text, text, text) from public, anon;
+grant execute on function public.post_pick_line(uuid, jsonb, text, text, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- The engine's own adjustments (Koreksi picklist, undo of a posting) are made for
+-- an operator's line too: the role check yields to app.sheet_engine, which only
+-- post_wave_sheet_rows sets. Everything else in the guard is unchanged.
+-- ---------------------------------------------------------------------
+create or replace function public.guard_adjustment_policy()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_limit numeric;
+begin
+  new.reason_code := coalesce(new.reason_code, nullif(current_setting('app.adjust_reason', true), ''));
+  new.by_name := coalesce(nullif(trim(new.by_name), ''), nullif(current_setting('app.by_name', true), ''));
+  if new.type <> 'adjustment' or auth.uid() is null then return new; end if;
+
+  if not public.has_role(array['supervisor','admin']::public.user_role[])
+     and coalesce(current_setting('app.sheet_engine', true), '') <> 'on' then
+    raise exception 'Only supervisors or admins can post adjustments';
+  end if;
+  if new.reason_code is null then raise exception 'Kode alasan adjustment wajib dipilih'; end if;
+  if nullif(trim(new.note), '') is null then raise exception 'Keterangan adjustment wajib diisi'; end if;
+  if new.by_name is null then raise exception 'Nama petugas wajib diisi untuk adjustment'; end if;
+  new.by_name := public.person_name(new.by_name);
+
+  v_limit := (public.inventory_policy()->>'adjust_approval_qty')::numeric;
+  if abs(new.quantity) > v_limit and coalesce(current_setting('app.adjust_approved', true), '') <> 'on' then
+    raise exception 'Adjustment % unit melebihi batas % unit: ajukan persetujuan (Inventory → Persetujuan), disetujui orang lain.',
+      abs(new.quantity), v_limit;
+  end if;
+  return new;
+end $$;
+revoke execute on function public.guard_adjustment_policy() from public, anon, authenticated;
+
+-- apply_movement (0017) with the same yield to the engine for its adjustments; nothing else changed.
+create or replace function public.apply_movement()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  src public.inventory%rowtype;
+  n_rows int;
+  v_exp date := new.expiry_date;
+  v_rec date := coalesce(new.received_date, current_date);
+  v_to_status public.bin_status;
+  v_to_zone text;
+  v_from_zone text;
+begin
+  -- Force the author to be the caller (seed/import from SQL editor have no auth.uid()).
+  if auth.uid() is not null then new.user_id := auth.uid(); end if;
+
+  -- Adjustments are supervisor/admin only (defence in depth; RLS checks too).
+  if new.type = 'adjustment' and auth.uid() is not null
+     and not public.has_role(array['supervisor','admin']::public.user_role[])
+     and coalesce(current_setting('app.sheet_engine', true), '') <> 'on' then
+    raise exception 'Only supervisors or admins can post adjustments';
+  end if;
+
+  -- Quarantine is blocked for picking but is where held / damaged stock goes:
+  -- supervisors may move stock in; nothing is ever picked out of it.
+  if new.to_bin_id is not null and new.type <> 'adjustment' then
+    select status, zone into v_to_status, v_to_zone from public.bins where id = new.to_bin_id;
+    if v_to_zone = 'QUARANTINE' then
+      if auth.uid() is not null and not public.has_role(array['supervisor','admin']::public.user_role[]) then
+        raise exception 'Hanya supervisor atau admin yang bisa memindahkan stok ke karantina';
+      end if;
+    elsif v_to_status = 'blocked' then
+      raise exception 'Destination bin is blocked';
+    end if;
+  end if;
+  if new.type = 'picking' and new.from_bin_id is not null then
+    select zone into v_from_zone from public.bins where id = new.from_bin_id;
+    if v_from_zone = 'QUARANTINE' then raise exception 'Stok karantina tidak boleh dipick'; end if;
+  end if;
+
+  -- 1) Take stock out of the source bin (picking, transfer, putaway from staging).
+  if new.from_bin_id is not null then
+    select count(*) into n_rows from public.inventory
+      where bin_id = new.from_bin_id and item_id = new.item_id and batch_lot = new.batch_lot
+        and (new.expiry_date is null or expiry_date = new.expiry_date);
+    if n_rows > 1 then
+      raise exception 'Batch % has several expiry dates in this bin; specify the expiry date', new.batch_lot;
+    end if;
+    select * into src from public.inventory
+      where bin_id = new.from_bin_id and item_id = new.item_id and batch_lot = new.batch_lot
+        and (new.expiry_date is null or expiry_date = new.expiry_date)
+      for update;
+    if not found or src.quantity < new.quantity then
+      raise exception 'Insufficient stock in source bin (available %, requested %)',
+        coalesce(src.quantity, 0), new.quantity;
+    end if;
+    if src.quantity = new.quantity then
+      delete from public.inventory where id = src.id;
+    else
+      update public.inventory set quantity = quantity - new.quantity, updated_at = now() where id = src.id;
+    end if;
+    -- Moved stock keeps its original dates (FEFO depends on it).
+    v_exp := src.expiry_date;
+    v_rec := coalesce(src.received_date, v_rec);
+    new.expiry_date := src.expiry_date;
+  end if;
+
+  -- 2) Put stock into the destination bin.
+  if new.type in ('inbound','putaway','transfer') then
+    if new.type in ('inbound','putaway') and new.from_bin_id is null and v_exp is null then
+      raise exception 'Expiry date is required when receiving stock';
+    end if;
+    insert into public.inventory (bin_id, item_id, batch_lot, quantity, expiry_date, received_date)
+    values (new.to_bin_id, new.item_id, new.batch_lot, new.quantity, v_exp, v_rec)
+    on conflict (bin_id, item_id, batch_lot, (coalesce(expiry_date, 'infinity'::date)))
+    do update set quantity = public.inventory.quantity + excluded.quantity, updated_at = now();
+
+  elsif new.type = 'adjustment' then
+    -- Signed correction on to_bin. Creates the row for opening balances / found stock.
+    -- Exact identity match first. Without an expiry, fall back to the batch's
+    -- only row in this bin (the pre-expiry-identity behaviour); ambiguous if
+    -- the batch has several expiry dates here.
+    select * into src from public.inventory
+      where bin_id = new.to_bin_id and item_id = new.item_id and batch_lot = new.batch_lot
+        and expiry_date is not distinct from new.expiry_date
+      for update;
+    if not found and new.expiry_date is null then
+      select count(*) into n_rows from public.inventory
+        where bin_id = new.to_bin_id and item_id = new.item_id and batch_lot = new.batch_lot;
+      if n_rows > 1 then
+        raise exception 'Batch % has several expiry dates in this bin; specify the expiry date', new.batch_lot;
+      end if;
+      select * into src from public.inventory
+        where bin_id = new.to_bin_id and item_id = new.item_id and batch_lot = new.batch_lot
+        for update;
+    end if;
+    if src.id is null then
+      if new.quantity < 0 then raise exception 'Cannot adjust below zero: no stock of this batch in bin'; end if;
+      insert into public.inventory (bin_id, item_id, batch_lot, quantity, expiry_date, received_date)
+      values (new.to_bin_id, new.item_id, new.batch_lot, new.quantity, new.expiry_date, new.received_date);
+    elsif src.quantity + new.quantity < 0 then
+      raise exception 'Adjustment would make stock negative (current %)', src.quantity;
+    elsif src.quantity + new.quantity = 0 then
+      delete from public.inventory where id = src.id;
+    else
+      update public.inventory set quantity = quantity + new.quantity, updated_at = now()
+      where id = src.id;
+    end if;
+    -- The ledger row records the identity it actually changed.
+    new.expiry_date := coalesce(new.expiry_date, src.expiry_date);
+  end if;
+
+  return new;
+end $$;
+
