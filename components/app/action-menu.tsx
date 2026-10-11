@@ -1,4 +1,3 @@
-"use client";
 import * as React from "react";
 import { MoreHorizontal } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
