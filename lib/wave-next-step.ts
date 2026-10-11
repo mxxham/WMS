@@ -74,6 +74,11 @@ export function dayNextStep(waves: WaveFacts[], d: DayFacts): DayStep {
   if (next) {
     return { text: `Mulai NO ${next.wave_no}${next.planned_slot ? ` (${next.planned_slot})` : ""}: ${next.open} baris.`, target: { kind: "wave", id: next.id } };
   }
+  // Not finished while a wave still waits to be closed or sits on Tunda.
+  const unclosed = waveOrder(waves).find((w) => w.status === "PENDING" && w.open === 0);
+  if (unclosed) return { text: `Tutup NO ${unclosed.wave_no}: semua baris sudah diposting.`, target: { kind: "wave", id: unclosed.id } };
+  const parked = waveOrder(waves).find((w) => w.status === "RESCHEDULED");
+  if (parked) return { text: `NO ${parked.wave_no} ditunda: ${parked.open} baris belum diambil.`, target: { kind: "wave", id: parked.id } };
   if (waves.length === 0) return { text: "Belum ada rencana untuk hari ini.", target: null };
   return { text: "Semua wave hari ini selesai.", target: null };
 }

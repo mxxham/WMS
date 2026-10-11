@@ -19,6 +19,8 @@ type Home = { label: string; file: string; host: string; uses: string };
 const homes: Home[] = [
   // wave level
   { label: 'Picklist', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'WaveMenu' },
+  // the old page showed Mulai picking on every running wave with lines, also when one was blocked
+  { label: 'Mulai picking', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'onStartPicking' },
   { label: 'Isi dari picklist', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'canSheet' },
   { label: 'Tambah item', file: 'add-order.tsx', host: 'wave-menu.tsx', uses: 'AddItems' },
   { label: 'Selesaikan wave', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'CompleteWaveButton' },
@@ -66,6 +68,18 @@ test('phone: lines use the same LineMenu and LinePrimary, panels the phone layou
   const screen = src('mobile/wave-screen.tsx');
   assert.ok(screen.includes('<LineMenu') && screen.includes('<LinePrimary'), 'wave-screen does not use LineMenu / LinePrimary');
   assert.ok(src('mobile/phone-layout.tsx').includes('m.panels("phone")'), 'phone-layout does not render the phone panels');
+});
+
+test('Buka lagi: the dialog reads the preview\'s blocked flag and turns the undo off', () => {
+  const menu = src('wave-menu.tsx');
+  assert.ok(/blocked: boolean/.test(menu) && menu.includes('b.blocked'), 'ReopenWaveButton ignores blocked');
+});
+test('Pulihkan wave: no replan from inside the restore dialog (it unmounts on refresh, and replans the whole day unconfirmed)', () => {
+  assert.ok(!src('wave-menu.tsx').includes('replanRemaining'), 'wave-menu still calls replanRemaining');
+});
+test('both layouts hand WaveMenu a way to start picking', () => {
+  assert.match(src('waves-client.tsx'), /<WaveMenu[^>]*onStartPicking=/, 'desktop WaveMenu has no onStartPicking');
+  assert.match(src('mobile/wave-screen.tsx'), /<WaveMenu[^>]*onStartPicking=/, 'phone WaveMenu has no onStartPicking');
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

@@ -156,8 +156,11 @@ select 'picking', id, 'RW1', 30, (select id from bins where bin_code = 'CC12A02'
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 insert into snap values ('drained', pg_temp.stock());
-select pg_temp.check('reopen refuses when a bulk Bin To Bin can no longer be sent back; nothing changed',
-  pg_temp.fails($q$select reopen_wave(pg_temp.wave('2026-12-02'), 'Supervisor', 'x', true)$q$, '%')
+select pg_temp.check('the preview flags the Bin To Bin that can no longer be sent back',
+  (select (e->>'blocked')::boolean from jsonb_array_elements(reopen_wave_preview(pg_temp.wave('2026-12-02'))->'bulk') e where (e->>'seq')::int = 2)
+  and not (select (e->>'blocked')::boolean from jsonb_array_elements(reopen_wave_preview(pg_temp.wave('2026-12-02'))->'bulk') e where (e->>'seq')::int = 1));
+select pg_temp.check('reopen refuses when a bulk Bin To Bin can no longer be sent back, naming the line; nothing changed',
+  pg_temp.fails($q$select reopen_wave(pg_temp.wave('2026-12-02'), 'Supervisor', 'x', true)$q$, 'Baris #2 (Bin To Bin CC11A02 ke CC12A02) tidak bisa dikembalikan%')
   and pg_temp.stock() = (select s from snap where name = 'drained')
   and (select status from waves where id = pg_temp.wave('2026-12-02')) = 'COMPLETED'
   and pg_temp.st('2026-12-02', 2) = 'COMPLETED');

@@ -23,6 +23,12 @@ export const lineIds = (it: LineItem) => (it.kind === "pair" ? [it.pick, it.move
 export const lineDone = (it: LineItem) => lineIds(it).every((t) => t.status === "COMPLETED");
 export const lineCancelled = (it: LineItem) => lineIds(it).every((t) => t.status === "CANCELLED");
 
+/** Finished lines fold away behind a toggle; the toggle shows whenever one exists, also when every line is finished. */
+export function foldDone(visible: LineItem[], showDone: boolean): { listed: LineItem[]; doneCount: number; toggle: boolean } {
+  const doneCount = visible.filter(lineDone).length;
+  return { listed: showDone ? visible : visible.filter((it) => !lineDone(it)), doneCount, toggle: doneCount > 0 };
+}
+
 /** Everything both layouts need about the day, computed once. */
 export type WaveModel = {
   date: string; prevDate: string | null; nextDate: string | null;

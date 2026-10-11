@@ -59,6 +59,14 @@ test('day: all finished, or no plan', () => {
     { text: 'Semua wave hari ini selesai.', target: null });
   assert.deepEqual(dayNextStep([], { short: [], requests: 0, waiting: [] }), { text: 'Belum ada rencana untuk hari ini.', target: null });
 });
+test('day: a wave fully posted but not closed is not "selesai"', () => {
+  const d = [w({ id: 'a', wave_no: '1', status: 'COMPLETED' }), w({ id: 'c', wave_no: '3', open: 0, total: 9 })];
+  assert.deepEqual(dayNextStep(d, { short: [], requests: 0, waiting: [] }), { text: 'Tutup NO 3: semua baris sudah diposting.', target: { kind: 'wave', id: 'c' } });
+});
+test('day: a wave on Tunda is not "selesai"', () => {
+  const d = [w({ id: 'a', wave_no: '1', status: 'COMPLETED' }), w({ id: 'g', wave_no: '7', status: 'RESCHEDULED', open: 4, total: 4 })];
+  assert.deepEqual(dayNextStep(d, { short: [], requests: 0, waiting: [] }), { text: 'NO 7 ditunda: 4 baris belum diambil.', target: { kind: 'wave', id: 'g' } });
+});
 test('wave order: running by slot then NO, then finished, then cancelled', () => {
   const list = [
     w({ id: 'x', wave_no: '9', status: 'CANCELLED' }), w({ id: 'f', wave_no: '1', status: 'COMPLETED' }),

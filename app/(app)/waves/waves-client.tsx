@@ -30,7 +30,7 @@ import { WaveMenu } from "./wave-menu";
 import { DayBar } from "./day-bar";
 import { ProblemsSummary, type ProblemCounts } from "./problems-summary";
 import { useIsPhone } from "./use-is-phone";
-import { NO_FILTER, filterActive, lineCancelled, lineDone, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
+import { NO_FILTER, filterActive, foldDone, lineCancelled, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
 import { WavePrimary } from "./wave-primary";
 
 export type { OutboundDetail, TaskWait } from "./wave-parts";
@@ -294,7 +294,8 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
         </button>
         <div className="flex items-center gap-1">
           {primary}
-          <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop" date={m.date}
+          <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop"
+            onStartPicking={() => { setSheet(false); setPicking(true); if (!open) onToggle(); }}
             onPrint={() => m.printWave(w)} onOpenSheet={() => { setSheet(true); setSheetFromRequest(false); if (!open) onToggle(); }} />
         </div>
       </div>
@@ -316,8 +317,7 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
   const [showOrders, setShowOrders] = useState(false);
   const cancelledCount = rows.filter(lineCancelled).length;
   const visible = showCancelled || w.status === "CANCELLED" ? rows : rows.filter((it) => !lineCancelled(it));
-  const doneCount = visible.filter(lineDone).length;
-  const listed = showDone ? visible : visible.filter((it) => !lineDone(it));
+  const { listed, doneCount, toggle } = foldDone(visible, showDone);
   const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
   const binLink = (code: string) => <BinButton code={code} className="font-semibold underline-offset-2 hover:underline">{code}</BinButton>;
 
@@ -352,7 +352,7 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
         })}</tbody>
       </Table>
       <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2">
-        {doneCount > 0 && doneCount < visible.length && (
+        {toggle && (
           <button className="text-sm underline" onClick={() => setShowDone((v) => !v)}>
             {showDone ? `${fmtNum(doneCount)} selesai — sembunyikan` : `${fmtNum(doneCount)} selesai — tampilkan`}
           </button>

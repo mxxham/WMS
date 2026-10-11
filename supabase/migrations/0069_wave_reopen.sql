@@ -161,11 +161,25 @@ begin
   return jsonb_build_object(
     'wave_no', w.wave_no,
     'loaded', coalesce((select jsonb_agg(l.shipment_number order by l.shipment_number) from public.shipment_loads l where l.wave_id = w.id), '[]'::jsonb),
-    'bulk', coalesce((select jsonb_agg(jsonb_build_object(
+    'bulk', coalesce((
+      with bl as (select * from public.wave_bulk_lines(w.id))
+      select jsonb_agg(jsonb_build_object(
                'task_id', t.id, 'seq', t.seq, 'task_type', t.task_type, 'sku', it.sku,
                'bin', b.bin_code, 'to_bin', tb.bin_code, 'quantity', coalesce(t.actual_quantity, t.quantity),
-               'audited', exists (select 1 from public.pick_audits a where a.task_id = t.id)) order by t.seq)
-             from public.wave_bulk_lines(w.id) t
+               'audited', exists (select 1 from public.pick_audits a where a.task_id = t.id),
+               -- A bulk Bin To Bin goes back only if its destination still holds it, counting the later
+               -- bulk picks from there that the undo returns first (it runs newest first). Same rule as
+               -- the refusal in reopen_wave, which stays the authority.
+               'blocked', t.task_type = 'REPLENISH' and coalesce((
+                   select sum(i.quantity) from public.inventory i
+                   where i.bin_id = t.to_bin_id and i.item_id = t.item_id and i.batch_lot = coalesce(t.actual_batch_lot, t.batch_lot)), 0)
+                 + coalesce((
+                   select sum(coalesce(p.actual_quantity, p.quantity)) from bl p
+                   where p.task_type = 'PICK' and p.seq > t.seq and p.item_id = t.item_id
+                     and coalesce(p.actual_from_bin_id, p.from_bin_id) = t.to_bin_id
+                     and coalesce(p.actual_batch_lot, p.batch_lot) = coalesce(t.actual_batch_lot, t.batch_lot)), 0)
+                 < coalesce(t.actual_quantity, t.quantity)) order by t.seq)
+             from bl t
              join public.items it on it.id = t.item_id
              join public.bins b on b.id = coalesce(t.actual_from_bin_id, t.from_bin_id)
              left join public.bins tb on tb.id = t.to_bin_id), '[]'::jsonb));
@@ -194,8 +208,20 @@ begin
     order by bl.seq limit 1;
     if v_seq is not null then raise exception 'Baris #% sudah diaudit: batalkan lewat audit dulu', v_seq; end if;
     -- Later picks before the moves that fed them: a move is sent back only after its pickface's picks returned.
-    for t in select b.id from public.wave_bulk_lines(w.id) b order by b.seq desc loop
-      perform public.unpost_task(t.id, v_name, 'buka lagi: ' || v_reason);
+    for t in select b.id, b.seq, b.task_type, fb.bin_code as from_code, tb.bin_code as to_code
+             from public.wave_bulk_lines(w.id) b
+             join public.bins fb on fb.id = coalesce(b.actual_from_bin_id, b.from_bin_id)
+             left join public.bins tb on tb.id = b.to_bin_id
+             order by b.seq desc loop
+      begin
+        perform public.unpost_task(t.id, v_name, 'buka lagi: ' || v_reason);
+      exception when others then
+        -- Name the line; the whole reopen still rolls back.
+        if t.task_type = 'REPLENISH' then
+          raise exception 'Baris #% (Bin To Bin % ke %) tidak bisa dikembalikan: %. Buka lagi tanpa membatalkan baris massal, lalu betulkan baris itu sendiri.', t.seq, t.from_code, t.to_code, sqlerrm;
+        end if;
+        raise exception 'Baris #% (pick dari %) tidak bisa dikembalikan: %', t.seq, t.from_code, sqlerrm;
+      end;
       n := n + 1;
     end loop;
   end if;

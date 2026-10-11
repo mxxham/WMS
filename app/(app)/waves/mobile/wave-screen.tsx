@@ -12,7 +12,7 @@ import { OrderQtyButton } from "../wave-corrections";
 import { WaveMenu } from "../wave-menu";
 import { WavePrimary } from "../wave-primary";
 import { Actual, BinChip, REASON, StatusTag, type OutboundDetail } from "../wave-parts";
-import { filterActive, lineCancelled, lineDone, lineProps, rowMatches, type RowFilter, type WaveModel } from "../wave-model";
+import { filterActive, foldDone, lineCancelled, lineDone, lineProps, rowMatches, type RowFilter, type WaveModel } from "../wave-model";
 
 const PickingPanel = dynamic(() => import("../picking-panel").then((m) => m.PickingPanel), {
   ssr: false, loading: () => <p className="p-4 text-sm text-steel-500">Membuka layar picking…</p>,
@@ -53,7 +53,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
   const rows = active ? all.filter((it) => rowMatches(it, filter, m.short, m.waits)) : all;
   const cancelledCount = rows.filter(lineCancelled).length;
   const visible = showCancelled || w.status === "CANCELLED" ? rows : rows.filter((it) => !lineCancelled(it));
-  const openRows = visible.filter((it) => !lineDone(it));
+  const openRows = foldDone(visible, false).listed;
   const doneRows = visible.filter(lineDone);
   const shortOrders = outbound.filter((o) => Number(o.quantity_allocated) < Number(o.quantity_requested));
   const primary = <WavePrimary model={m} wave={w} primary={next.primary} layout="phone" onStart={onStartPicking} onShowProblems={onShowProblems} />;
@@ -70,7 +70,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
           <h1 className="font-cond text-xl font-semibold leading-tight">NO {w.wave_no}{w.planned_slot ? ` · ${w.planned_slot}` : ""}</h1>
           <p className="truncate text-xs text-steel-500 tabular">{w.shipment_numbers.join(", ")}</p>
         </div>
-        <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" date={m.date} onPrint={() => m.printWave(w)} />
+        <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" onStartPicking={onStartPicking} onPrint={() => m.printWave(w)} />
       </div>
 
       <div className={cn("space-y-3 px-4 pt-3", hasPrimary ? "pb-28" : "pb-4")}>
