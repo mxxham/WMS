@@ -43,7 +43,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
 
   return (
     <main>
-      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads"]}>
+      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads", "pick_line_requests"]}>
         <form className="flex items-center gap-2">
           <Input type="date" name="date" defaultValue={date} className="w-auto" aria-label="Tanggal" />
           <Button type="submit" variant="outline">Tampilkan</Button>

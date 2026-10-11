@@ -254,7 +254,12 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
   const [expanded, setExpanded] = useState(!finished);
   // Isi dari picklist (0057) opens in place of the table, for this wave only.
   const [sheet, setSheet] = useState(false);
-  useEffect(() => { if (sheetAt) { setSheet(true); setExpanded(true); } }, [sheetAt]);
+  // A sheet opened from a request closes when the selection moves to another wave; a sheet opened by hand stays.
+  const [sheetFromRequest, setSheetFromRequest] = useState(false);
+  useEffect(() => {
+    if (sheetAt) { setSheet(true); setExpanded(true); setSheetFromRequest(true); }
+    else if (sheetFromRequest) { setSheet(false); setSheetFromRequest(false); }
+  }, [sheetAt]); // eslint-disable-line react-hooks/exhaustive-deps
   // Picking (0067): the wave line by line for the floor, any role.
   const [picking, setPicking] = useState(false);
   const canPick = w.status === "PENDING" && live > 0;
@@ -330,7 +335,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
             </Button>
           )}
           {canSheet && !sheet && (
-            <Button size="sm" variant={open.length > 0 ? "default" : "outline"} onClick={() => setSheet(true)}
+            <Button size="sm" variant={open.length > 0 ? "default" : "outline"} onClick={() => { setSheet(true); setSheetFromRequest(false); }}
               title="Salin picklist kertas yang sudah diisi, lalu posting semua baris sekaligus">
               <ClipboardList className="h-4 w-4" />Isi dari picklist
             </Button>
@@ -349,7 +354,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
         </div>
       </CardHeader>
 
-      {sheet && <WaveSheetPanel wave={w} tasks={tasks} prefill={sheetAt?.row} onClose={() => { setSheet(false); onSheetAtDone(); }} />}
+      {sheet && <WaveSheetPanel key={sheetAt?.id ?? "plain"} wave={w} tasks={tasks} prefill={sheetAt?.row} onClose={() => { setSheet(false); setSheetFromRequest(false); if (sheetAt) onSheetAtDone(); }} />}
       {picking && <PickingPanel wave={w} tasks={tasks}
         orders={outbound.map((o) => ({ shipment_number: o.shipment_number, sku: o.sku, description: o.description, quantity_requested: Number(o.quantity_requested), shortage_reason: o.shortage_reason }))}
         onClose={() => setPicking(false)} />}

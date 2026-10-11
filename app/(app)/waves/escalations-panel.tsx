@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ConfirmButton } from "@/components/app/confirm-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,11 +30,12 @@ export function EscalationsPanel({ rows, supervisor, person, onOpenSheet }: {
   const [error, setError] = useState<string | null>(null);
   if (!rows.length) return null;
 
-  async function close(r: LineRequest) {
+  async function close(r: LineRequest): Promise<string | null> {
     setError(null);
-    const { error } = await createClient().rpc("close_pick_line_request", { p_id: r.id, p_by_name: person, p_note: note[r.id] ?? "" });
-    if (error) return setError(error.message);
+    const { error } = await createClient().rpc("close_pick_line_request", { p_id: r.id, p_by_name: person, p_note: (note[r.id] ?? "").trim() });
+    if (error) return error.message;
     router.refresh();
+    return null;
   }
 
   return (
@@ -43,18 +45,21 @@ export function EscalationsPanel({ rows, supervisor, person, onOpenSheet }: {
         {error && <p role="alert" className="text-sm text-bad">{error}</p>}
         {rows.map((r) => {
           const unit = unitOf(r.sku ?? "", r.uom);
-          const took = r.row.sources.map((s) => `${fmtNum(s.qty)} ${unit} dari ${s.bin}`).join(" + ");
+          const took = (r.row?.sources ?? []).map((s) => `${fmtNum(s.qty)} ${unit} dari ${s.bin}`).join(" + ");
           return (
             <div key={r.id} className="space-y-2 rounded-md border border-steel-200 p-3 text-sm">
               <p><b>NO {r.wave_no} #{r.seq ?? "–"}</b> · {r.sku} {r.description} · {KIND[r.kind] ?? r.kind}</p>
-              <p className="text-steel-500">{r.by_name}, {new Date(r.created_at).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })}: ambil {took}{r.row.move_to && `, sisa ${fmtNum(r.row.move_qty ?? 0)} ${unit} ke ${r.row.move_to}`}</p>
+              <p className="text-steel-500">{r.by_name}, {new Date(r.created_at).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })}: ambil {took}{r.row?.move_to && `, sisa ${fmtNum(r.row.move_qty ?? 0)} ${unit} ke ${r.row.move_to}`}</p>
               <p className="text-warn">{r.message}</p>
               {supervisor && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" onClick={() => onOpenSheet(r)}>Isi dari picklist</Button>
                   <Input aria-label={`Catatan tutup ${r.wave_no} #${r.seq}`} className="h-8 w-56" placeholder="catatan (wajib untuk Tutup)"
-                    value={note[r.id] ?? ""} onChange={(e) => setNote({ ...note, [r.id]: e.target.value })} />
-                  <Button size="sm" variant="outline" disabled={!(note[r.id] ?? "").trim() || person.trim().length < 2} onClick={() => void close(r)}>Tutup</Button>
+                    value={note[r.id] ?? ""} onChange={(e) => { const v = e.target.value; setNote((n) => ({ ...n, [r.id]: v })); }} />
+                  <ConfirmButton size="sm" variant="outline" disabled={!(note[r.id] ?? "").trim() || person.trim().length < 2}
+                    title={`Tutup permintaan NO ${r.wave_no} #${r.seq ?? "–"}`} confirmLabel="Tutup permintaan"
+                    summary={`Tutup permintaan NO ${r.wave_no} #${r.seq ?? "–"} dari ${r.by_name} tanpa posting: ${(note[r.id] ?? "").trim()}.`}
+                    onConfirm={() => close(r)}>Tutup</ConfirmButton>
                 </div>
               )}
             </div>

@@ -736,3 +736,17 @@ begin
   return new;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Live updates: a new Minta supervisor request reaches an open Wave page
+-- without a reload. Same guard as 0015 (plain Postgres has no publication).
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    raise notice 'supabase_realtime publication not found; skipping';
+    return;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'pick_line_requests') then
+    alter publication supabase_realtime add table public.pick_line_requests;
+  end if;
+end $$;

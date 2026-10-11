@@ -44,16 +44,18 @@ export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { i
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [auto, setAuto] = useState<Auto[]>([]);
+  // Once the sheet is posted, Muat ulang must not re-apply the picker's values to a posted line.
+  const prefillUsed = useRef(false);
 
   async function load() {
     loadedAs.current = signature(tasks);
     const sheet = buildSheet(tasks);
-    if (prefill) {
+    if (prefill && !prefillUsed.current) {
       const key = prefill.pick_id ?? prefill.move_id;
       const l = sheet.lines.find((x) => x.key === key);
       if (l) {
         // What the picker posted on the phone (0067): the supervisor checks it and posts.
-        l.sources = prefill.sources.map((s) => ({ bin: s.bin, batch: s.batch, expiry: s.expiry ?? "", qty: String(s.qty) }));
+        l.sources = (prefill.sources ?? []).map((s) => ({ bin: s.bin, batch: s.batch, expiry: s.expiry ?? "", qty: String(s.qty) }));
         l.moveTo = prefill.move_to ?? ""; l.moveQty = prefill.move_qty === null ? "" : String(prefill.move_qty);
         l.done = true;
         setTimeout(() => document.querySelector(`[data-sheet="${w.id}"][data-r="${sheet.lines.indexOf(l)}"]`)?.scrollIntoView({ block: "center" }), 300);
@@ -120,6 +122,7 @@ export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { i
     setBusy(false);
     if (error) { setStep("edit"); return setError(error.message); }
     setAuto(((data as { auto?: Auto[] } | null)?.auto ?? []));
+    prefillUsed.current = true;
     setStep("done");
     router.refresh();
   }
