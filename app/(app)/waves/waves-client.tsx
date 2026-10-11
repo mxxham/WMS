@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -25,6 +25,7 @@ import { CorrectionsPanel, type PicklistCorrection } from "./corrections-panel";
 import { RowHistory } from "./row-history";
 import { ImpactNote } from "./impact-note";
 import { PostMoveEarlyButton } from "./post-move-early";
+import { EscalationsPanel, type LineRequest } from "./escalations-panel";
 import { ProblemsPanel, type OpenCount } from "./problems-panel";
 import { pairMoves } from "@/lib/allocator/pair-moves";
 
@@ -121,7 +122,7 @@ function StatusTag({ status }: { status: string }) {
  * (stock changes here, not when the plan was saved). Supervisors can also
  * cancel or reschedule; operators only execute.
  */
-export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [] }: {
+export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
   date: string; role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
@@ -135,11 +136,15 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
   lastImport?: string | null;
   /** koreksi picklist booked for this date's waves (0057) */
   corrections?: PicklistCorrection[];
+  /** Minta supervisor (0067): picker lines the picking screen could not post */
+  requests?: LineRequest[];
 }) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
   const supervisor = role === "supervisor" || role === "admin";
   const [filter, setFilter] = useState<RowFilter>({ q: "", onlyOpen: false, onlyProblems: false });
+  // The request whose line the sheet opens at (Isi dari picklist).
+  const [sheetAt, setSheetAt] = useState<LineRequest | null>(null);
 
   async function rpc(fn: string, args: Record<string, unknown>): Promise<string | null> {
     const { error } = await createClient().rpc(fn, args);
@@ -186,6 +191,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
     <>
       <ProblemsPanel waves={waves} tasks={tasks} short={short} waits={waits} counts={counts} lastImport={lastImport} supervisor={supervisor} rpc={rpc}
         extra={supervisor && untouched.length > 0 && shortInUntouched ? replanButton("plate") : undefined} />
+      <EscalationsPanel rows={requests} supervisor={supervisor} person={person} onOpenSheet={setSheetAt} />
       <CorrectionsPanel date={date} rows={corrections} canAdjust={supervisor} />
       <PersonNameField className="max-w-xs" value={person} onChange={setPerson} label="Nama Anda (dicatat di setiap posting)" />
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -204,6 +210,7 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
       <FilterBar filter={filter} onChange={setFilter} />
       {waves.map((w) => (
         <WaveCard key={w.id} wave={w} supervisor={supervisor} rpc={rpc} short={short} audit={audit} waits={waits} rest={rest} filter={filter} onDone={() => router.refresh()}
+          sheetAt={sheetAt?.wave_id === w.id ? sheetAt : null} onSheetAtDone={() => setSheetAt(null)}
           print={() => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`)}
           tasks={tasks.filter((t) => t.wave_id === w.id)} outbound={outbound.filter((o) => o.wave_id === w.id)} />
       ))}
@@ -211,9 +218,11 @@ export function WavesClient({ date, role, waves, tasks, outbound, shortfalls, au
   );
 }
 
-function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, waits, rest, filter, onDone, print }: {
+function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, waits, rest, filter, onDone, print, sheetAt, onSheetAtDone }: {
   wave: WaveRow; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[]; supervisor: boolean; print: () => void;
   filter: RowFilter;
+  /** the request whose line the sheet opens at, for this wave only */
+  sheetAt: LineRequest | null; onSheetAtDone: () => void;
   /** Opened pallets without their own move: where the rest goes (same text as the printed Bin To Bin). */
   rest: Map<string, string>;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<string | null>;
@@ -245,6 +254,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
   const [expanded, setExpanded] = useState(!finished);
   // Isi dari picklist (0057) opens in place of the table, for this wave only.
   const [sheet, setSheet] = useState(false);
+  useEffect(() => { if (sheetAt) { setSheet(true); setExpanded(true); } }, [sheetAt]);
   // Picking (0067): the wave line by line for the floor, any role.
   const [picking, setPicking] = useState(false);
   const canPick = w.status === "PENDING" && live > 0;
@@ -339,7 +349,7 @@ function WaveCard({ wave: w, tasks, outbound, supervisor, rpc, short, audit, wai
         </div>
       </CardHeader>
 
-      {sheet && <WaveSheetPanel wave={w} tasks={tasks} onClose={() => setSheet(false)} />}
+      {sheet && <WaveSheetPanel wave={w} tasks={tasks} prefill={sheetAt?.row} onClose={() => { setSheet(false); onSheetAtDone(); }} />}
       {picking && <PickingPanel wave={w} tasks={tasks}
         orders={outbound.map((o) => ({ shipment_number: o.shipment_number, sku: o.sku, description: o.description, quantity_requested: Number(o.quantity_requested), shortage_reason: o.shortage_reason }))}
         onClose={() => setPicking(false)} />}

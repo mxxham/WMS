@@ -9,7 +9,7 @@ import { usePersonName } from "@/components/app/person-name";
 import { fetchAll } from "@/lib/fetch-all";
 import { cn, fmtNum } from "@/lib/utils";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
-import { buildSheet, leftoverAfter, lineChanged, sheetNotes, sheetPayload, sheetSummary, type SheetIncoming, type SheetLine, type SheetSource, type SheetStock } from "@/lib/wave-sheet";
+import { buildSheet, leftoverAfter, lineChanged, sheetNotes, sheetPayload, sheetSummary, type SheetIncoming, type SheetLine, type SheetRow, type SheetSource, type SheetStock } from "@/lib/wave-sheet";
 
 const REASONS = ["sesuai picklist cetak", "bin kosong / kurang", "palet terhalang", "karton rusak"];
 type Auto = { kind: "correction"; bin: string; sku: string; batch: string; qty: number; had: number }
@@ -28,7 +28,7 @@ type Auto = { kind: "correction"; bin: string; sku: string; batch: string; qty: 
  */
 const signature = (tasks: TaskRow[]) => tasks.map((t) => `${t.id}:${t.status}:${t.quantity}:${t.from_bin}:${t.to_bin}`).sort().join("|");
 
-export function WaveSheetPanel({ wave: w, tasks, onClose }: { wave: { id: string; wave_no: string }; tasks: TaskRow[]; onClose: () => void }) {
+export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { id: string; wave_no: string }; tasks: TaskRow[]; onClose: () => void; prefill?: SheetRow | null }) {
   const router = useRouter();
   const loadedAs = useRef<string | null>(null);
   const [sent, setSent] = useState(0);
@@ -48,8 +48,20 @@ export function WaveSheetPanel({ wave: w, tasks, onClose }: { wave: { id: string
   async function load() {
     loadedAs.current = signature(tasks);
     const sheet = buildSheet(tasks);
+    if (prefill) {
+      const key = prefill.pick_id ?? prefill.move_id;
+      const l = sheet.lines.find((x) => x.key === key);
+      if (l) {
+        // What the picker posted on the phone (0067): the supervisor checks it and posts.
+        l.sources = prefill.sources.map((s) => ({ bin: s.bin, batch: s.batch, expiry: s.expiry ?? "", qty: String(s.qty) }));
+        l.moveTo = prefill.move_to ?? ""; l.moveQty = prefill.move_qty === null ? "" : String(prefill.move_qty);
+        l.done = true;
+        setTimeout(() => document.querySelector(`[data-sheet="${w.id}"][data-r="${sheet.lines.indexOf(l)}"]`)?.scrollIntoView({ block: "center" }), 300);
+      }
+    }
     setLines(sheet.lines);
-    setInitial(new Map(sheet.lines.map((l) => [l.key, structuredClone(l)])));
+    // The plan as printed, untouched by the prefill: the prefilled values show as changes against it.
+    setInitial(new Map(buildSheet(tasks).lines.map((l) => [l.key, structuredClone(l)])));
     setCancelled(sheet.cancelled);
     setStep("edit"); setError(null); setAuto([]); setReason(REASONS[0]);
     const db = createClient();

@@ -9,6 +9,7 @@ import type { OutboundRow, TaskRow, WaveRow } from "@/lib/allocator/picklist-fro
 import type { ShipmentState } from "@/lib/pick-audit";
 import type { PicklistCorrection } from "./corrections-panel";
 import { WavesClient, type OutboundDetail, type TaskWait } from "./waves-client";
+import type { LineRequest } from "./escalations-panel";
 import type { OpenCount } from "./problems-panel";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
   const supabase = await createClient();
 
-  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }, { data: waits }, { data: counts }, { data: lastImport }, { data: corrections }] = await Promise.all([
+  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }, { data: waits }, { data: counts }, { data: lastImport }, { data: corrections }, { data: requests }] = await Promise.all([
     supabase.from("waves").select("id, wave_no, planned_date, shipment_numbers, truck, destination, planned_slot, status")
       .eq("planned_date", date).order("planned_slot", { nullsFirst: false }).order("wave_no"),
     fetchAll<TaskRow>((from, to) => supabase.from("pick_task_detail").select("*").eq("planned_date", date).order("seq").order("id").range(from, to)),
@@ -35,6 +36,8 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     supabase.from("movements").select("created_at").like("note", "IMPORT % (not in file)").order("created_at", { ascending: false }).limit(1),
     // Koreksi picklist of this date (0057): what the paper took that the system did not have.
     supabase.from("picklist_corrections").select("*").eq("planned_date", date).order("sku").order("bin_code"),
+    // Minta supervisor (0067): picker lines the picking screen could not post.
+    supabase.from("pick_line_requests_open").select("*").eq("planned_date", date).order("created_at"),
   ]);
   const dates = [...new Set((recent ?? []).map((r) => r.planned_date as string))].slice(0, 7);
 
@@ -64,6 +67,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           counts={(counts ?? []) as OpenCount[]}
           lastImport={(lastImport?.[0]?.created_at as string | undefined) ?? null}
           corrections={(corrections ?? []) as PicklistCorrection[]}
+          requests={(requests ?? []) as LineRequest[]}
         />
       </div>
     </main>
