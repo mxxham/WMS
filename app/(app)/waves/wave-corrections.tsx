@@ -342,7 +342,7 @@ export function SplitButton({ task: t }: { task: TaskRow }) {
       <div>
         <Label htmlFor="sp-keep">Tetap di tugas ini ({t.from_bin})</Label>
         <Input id="sp-keep" type="number" min={1} max={total - 1} value={keep} onChange={(e) => setKeep(e.target.value)} placeholder={`1–${total - 1}`} />
-        {ready && <p className="mt-1 text-sm">Tugas baru: <b>{fmtNum(total - k)}</b>, tepat di bawahnya.</p>}
+        {ready && <p className="mt-1 text-sm">Tugas baru: <b>{fmtNum(total - k)}</b>, tepat di bawah tugas ini (atau di bawah Bin To Bin-nya, kalau baris ini punya).</p>}
       </div>
     </CorrectionDialog>
   );
