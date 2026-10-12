@@ -144,7 +144,8 @@ The values below are **assumptions**. Change each one in the single file or menu
    ```sql
    update public.profiles set role = 'admin', name = 'Gudang' where id = (select id from auth.users where email = '<site account email>');
    ```
-   Fill in `SITE_ACCOUNT_EMAIL` and `SITE_ACCOUNT_PASSWORD` in the hosting environment (Vercel) and in `.env.local`. Every visitor shares this account session, so the app opens straight away.
+   Fill in `SITE_ACCOUNT_EMAIL` and `SITE_ACCOUNT_PASSWORD` in the hosting environment (Vercel) and in `.env.local`. While `LOGIN_REQUIRED` is not `true`, every visitor shares this account session, so the app opens straight away (migration `0071` gives it the username `gudang`).
+   **Personal accounts (login).** Built, not required yet. To switch on, between shifts: (1) `supabase db push` and deploy with `LOGIN_REQUIRED` unset — nothing changes; (2) sign in at `/login` as `gudang` with the site-account password, create everyone's accounts on `Pengguna` and hand out usernames and starting passwords; (3) set `LOGIN_REQUIRED=true` in Vercel and redeploy; (4) change `gudang`'s password (`Reset kata sandi`) and remove `SITE_ACCOUNT_EMAIL` / `SITE_ACCOUNT_PASSWORD`. Until step 3, personal accounts protect nothing: anyone can be the shared admin.
 5. **Authentication → Providers → Email**: turn off "Allow new users to sign up".
 
 Regenerating the seed from a new WMS file:
@@ -198,6 +199,7 @@ psql -f supabase/tests/38_putaway_fix.sql                # Sheet benar and Riway
 psql -f supabase/tests/39_pick_line.sql                  # paperless picking, Minta supervisor (0067), same
 psql -f supabase/tests/40_rack_scan.sql                  # pick confirmed by the rack label (0068), same
 psql -f supabase/tests/41_wave_reopen.sql                # Buka lagi and Pulihkan wave (0069), same
+psql -f supabase/tests/42_accounts.sql                   # personal accounts, deactivation, sign-in limit (0071), same
 ```
 Or all of them at once against a temporary local database: `scripts/sql-test.sh`.
 
@@ -371,6 +373,7 @@ Everything here exists because of something that happened on the floor; each mig
 - `0068` **Rack scan** — the barcodes on the floor are on the racking, so every posting at a bin (`Mulai picking`, `Posting`, a pick with its pallet move, `Ambil dari bin lain`) is confirmed by that bin's location label, scanned or typed, never by an item barcode (`items.ean` is empty). A wrong label is refused before anything posts: `Bin salah: kamu scan X, baris ini Y`. Each completed task records `scan_method` (`scan` / `ketik`) and the confirmed code; `unpost_task` clears them.
 - `0069` **`Buka lagi`** (a finished wave) and **`Pulihkan wave`** (a cancelled one), supervisor and admin, with a name and a reason. `Buka lagi` sets the wave and its orders running again and offers to undo the lines `Selesaikan wave` posted in bulk (`pick_tasks.bulk_source`), newest first, each stock movement reversed into the exact bin, batch and expiry it left; lines posted one by one stay posted. It refuses when a shipment is already loaded or a bulk line was audited. `Pulihkan wave` returns the lines cancelled with the wave to the plan and moves no stock; it warns, before restoring, about a bin that no longer covers its line and offers `Hitung ulang wave tersisa`. Neither changes `Remain Qty` except by those reversing movements.
 - `0070` `fefo_exceptions` (the Dashboard's `FEFO compliance` tile) rewritten to read each bin's movements through its index instead of re-scanning the period for every pick: same rows, 39 s down to 0.1 s on the local copy. Before, the tile timed out on every load.
+- `0071` **Personal accounts** (login, not required yet: `LOGIN_REQUIRED`): `profiles.username` / `active`, admin-only `set_user_role` / `set_user_active`, `account_email` for the server-side sign-in, deactivation enforced before every request and in every read/insert policy, and a per-username + IP sign-in limit. See §2 for switching it on.
 - **`Bandingkan dengan sistem`** (Import page, after validation): the WMS file against the system's stock now, nothing imported. Per bin and SKU: same, batch/expiry name only, moved to another bin (the SKU total agrees), quantity differs, only in the file, only in the system; filter chips and `Unduh selisih`. The way to run the system next to the WMS sheet until they agree every morning.
 - **Undoing a posted Bin To Bin** asks for confirmation that the cartons physically went back; a move that happened (to another bin or quantity) is corrected with `Isi dari picklist` or `Mutasi`, not undone.
 

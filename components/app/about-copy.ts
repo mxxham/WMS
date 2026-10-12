@@ -29,8 +29,8 @@ export const ABOUT = {
   privacyContact: "Supervisor gudang WSM SUB 2",
   privacy: [
     { h: "Apa yang dicatat", p: [
-      "Nama orang yang memposting, mengubah, mengaudit, menghitung atau menyetujui sesuatu di sistem, beserta waktunya.",
-      "Nama yang Anda ketik disimpan di perangkat ini (browser) supaya tidak perlu diketik ulang. Data itu hanya ada di perangkat ini.",
+      "Nama orang yang memposting, mengubah, mengaudit, menghitung atau menyetujui sesuatu di sistem, beserta waktunya. Jika Anda masuk dengan akun sendiri, akun Anda (nama dan nama pengguna) juga tercatat pada setiap tindakan itu.",
+      "Tanpa akun sendiri, nama yang Anda ketik disimpan di perangkat ini (browser) supaya tidak perlu diketik ulang; data itu hanya ada di perangkat ini. Dengan akun sendiri, nama diisi dari akun dan tidak disimpan di perangkat.",
       "Tidak ada data lain tentang pekerja: tidak ada nomor telepon, alamat, foto, atau lokasi.",
     ] },
     { h: "Untuk apa", p: [
