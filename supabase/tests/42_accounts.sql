@@ -33,6 +33,15 @@ select pg_temp.check('username from app metadata, lowercased',
   (select username from profiles where id = 'a1111111-1111-1111-1111-111111111111') = 'gudang');
 select pg_temp.check('a username in user metadata (which the user controls) is ignored: derived from the email instead',
   (select username ~ '^[a-z0-9._-]{3,32}$' and username like 'budi.santoso%' from profiles where id = 'a3333333-3333-3333-3333-333333333333'));
+-- Supabase's admin API inserts the user, then writes app_metadata in a second step.
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data) values
+  ('a5555555-5555-5555-5555-555555555555','sementara@x','{"name":"Eka"}','{"provider":"email"}');
+update auth.users set raw_app_meta_data = raw_app_meta_data || '{"username":"eka.putri_gudang-surabaya-shift2"}' where id = 'a5555555-5555-5555-5555-555555555555';
+select pg_temp.check('a username set in app metadata after the insert (as the admin API does) reaches the profile, all 32 characters',
+  (select username from profiles where id = 'a5555555-5555-5555-5555-555555555555') = 'eka.putri_gudang-surabaya-shift2');
+update auth.users set raw_app_meta_data = raw_app_meta_data || '{"username":"ani"}' where id = 'a5555555-5555-5555-5555-555555555555';
+select pg_temp.check('a later app-metadata username that is already taken leaves the profile as it was',
+  (select username from profiles where id = 'a5555555-5555-5555-5555-555555555555') = 'eka.putri_gudang-surabaya-shift2');
 select pg_temp.check('a duplicate username is refused',
   pg_temp.fails($q$update profiles set username = 'ani' where id = 'a3333333-3333-3333-3333-333333333333'$q$, '%duplicate key%'));
 select pg_temp.check('capitals are refused by the format check',

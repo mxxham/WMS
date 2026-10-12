@@ -34,11 +34,11 @@ update public.profiles set username = 'gudang', role = 'admin' where id = '5e853
 -- Everyone else: from their email's local part, made valid and unique.
 create or replace function public.derive_username(p_email text, p_id uuid) returns text
 language plpgsql stable set search_path = public as $$
-declare v text := left(regexp_replace(lower(split_part(coalesce(p_email, ''), '@', 1)), '[^a-z0-9._-]', '', 'g'), 24);
+declare v text := left(regexp_replace(lower(split_part(coalesce(p_email, ''), '@', 1)), '[^a-z0-9._-]', '', 'g'), 32);
 begin
   if length(v) < 3 then v := 'user'; end if;
   if exists (select 1 from public.profiles where username = v and id <> p_id) then
-    v := v || '-' || left(replace(p_id::text, '-', ''), 6);
+    v := left(v, 25) || '-' || left(replace(p_id::text, '-', ''), 6);
   end if;
   return v;
 end $$;
@@ -65,6 +65,23 @@ begin
   on conflict (id) do nothing;
   return new;
 end $$;
+
+-- Supabase's admin API inserts the user and writes app_metadata in a second step, so the insert
+-- trigger above usually sees no username yet: take it when it arrives (if valid and free).
+create or replace function public.sync_username()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v text := lower(trim(coalesce(new.raw_app_meta_data->>'username', '')));
+begin
+  if v ~ '^[a-z0-9._-]{3,32}$' and v is distinct from lower(trim(coalesce(old.raw_app_meta_data->>'username', '')))
+     and not exists (select 1 from public.profiles where username = v and id <> new.id) then
+    update public.profiles set username = v where id = new.id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_app_meta on auth.users;
+create trigger on_auth_user_app_meta after update of raw_app_meta_data on auth.users
+  for each row execute function public.sync_username();
 
 create or replace function public.has_role(roles public.user_role[])
 returns boolean language sql stable security definer set search_path = public as $$
@@ -184,7 +201,7 @@ language sql stable security definer set search_path = public as $$
   where p.username = lower(trim(p_username)) and p.active
 $$;
 
-revoke execute on function public.accounts_guard(uuid), public.derive_username(text, uuid) from public, anon, authenticated;
+revoke execute on function public.accounts_guard(uuid), public.derive_username(text, uuid), public.sync_username() from public, anon, authenticated;
 revoke execute on function public.account_email(text), public.login_allowed(text, text), public.login_result(text, text, boolean) from public, anon, authenticated;
 grant execute on function public.account_email(text), public.login_allowed(text, text), public.login_result(text, text, boolean) to service_role;
 grant execute on function public.check_request(), public.is_active() to anon, authenticated;
