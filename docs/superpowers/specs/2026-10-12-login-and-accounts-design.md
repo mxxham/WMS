@@ -69,14 +69,15 @@ can use the site. The user asked for a login page with a role per login.
 - AGENTS.md: replace "Every visitor shares this one session … Do not add per-user auth" with the
   new model; README setup and §1 updated; `.env.example` without the site account.
 
-## 5. Cutover (user runs the push/deploy, as always)
+## 5. Cutover (user runs the push/deploy, as always; between shifts)
 
-1. `supabase db push` (0068–0071). Nothing visible changes yet; `gudang` is now admin with a username.
-2. Set a known password for `gudang` (script or Supabase dashboard) and, on the old site, nothing
-   changes; on a local or preview build, sign in as `gudang` and create everyone's accounts.
-   (Accounts are rows in the live database, so creating them from a preview deployment pointed at
-   it is fine.)
-3. Deploy the app: the login page appears; people sign in with the accounts they were given.
+1. `supabase db push` (0068–0071). Nothing visible changes: the old app still signs everyone in as
+   Gudang, which now also has username `gudang` and role admin.
+2. Deploy the app. The login page appears.
+3. Sign in as `gudang` with the current site-account password (the `SITE_ACCOUNT_PASSWORD` value in
+   Vercel), open `Pengguna`, create everyone's accounts, and hand out usernames and starting
+   passwords before the shift starts. Then change `gudang`'s password (`Reset kata sandi`).
+4. Remove `SITE_ACCOUNT_EMAIL` / `SITE_ACCOUNT_PASSWORD` from Vercel (no longer read).
 
 ## 6. Testing
 
