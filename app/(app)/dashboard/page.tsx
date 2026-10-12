@@ -13,8 +13,8 @@ import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
 import { jakartaDate, locType } from "@/lib/inventory-view";
 
-// fefo_exceptions takes ~8s on the live data set; cache the counts for 15 min
-// so dashboard loads don't wait on it. A cached function may not read cookies
+// fefo_exceptions timed out (over 8 s) before 0070 made it ~0.1 s; the counts
+// are still cached for 15 min so dashboard loads don't wait on it. A cached function may not read cookies
 // (5 Oct: every /dashboard load crashed, digest 2046118177), so it uses the
 // server-only client: two read-only, warehouse-wide counts with no per-user
 // rule, and the page has already required a signed-in supervisor.
