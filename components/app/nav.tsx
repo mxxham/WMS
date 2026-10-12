@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/types";
 import { mobileLinksFor, sectionsFor } from "./nav-config";
-import { AccountBox } from "./account";
+import { AccountBox, AccountSwitch } from "./account";
 import { BRAND } from "@/config/brand";
 
 export function Nav({ role }: { role: Role }) {
@@ -40,6 +40,7 @@ export function Nav({ role }: { role: Role }) {
           ))}
         </nav>
         <AccountBox />
+        <AccountSwitch />
       </aside>
       {/* Mobile bottom bar: five floor-work links fit one thumb row */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-ckb-dark bg-ckb text-white lg:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>

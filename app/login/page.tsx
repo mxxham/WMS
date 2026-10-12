@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { BRAND } from "@/config/brand";
 import { ABOUT } from "@/components/app/about-copy";
 import { LoginForm } from "./login-form";
+import { loginRequired } from "@/lib/auth-route";
 
 /** Sign in (spec §1). Outside the app layout: no nav, no footer, no welcome screen. */
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; nonaktif?: string }> }) {
@@ -19,6 +21,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
         <p className="text-sm text-steel-500">Masuk dengan akun yang dibuat admin gudang.</p>
+        {!loginRequired() && <p className="rounded-md bg-ckb-tint/60 p-2 text-sm">Login belum diwajibkan: tanpa masuk, situs memakai akun bersama. <Link href="/" className="font-semibold underline">Kembali ke aplikasi</Link></p>}
         {sp.nonaktif && <p role="alert" className="text-sm text-bad">Akun ini dinonaktifkan. Hubungi admin.</p>}
         <LoginForm next={sp.next ?? ""} />
         <p className="text-xs text-steel-500">{ABOUT.copyright} · {ABOUT.internal}</p>

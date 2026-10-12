@@ -1,5 +1,5 @@
 "use client";
-import { LogOut } from "lucide-react";
+import { LogIn, LogOut } from "lucide-react";
 import { ActionMenu, MenuSection } from "@/components/app/action-menu";
 import { useSession } from "./session";
 
@@ -12,6 +12,11 @@ function SignOut({ className }: { className?: string }) {
       <button type="submit" className={className}><LogOut className="h-4 w-4" />Keluar</button>
     </form>
   );
+}
+
+/** Login not required (today): anyone can still sign in as their own account. */
+function SignInAsOther({ className }: { className?: string }) {
+  return <a href="/login" className={className}><LogIn className="h-4 w-4" />Masuk sebagai akun lain</a>;
 }
 
 /** Bottom of the desktop sidebar: who is signed in, and Keluar. */
@@ -29,6 +34,17 @@ export function AccountBox() {
   );
 }
 
+/** Under the sidebar account box while login is not required. */
+export function AccountSwitch() {
+  const s = useSession();
+  if (!s || s.loginRequired) return null;
+  return (
+    <div className="px-4 pb-3 text-xs">
+      <SignInAsOther className="inline-flex min-h-9 items-center gap-1 text-white/70 underline-offset-2 hover:text-white hover:underline" />
+    </div>
+  );
+}
+
 /** Phone page header: the account's initial; tapping shows name, role and Keluar. */
 export function AccountButton() {
   const s = useSession();
@@ -40,7 +56,7 @@ export function AccountButton() {
       </button>
     }>
       <p className="px-3 pb-2 text-sm text-steel-500">{s.username} · {ROLE[s.role] ?? s.role}</p>
-      <MenuSection><SignOut /></MenuSection>
+      <MenuSection>{!s.loginRequired && <div><SignInAsOther /></div>}<SignOut /></MenuSection>
     </ActionMenu>
   );
 }

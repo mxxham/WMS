@@ -10,13 +10,23 @@ function test(name: string, fn: () => void) {
 console.log('\nSign-in wiring');
 const src = (f: string) => readFileSync(f, 'utf8');
 
-test('the middleware no longer signs anyone in; it applies authRedirect', () => {
+test('the middleware follows authRoute, and signs in as the site account only for "shared" (login not required)', () => {
   const m = src('middleware.ts');
-  assert.ok(!m.includes('signInWithPassword') && !m.includes('SITE_ACCOUNT'), 'middleware still signs in');
-  assert.ok(m.includes('authRedirect('), 'middleware does not use authRedirect');
+  assert.ok(m.includes('authRoute(') && m.includes('loginRequired()'), 'middleware does not use authRoute with the switch');
+  const shared = m.indexOf('"shared"');
+  assert.ok(shared > 0 && m.indexOf('signInWithPassword') > shared, 'the site-account sign-in is not limited to the shared case');
 });
-test('no code reads the site account any more', () => {
-  for (const f of ['middleware.ts', 'lib/auth.ts', '.env.example', 'app/login/actions.ts']) assert.ok(!src(f).includes('SITE_ACCOUNT'), f);
+test('only the middleware reads the site account; .env.example documents the switch', () => {
+  for (const f of ['lib/auth.ts', 'app/login/actions.ts', 'lib/auth-route.ts']) assert.ok(!src(f).includes('SITE_ACCOUNT'), f);
+  const env = src('.env.example');
+  assert.ok(env.includes('LOGIN_REQUIRED=') && env.includes('SITE_ACCOUNT_EMAIL='), '.env.example lacks the switch or the site account');
+});
+test('Keluar goes back to the shared account while login is not required', () => {
+  assert.ok(src('app/keluar/route.ts').includes('loginRequired()'), '/keluar ignores the switch');
+});
+test('while login is not required, the account menu offers signing in as yourself', () => {
+  const acc = src('components/app/account.tsx');
+  assert.ok(acc.includes('Masuk sebagai akun lain') && acc.includes('href="/login"'), 'no way to sign in as yourself');
 });
 test('the username lookup runs on the server with the service role, one error message for every failure', () => {
   const a = src('app/login/actions.ts');

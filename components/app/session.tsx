@@ -2,7 +2,7 @@
 import { createContext, useContext } from "react";
 import type { Role } from "@/lib/types";
 
-type Session = { name: string; username: string; role: Role };
+type Session = { name: string; username: string; role: Role; loginRequired: boolean };
 const Ctx = createContext<Session | null>(null);
 
 /** The signed-in account, for client components (filled once by the app layout). */

@@ -6,6 +6,7 @@ import { WaveAlerts } from "@/components/app/wave-alerts";
 import { WelcomeScreen } from "@/components/app/welcome-screen";
 import { SiteFooter } from "@/components/app/site-footer";
 import { SessionProvider } from "@/components/app/session";
+import { loginRequired } from "@/lib/auth-route";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
@@ -13,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // token for a deactivated (or missing) profile. Sign it out.
   if (!user) redirect("/keluar?nonaktif=1");
   return (
-    <SessionProvider user={{ name: user.name, username: user.username, role: user.role }}>
+    <SessionProvider user={{ name: user.name, username: user.username, role: user.role, loginRequired: loginRequired() }}>
       <div className="min-h-screen">
         <Nav role={user.role} />
         <div className="pb-20 lg:pb-0 lg:pl-56">
