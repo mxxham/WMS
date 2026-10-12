@@ -25,3 +25,11 @@
 @layer components {
   .tabular { font-variant-numeric: tabular-nums; }
 }
+
+/* The single fade-in of the welcome screen and the Home page; off with reduced motion above. */
+@keyframes welcome-fade { from { opacity: 0; } to { opacity: 1; } }
+.welcome-fade { animation: welcome-fade 400ms ease-out both; }
+.home-fade { animation: welcome-fade 400ms ease-out both; }
+
+/* A page with a bar pinned above the bottom navigation (the phone Wave screen): keep the footer clear of it. */
+body:has([data-pinned-bar]) .site-footer { padding-bottom: 6rem; }

@@ -1,8 +1,10 @@
+import { BRAND } from "./brand";
+
 /**
  * Static configuration for WSM SUB 2. Values marked CONFIRM are assumptions
  * that must be checked against the physical warehouse before go-live.
  */
-export const WAREHOUSE_NAME = "PT Cipta Krida Bahari · WSM SUB 2 Surabaya";
+export const WAREHOUSE_NAME = `${BRAND.owner} · WSM SUB 2 Surabaya`;
 
 /** Stock expiring within this many days is shown yellow (FEFO warning). */
 export const NEAR_EXPIRY_DAYS = 90;
@@ -79,3 +81,9 @@ export function expiryStatus(dateIso: string | null | undefined): ExpiryStatus {
   if (days <= NEAR_EXPIRY_DAYS) return "near";
   return "ok";
 }
+
+/**
+ * The one-time welcome screen with the credits (components/app/welcome-screen.tsx). false turns it
+ * off on every device, e.g. if it gets in the way on warehouse handhelds. The Kredit link still works.
+ */
+export const SHOW_WELCOME = true;

@@ -124,7 +124,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
       </div>
 
       {hasPrimary && (
-        <div className="fixed inset-x-0 z-30 border-t border-steel-100 bg-white/95 p-3 backdrop-blur" style={{ bottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}>
+        <div data-pinned-bar className="fixed inset-x-0 z-30 border-t border-steel-100 bg-white/95 p-3 backdrop-blur" style={{ bottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}>
           {primary}
         </div>
       )}

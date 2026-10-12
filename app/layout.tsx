@@ -5,12 +5,13 @@ import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-sans-condensed/500.css";
 import "@fontsource/ibm-plex-sans-condensed/700.css";
 import "./globals.css";
+import { BRAND } from "@/config/brand";
 
 // "only light": browser and OS auto-dark features (Android "darken web pages", Chrome auto dark mode,
 // Firefox/Zen website dark mode) leave the app alone; darkreader-lock does the same for Dark Reader engines.
 export const metadata: Metadata = {
-  title: "K-one · CKB WSM SUB 2",
-  description: "K-one: label bin, scan, alokasi FEFO, dan stok gudang CKB WSM SUB 2",
+  title: `${BRAND.appName} · ${BRAND.site}`,
+  description: `${BRAND.appName}: label bin, scan, alokasi FEFO, dan stok gudang ${BRAND.site}`,
   other: { "darkreader-lock": "lock" },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#135F45", colorScheme: "only light" };
