@@ -22,7 +22,8 @@ test('operators see only their modules (no Dashboard, Alokasi, Import…)', () =
 test('supervisors get everything but Import and Pengaturan; admins get all', () => {
   const sup = hrefs('supervisor');
   assert.ok(sup.includes('/dashboard') && sup.includes('/allocate') && !sup.includes('/admin/import') && !sup.includes('/admin/settings'));
-  assert.equal(hrefs('admin').length, sup.length + 2);
+  assert.equal(hrefs('admin').length, sup.length + 3);
+  assert.ok(hrefs('admin').includes('/admin/users') && !sup.includes('/admin/users'));
 });
 test('empty sections are dropped (operators have no Admin section)', () => {
   assert.ok(!sectionsFor('operator').some((s) => s.title === 'Admin'));

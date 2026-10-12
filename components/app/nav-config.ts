@@ -1,4 +1,4 @@
-import { ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, type LucideIcon } from "lucide-react";
+import { ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, type LucideIcon } from "lucide-react";
 import type { Role } from "@/lib/types";
 
 /**
@@ -41,6 +41,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
     { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, roles: SUP },
     { href: "/admin/import", label: "Import", icon: Upload, roles: ["admin"] },
     { href: "/admin/settings", label: "Pengaturan", icon: Settings, roles: ["admin"] },
+    { href: "/admin/users", label: "Pengguna", icon: Users, roles: ["admin"] },
   ] },
 ];
 

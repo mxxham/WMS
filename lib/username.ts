@@ -20,3 +20,16 @@ export function usernameError(u: string): string | null {
 export function internalEmail(u: string): string {
   return `${u}@${INTERNAL_DOMAIN}`;
 }
+
+export const PASSWORD_MIN = 8;
+export const ROLES = ["operator", "supervisor", "admin"] as const;
+
+/** Tambah pengguna: the first problem with the form, or null. */
+export function newUserError(i: { name: string; username: string; password: string; role: string }): string | null {
+  if (i.name.trim().length < 2) return "Nama wajib diisi.";
+  const u = usernameError(normalizeUsername(i.username));
+  if (u) return u;
+  if (i.password.length < PASSWORD_MIN) return `Kata sandi minimal ${PASSWORD_MIN} karakter.`;
+  if (!(ROLES as readonly string[]).includes(i.role)) return "Peran tidak dikenal.";
+  return null;
+}
