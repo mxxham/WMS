@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { UserPlus } from "lucide-react";
-import { ActionMenu, MenuDanger, MenuSection } from "@/components/app/action-menu";
+import { ActionMenu, MenuDanger, MenuNote, MenuSection } from "@/components/app/action-menu";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
@@ -12,7 +12,9 @@ import { createUser, resetPassword, setActive, setRole } from "./actions";
 export type UserRow = { id: string; name: string; username: string; role: string; active: boolean };
 const ROLE: Record<string, string> = { operator: "Operator", supervisor: "Supervisor", admin: "Admin" };
 
-export function UsersClient({ rows, me }: { rows: UserRow[]; me: string }) {
+export function UsersClient({ rows, me, shared, locked }: { rows: UserRow[]; me: string; shared: string[]; locked: boolean }) {
+  const tag = (u: UserRow) => `${u.id === me ? " (Anda)" : ""}${shared.includes(u.id) ? " (akun bersama)" : ""}`;
+  const lockedShared = (u: UserRow) => locked && shared.includes(u.id);
   return (
     <div className="space-y-4">
       <AddUser />
@@ -21,10 +23,10 @@ export function UsersClient({ rows, me }: { rows: UserRow[]; me: string }) {
         {rows.map((u) => (
           <li key={u.id} className={cn("flex items-center gap-3 rounded-lg bg-white p-3", !u.active && "opacity-60")}>
             <span className="min-w-0 flex-1">
-              <span className="block font-medium">{u.name}{u.id === me && " (Anda)"}</span>
+              <span className="block font-medium">{u.name}{tag(u)}</span>
               <span className="block text-sm text-steel-500">{u.username} · {ROLE[u.role]} · {u.active ? "Aktif" : "Nonaktif"}</span>
             </span>
-            <UserMenu u={u} self={u.id === me} />
+            <UserMenu u={u} self={u.id === me} lockedShared={lockedShared(u)} />
           </li>
         ))}
       </ul>
@@ -33,9 +35,9 @@ export function UsersClient({ rows, me }: { rows: UserRow[]; me: string }) {
           <thead><tr><Th>Nama</Th><Th>Nama pengguna</Th><Th>Peran</Th><Th>Status</Th><Th /></tr></thead>
           <tbody>{rows.map((u) => (
             <tr key={u.id} className={cn(!u.active && "text-steel-500")}>
-              <Td>{u.name}{u.id === me && " (Anda)"}</Td><Td>{u.username}</Td><Td>{ROLE[u.role]}</Td>
+              <Td>{u.name}{tag(u)}</Td><Td>{u.username}</Td><Td>{ROLE[u.role]}</Td>
               <Td>{u.active ? "Aktif" : "Nonaktif"}</Td>
-              <Td className="text-right"><UserMenu u={u} self={u.id === me} /></Td>
+              <Td className="text-right"><UserMenu u={u} self={u.id === me} lockedShared={lockedShared(u)} /></Td>
             </tr>
           ))}</tbody>
         </Table>
@@ -69,9 +71,16 @@ function AddUser() {
   );
 }
 
-function UserMenu({ u, self }: { u: UserRow; self: boolean }) {
+function UserMenu({ u, self, lockedShared }: { u: UserRow; self: boolean; lockedShared: boolean }) {
   const [role, setR] = useState(u.role);
   const [pw, setPw] = useState("");
+  if (lockedShared) {
+    return (
+      <ActionMenu title={u.name}>
+        <MenuNote>Akun bersama: semua perangkat memakainya selama login belum diwajibkan. Peran, status dan kata sandinya bisa diubah setelah LOGIN_REQUIRED aktif.</MenuNote>
+      </ActionMenu>
+    );
+  }
   return (
     <ActionMenu title={u.name}>
       <MenuSection>

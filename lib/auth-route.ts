@@ -18,6 +18,8 @@ export function safeNext(next: string | null): string {
   const u = new URL(v, here);
   if (u.origin !== here) return "/";
   const path = u.pathname + u.search + u.hash;
+  // Dot segments can collapse to "//host" ("/..//evil.com" parses to "//evil.com"): check the result.
+  if (path.startsWith("//") || new URL(path, here).origin !== here) return "/";
   if (path === "/login" || path.startsWith("/login?") || path.startsWith("/keluar")) return "/";
   return path;
 }
@@ -35,9 +37,12 @@ const stay: AuthRoute = { kind: "continue" };
  * required: signed out -> /login?next=<page>; signed in on /login -> back to that page.
  * not required: signed out -> "shared" (the middleware signs in as the site account, as before);
  * /login and /keluar always reachable, so anyone can sign in as their own account.
+ * isShared: the session is the shared site account (app_metadata.shared) — signed out once required.
  */
-export function authRoute(path: string, search: string, signedIn: boolean, required: boolean): AuthRoute {
+export function authRoute(path: string, search: string, signedIn: boolean, required: boolean, isShared = false): AuthRoute {
   if (!required) return signedIn || isPublic(path) ? stay : { kind: "shared" };
+  // Once login is required, a device still holding the shared account's session must sign in.
+  if (signedIn && isShared) return isPublic(path) ? stay : go("/keluar");
   if (!signedIn) {
     if (isPublic(path)) return stay;
     const here = path + search;

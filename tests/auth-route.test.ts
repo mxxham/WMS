@@ -45,6 +45,18 @@ test('next never leaves the site', () => {
   for (const bad of ['//evil.com', 'https://evil.com', '/\\evil.com', 'evil.com', '', null, '/login', '/%2F%2Fevil.com']) assert.equal(safeNext(bad), '/', String(bad));
   assert.equal(safeNext('/waves?date=2026-10-12'), '/waves?date=2026-10-12');
 });
+test('dot segments that collapse to //host are refused (/..//evil.com, /%2e%2e//evil.com, /.//evil.com, /./%2Fevil.com)', () => {
+  for (const bad of ['/..//evil.com', '/%2e%2e//evil.com', '/.//evil.com', '/./%2Fevil.com', '/a/..//evil.com', '/%2E%2E%2F%2Fevil.com'])
+    assert.equal(safeNext(bad), '/', bad);
+  assert.equal(to('/login', '?next=%2F..%2F%2Fevil.com', true), '/');
+  for (const ok of ['/waves', '/waves?date=2026-10-12', '/admin/users']) assert.equal(safeNext(ok), ok);
+});
+test('login required: a shared-account session counts as signed out (floor devices must sign in)', () => {
+  const r = authRoute('/waves', '', true, true, true);
+  assert.deepEqual(r, { kind: 'redirect', to: '/keluar' });
+  assert.deepEqual(authRoute('/keluar', '', true, true, true), { kind: 'continue' });
+  assert.deepEqual(authRoute('/waves', '', true, false, true), { kind: 'continue' }, 'switch off: the shared account is today\'s normal session');
+});
 test('browsers drop tabs and newlines, so /<tab>/evil.com would become //evil.com: refused', () => {
   for (const bad of ['/\t/evil.com', '/%09/evil.com', '/\n/evil.com', '/%0A/evil.com', '/\r/evil.com', '/ /evil.com', '/%2F/evil.com'])
     assert.equal(safeNext(bad), '/', JSON.stringify(bad));

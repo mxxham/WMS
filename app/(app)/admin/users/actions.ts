@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { checkRole } from "@/lib/auth";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { PASSWORD_MIN, internalEmail, newUserError, normalizeUsername } from "@/lib/username";
+import { loginRequired } from "@/lib/auth-route";
 
 // Pengguna (spec §3). Passwords live in Supabase Auth, so creating accounts and setting passwords
 // use the Auth admin API (service role) after an admin check; role and status go through the
@@ -15,6 +16,20 @@ async function admin() {
   return u;
 }
 const done = () => { revalidatePath("/admin/users"); return null; };
+
+/** True for the shared site account (app_metadata.shared, or the site-account email). */
+export async function isSharedAccount(id: string): Promise<boolean> {
+  const { data } = await createServiceClient().auth.admin.getUserById(id);
+  const u = data.user;
+  if (!u) return false;
+  return u.app_metadata?.shared === true || (!!process.env.SITE_ACCOUNT_EMAIL && u.email?.toLowerCase() === process.env.SITE_ACCOUNT_EMAIL.toLowerCase());
+}
+
+/** While login is not required every floor device runs on the shared account: leave it alone. */
+async function sharedGuard(id: string): Promise<string | null> {
+  if (loginRequired() || !(await isSharedAccount(id))) return null;
+  return "Ini akun bersama yang dipakai semua perangkat selama login belum diwajibkan. Peran, status dan kata sandinya baru bisa diubah setelah LOGIN_REQUIRED aktif.";
+}
 
 export async function createUser(i: { name: string; username: string; password: string; role: string }): Promise<string | null> {
   try {
@@ -42,6 +57,8 @@ export async function createUser(i: { name: string; username: string; password: 
 export async function setRole(id: string, role: string): Promise<string | null> {
   try {
     await admin();
+    const shared = await sharedGuard(id);
+    if (shared) return shared;
     const { error } = await (await createClient()).rpc("set_user_role", { p_user: id, p_role: role });
     return error ? error.message : done();
   } catch (e) { return (e as Error).message; }
@@ -50,6 +67,8 @@ export async function setRole(id: string, role: string): Promise<string | null> 
 export async function setActive(id: string, active: boolean): Promise<string | null> {
   try {
     await admin();
+    const shared = await sharedGuard(id);
+    if (shared) return shared;
     const { error } = await (await createClient()).rpc("set_user_active", { p_user: id, p_active: active });
     if (error) return error.message;
     const { error: e2 } = await createServiceClient().auth.admin.updateUserById(id, { ban_duration: active ? "none" : BAN });
@@ -61,6 +80,8 @@ export async function setActive(id: string, active: boolean): Promise<string | n
 export async function resetPassword(id: string, password: string): Promise<string | null> {
   try {
     await admin();
+    const shared = await sharedGuard(id);
+    if (shared) return shared;
     if (password.length < PASSWORD_MIN) return `Kata sandi minimal ${PASSWORD_MIN} karakter.`;
     const { error } = await createServiceClient().auth.admin.updateUserById(id, { password });
     return error ? error.message : done();

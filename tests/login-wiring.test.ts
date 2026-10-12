@@ -16,8 +16,8 @@ test('the middleware follows authRoute, and signs in as the site account only fo
   const shared = m.indexOf('"shared"');
   assert.ok(shared > 0 && m.indexOf('signInWithPassword') > shared, 'the site-account sign-in is not limited to the shared case');
 });
-test('the site account is read only by the middleware (sign-in) and the layout (is this the shared account?)', () => {
-  for (const f of ['lib/auth.ts', 'app/login/actions.ts', 'lib/auth-route.ts']) assert.ok(!src(f).includes('SITE_ACCOUNT'), f);
+test('the site account is read only to sign in as it (middleware) or recognise it (lib/auth, Pengguna); never by the login action', () => {
+  for (const f of ['app/login/actions.ts', 'lib/auth-route.ts']) assert.ok(!src(f).includes('SITE_ACCOUNT'), f);
   const env = src('.env.example');
   assert.ok(env.includes('LOGIN_REQUIRED=') && env.includes('SITE_ACCOUNT_EMAIL='), '.env.example lacks the switch or the site account');
 });
@@ -57,7 +57,7 @@ test('Nama Anda: a personal account\'s name; on the shared account, the name typ
   const p = src('components/app/person-name.tsx');
   assert.ok(p.includes('useSession()') && p.includes('shared'), 'person name ignores whether the session is the shared account');
   assert.ok(p.includes('localStorage.getItem') && p.includes('localStorage.setItem'), 'the shared account no longer remembers the typed name');
-  assert.ok(src('app/(app)/layout.tsx').includes('SITE_ACCOUNT_EMAIL'), 'the layout does not tell the shared account apart');
+  assert.ok(src('lib/auth.ts').includes('app_metadata') && src('app/(app)/layout.tsx').includes('shared: user.shared'), 'the shared account is not told apart');
 });
 
 test('sign-in fails closed: refused unless the limit check said yes; the client IP is part of the key', () => {
@@ -68,6 +68,22 @@ test('sign-in fails closed: refused unless the limit check said yes; the client 
 test('after a wrong password the username stays filled in (React resets the form after an action)', () => {
   const f = src('app/login/login-form.tsx');
   assert.ok(/value=\{username\}/.test(f) && f.includes('setUsername'), 'the username input is not kept in state');
+});
+test('only a real deactivation signs someone out; other profile read errors throw (error page, retry)', () => {
+  const a = src('lib/auth.ts');
+  assert.ok(a.includes('PGRST116') && a.includes('PT403') && /throw /.test(a), 'every failed read is treated as deactivated');
+});
+test('the shared account is marked in its sign-in data, and the middleware passes it to authRoute', () => {
+  const m = src('middleware.ts');
+  assert.ok(m.includes('shared') && m.includes('app_metadata'), 'middleware does not know the shared account');
+  assert.ok(/authRoute\(.*isShared\)/.test(m), 'authRoute does not get the shared flag');
+});
+test('while login is not required, Pengguna refuses to deactivate, re-role or reset the shared account', () => {
+  const a = src('app/(app)/admin/users/actions.ts');
+  for (const fn of ['setRole', 'setActive', 'resetPassword']) {
+    const body = a.slice(a.indexOf(`export async function ${fn}`), a.indexOf('\n}', a.indexOf(`export async function ${fn}`)));
+    assert.ok(body.includes('sharedGuard('), `${fn} does not guard the shared account`);
+  }
 });
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

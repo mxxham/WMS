@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <SessionProvider user={{
       name: user.name, username: user.username, role: user.role, loginRequired: loginRequired(),
-      shared: !!process.env.SITE_ACCOUNT_EMAIL && user.email?.toLowerCase() === process.env.SITE_ACCOUNT_EMAIL.toLowerCase(),
+      shared: user.shared,
     }}>
       <div className="min-h-screen">
         <Nav role={user.role} />

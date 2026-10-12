@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { authRoute, loginRequired } from "@/lib/auth-route";
 
@@ -20,14 +21,26 @@ export async function middleware(request: NextRequest) {
     },
   });
   const { data } = await supabase.auth.getClaims();
-  const route = authRoute(request.nextUrl.pathname, request.nextUrl.search, !!data?.claims, loginRequired());
+  // The shared site account carries app_metadata.shared (0072; set below on first use elsewhere).
+  // A token issued before the flag was set lacks it until its hourly refresh, so the site-account
+  // email (still set when login is switched on) is checked too.
+  const siteEmail = process.env.SITE_ACCOUNT_EMAIL?.toLowerCase();
+  const isShared = (data?.claims?.app_metadata as { shared?: boolean } | undefined)?.shared === true
+    || (!!siteEmail && typeof data?.claims?.email === "string" && data.claims.email.toLowerCase() === siteEmail);
+  const route = authRoute(request.nextUrl.pathname, request.nextUrl.search, !!data?.claims, loginRequired(), isShared);
   if (route.kind === "continue") return response;
 
   let to: URL;
   if (route.kind === "shared") {
     const email = process.env.SITE_ACCOUNT_EMAIL, password = process.env.SITE_ACCOUNT_PASSWORD;
-    const { error } = email && password ? await supabase.auth.signInWithPassword({ email, password }) : { error: true };
-    if (error) return new NextResponse("Situs belum dikonfigurasi (SITE_ACCOUNT_EMAIL / SITE_ACCOUNT_PASSWORD).", { status: 503 });
+    const signIn = email && password ? await supabase.auth.signInWithPassword({ email, password }) : null;
+    if (!signIn || signIn.error || !signIn.data.user) return new NextResponse("Situs belum dikonfigurasi (SITE_ACCOUNT_EMAIL / SITE_ACCOUNT_PASSWORD).", { status: 503 });
+    const user = signIn.data.user;
+    if (user.app_metadata?.shared !== true) {
+      // Mark the shared account once, so it is recognised after the site-account variables are gone.
+      await createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } })
+        .auth.admin.updateUserById(user.id, { app_metadata: { ...user.app_metadata, shared: true } });
+    }
     to = request.nextUrl.clone(); // the same page, now with the session
   } else {
     to = new URL(route.to, request.url);
