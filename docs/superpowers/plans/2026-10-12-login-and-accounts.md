@@ -961,7 +961,8 @@ export async function createUser(i: { name: string; username: string; password: 
     if (taken) return `Nama pengguna ${username} sudah dipakai.`;
     const { data, error } = await createServiceClient().auth.admin.createUser({
       email: internalEmail(username), password: i.password, email_confirm: true,
-      user_metadata: { name: i.name.trim(), username },
+      // username in app metadata: only the server can set it (0071 reads it from there).
+      user_metadata: { name: i.name.trim() }, app_metadata: { username },
     });
     if (error || !data.user) return error?.message ?? "Akun tidak bisa dibuat.";
     if (i.role !== "operator") {
@@ -1194,7 +1195,8 @@ Start the dev server with the local keys and **no** `SITE_ACCOUNT_*` variables. 
 4. Post one wave line as `opuji`; `select user_id from movements order by created_at desc limit 1` = `opuji`'s id.
 5. As `adminuji`, `Nonaktifkan` `opuji`; in the other browser context where `opuji` is still signed in, reload → `/login?nonaktif=1`; signing in as `opuji` fails.
 6. `adminuji` cannot change or deactivate their own account (no menu rows); `Reset kata sandi` on self works.
-7. `/login?next=//evil.com` signed in → `/`.
+7. `/login?next=//evil.com` and `/login?next=%2F%09%2Fevil.com` signed in → `/`.
+8. Six wrong passwords for `supuji` → the sixth answer is `Terlalu banyak percobaan…`; the right password is refused too until the 15 minutes pass (clear with `delete from login_failures` locally to continue).
 Clean up: kill the dev server by PID, delete the local test users, `git checkout -- tsconfig.json`, `rm -rf .next/claude-dev`.
 
 - [ ] **Step 4: Commit**

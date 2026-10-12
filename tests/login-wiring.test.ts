@@ -32,5 +32,10 @@ test('the app layout sends a missing or inactive session to /keluar', () => {
   assert.match(src('app/(app)/layout.tsx'), /redirect\("\/keluar\?nonaktif=1"\)/);
 });
 
+test('sign-in is limited per username on the server (Supabase\'s per-IP limit only sees the server)', () => {
+  const a = src('app/login/actions.ts');
+  assert.ok(a.includes('"login_allowed"') && a.includes('"login_result"'), 'login does not use the per-username limit');
+  assert.ok(a.indexOf('"login_allowed"') < a.indexOf('signInWithPassword'), 'the limit is not checked before trying the password');
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

@@ -9,11 +9,17 @@ const isPublic = (path: string) => PUBLIC_PATHS.some((p) => path === p || path.s
 /** A same-site path to return to; anything else (other sites, protocol-relative, /login) is "/". */
 export function safeNext(next: string | null): string {
   if (!next) return "/";
-  let v = next;
+  let v: string;
   try { v = decodeURIComponent(next); } catch { return "/"; }
-  if (!v.startsWith("/") || v.startsWith("//") || v.startsWith("/\\") || v.includes("\\")) return "/";
-  if (v === "/login" || v.startsWith("/login?") || v.startsWith("/keluar")) return "/";
-  return v;
+  // Browsers drop tabs and newlines and read "\" as "/" ("/<tab>/evil.com" becomes "//evil.com"):
+  // refuse all of them, then parse it the way a browser would and keep it only if it stays here.
+  if (/[\u0000-\u001f\u007f\s\\]/.test(v) || !v.startsWith("/") || v.startsWith("//")) return "/";
+  const here = "http://same.site";
+  const u = new URL(v, here);
+  if (u.origin !== here) return "/";
+  const path = u.pathname + u.search + u.hash;
+  if (path === "/login" || path.startsWith("/login?") || path.startsWith("/keluar")) return "/";
+  return path;
 }
 
 export function authRedirect(path: string, search: string, signedIn: boolean): string | null {

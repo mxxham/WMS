@@ -30,6 +30,11 @@ test('next never leaves the site', () => {
   for (const bad of ['//evil.com', 'https://evil.com', '/\\evil.com', 'evil.com', '', null, '/login', '/%2F%2Fevil.com']) assert.equal(safeNext(bad), '/', String(bad));
   assert.equal(safeNext('/waves?date=2026-10-12'), '/waves?date=2026-10-12');
 });
+test('browsers drop tabs and newlines, so /<tab>/evil.com would become //evil.com: refused', () => {
+  for (const bad of ['/\t/evil.com', '/%09/evil.com', '/\n/evil.com', '/%0A/evil.com', '/\r/evil.com', '/ /evil.com', '/%2F/evil.com'])
+    assert.equal(safeNext(bad), '/', JSON.stringify(bad));
+  assert.equal(authRedirect('/login', '?next=%2F%09%2Fevil.com', true), '/');
+});
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

@@ -12,16 +12,26 @@ begin execute p_sql; return false; exception when others then
   return sqlerrm like p_like; end $$;
 create or replace function pg_temp.as_user(p uuid) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claim.sub', p::text, true); end $$;
+-- n wrong passwords for a username (login_result returns void).
+create or replace function pg_temp.wrong(u text, n int) returns boolean language plpgsql as $$
+begin for i in 1..n loop perform login_result(u, false); end loop; return true; end $$;
+-- A real stock row and another bin, read before switching to an account that may not read them
+-- (the stock check runs first, so the transfer must be one the stock allows).
+select i.item_id as item_x, i.bin_id as bin_a, i.batch_lot as batch_x, i.expiry_date as exp_x,
+       (select b.id from bins b where b.id <> i.bin_id order by b.bin_code limit 1) as bin_b
+from inventory i where i.quantity >= 1 order by i.bin_id limit 1 \gset
 
-insert into auth.users values ('a1111111-1111-1111-1111-111111111111','site@x','{"name":"Gudang","username":"Gudang"}');
-insert into auth.users values ('a2222222-2222-2222-2222-222222222222','ani@pengguna.internal','{"name":"Ani","username":"ani"}');
-insert into auth.users values ('a3333333-3333-3333-3333-333333333333','Budi.Santoso@x','{"name":"Budi"}');
-insert into auth.users values ('a4444444-4444-4444-4444-444444444444','admin2@pengguna.internal','{"name":"Dewi","username":"dewi"}');
+-- The username comes from app metadata (set only by the server's admin API), never user metadata.
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data) values
+  ('a1111111-1111-1111-1111-111111111111','site@x','{"name":"Gudang"}','{"username":"Gudang"}'),
+  ('a2222222-2222-2222-2222-222222222222','ani@pengguna.internal','{"name":"Ani"}','{"username":"ani"}'),
+  ('a3333333-3333-3333-3333-333333333333','Budi.Santoso@x','{"name":"Budi","username":"ilham"}','{}'),
+  ('a4444444-4444-4444-4444-444444444444','admin2@pengguna.internal','{"name":"Dewi"}','{"username":"dewi"}');
 update profiles set role = 'admin' where id in ('a1111111-1111-1111-1111-111111111111','a4444444-4444-4444-4444-444444444444');
 
-select pg_temp.check('username from metadata, lowercased',
+select pg_temp.check('username from app metadata, lowercased',
   (select username from profiles where id = 'a1111111-1111-1111-1111-111111111111') = 'gudang');
-select pg_temp.check('no username in metadata: derived from the email, valid format',
+select pg_temp.check('a username in user metadata (which the user controls) is ignored: derived from the email instead',
   (select username ~ '^[a-z0-9._-]{3,32}$' and username like 'budi.santoso%' from profiles where id = 'a3333333-3333-3333-3333-333333333333'));
 select pg_temp.check('a duplicate username is refused',
   pg_temp.fails($q$update profiles set username = 'ani' where id = 'a3333333-3333-3333-3333-333333333333'$q$, '%duplicate key%'));
@@ -52,18 +62,39 @@ select set_user_active('a2222222-2222-2222-2222-222222222222', false);
 select pg_temp.as_user('a2222222-2222-2222-2222-222222222222');
 select pg_temp.check('a deactivated account has no role at once (live token or not)',
   not has_role(array['operator','supervisor','admin']::user_role[]));
+select pg_temp.check('a deactivated account reads nothing (every read policy checks active)',
+  (select count(*) from bins) = 0 and (select count(*) from movements) = 0 and (select count(*) from profiles) = 0);
+select pg_temp.check('a deactivated account cannot insert a movement',
+  pg_temp.fails(format($q$insert into movements (type, item_id, batch_lot, expiry_date, quantity, from_bin_id, to_bin_id, user_id)
+    values ('transfer', %L, %L, %L, 1, %L, %L, 'a2222222-2222-2222-2222-222222222222')$q$, :'item_x', :'batch_x', nullif(:'exp_x', ''), :'bin_a', :'bin_b'), '%row-level security%'));
+select pg_temp.check('every request of a deactivated account is refused before it runs (PostgREST pre-request)',
+  pg_temp.fails('select public.check_request()', 'Akun ini dinonaktifkan%'));
+select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
+select pg_temp.check('an active account and the server (no account) pass the pre-request check',
+  not pg_temp.fails('select public.check_request()', '%'));
 select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
 select set_user_role('a4444444-4444-4444-4444-444444444444', 'operator');
 select pg_temp.check('an admin demotes another admin; the acting admin stays admin',
   (select role from profiles where id = 'a4444444-4444-4444-4444-444444444444') = 'operator'
   and (select role = 'admin' and active from profiles where id = 'a1111111-1111-1111-1111-111111111111'));
-select pg_temp.check('concurrent last-admin guard: both functions go through the locking guard',
-  (select prosrc like '%pg_advisory_xact_lock%' from pg_proc where proname = 'accounts_guard')
+select pg_temp.check('concurrent last-admin guard: the lock is taken before the admin check (no stale privilege)',
+  (select position('pg_advisory_xact_lock' in prosrc) between 1 and position('has_role' in prosrc) from pg_proc where proname = 'accounts_guard')
   and (select count(*) from pg_proc where proname in ('set_user_role','set_user_active') and prosrc like '%accounts_guard%') = 2);
 
 reset role;
 select pg_temp.check('account_email finds the auth email by username, whatever the email is',
   account_email(' Gudang ') = 'site@x' and account_email('ani') is null and account_email('nobody') is null);
+-- Each request is its own statement (login_allowed is stable: it sees the statement's snapshot).
+select pg_temp.check('a username starts unlocked', login_allowed('gudang') and login_allowed('nobody'));
+select pg_temp.wrong('gudang', 5), pg_temp.wrong('nobody', 5), pg_temp.wrong('ani', 4);
+select pg_temp.check('5 wrong passwords lock a username for 15 minutes, existing or not; 4 do not',
+  not login_allowed('gudang') and not login_allowed(' GUDANG ') and not login_allowed('nobody') and login_allowed('ani'));
+select login_result('ani', true);
+select pg_temp.wrong('ani', 1);
+select pg_temp.check('a successful sign-in clears the count (4 wrong, success, 1 wrong: not locked)', login_allowed('ani'));
+select pg_temp.check('the sign-in limit is for the server only',
+  not has_function_privilege('authenticated', 'public.login_allowed(text)', 'execute')
+  and not has_function_privilege('anon', 'public.login_result(text, boolean)', 'execute'));
 select pg_temp.check('account_email is for the server only',
   not has_function_privilege('authenticated', 'public.account_email(text)', 'execute')
   and not has_function_privilege('anon', 'public.account_email(text)', 'execute'));
