@@ -96,3 +96,21 @@ can use the site. The user asked for a login page with a role per login.
 
 Self-service password change and "forgot password" (the admin resets); removing the typed-name
 fields and `p_by_name` from RPCs (later, once accounts are in use); PINs; SSO.
+
+## Revision (2026-10-12, user): build it, but don't require it yet
+
+- **`LOGIN_REQUIRED`** (server environment variable, default off; `true` switches login on).
+  - **Off:** a request without a session is signed in as the shared site account
+    (`SITE_ACCOUNT_EMAIL` / `SITE_ACCOUNT_PASSWORD`, as before) — the site behaves exactly as today.
+    `/login` still works ("optional sign-in"): anyone can sign in as their own account, even while
+    signed in as the shared one; the sidebar / phone account menu offers `Masuk sebagai akun lain`.
+    `Keluar` returns to the shared account. `Pengguna` works for admins, so accounts can be set up
+    before switching on.
+  - **On:** as in §1 — no automatic session, every page needs a sign-in.
+- Cutover becomes: push the migration and deploy with the switch off (nothing changes), create
+  accounts on `Pengguna` (sign in as `gudang`), then set `LOGIN_REQUIRED=true` in Vercel and
+  redeploy; remove the site-account variables only after that.
+- Security review findings folded in: the per-username sign-in limit is keyed by username and
+  client IP (5 wrong → 15 min) with a per-username cap across IPs (30 in 15 min), so one person
+  cannot lock a colleague out from their own device; if the limit check itself fails, sign-in is
+  refused (never skipped).

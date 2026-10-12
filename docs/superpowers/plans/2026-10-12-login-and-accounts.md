@@ -1205,3 +1205,28 @@ Clean up: kill the dev server by PID, delete the local test users, `git checkout
 git add AGENTS.md README.md components/app/about-copy.ts docs/superpowers/specs/2026-10-12-login-and-accounts-design.md
 git commit -m "docs(auth): personal accounts, cutover, privacy text"
 ```
+
+---
+
+## Revision (2026-10-12): switch and review fixes — tasks 7 and 8 run before Task 5
+
+### Task 7: Review fixes — fail-closed limit, lockout per username and IP
+
+**Files:** `supabase/migrations/0071_accounts.sql` (not pushed: edited in place), `supabase/tests/42_accounts.sql`, `app/login/actions.ts`, `tests/login-wiring.test.ts`.
+
+- `login_allowed(p_username text, p_ip text) returns boolean`, `login_result(p_username text, p_ip text, p_ok boolean) returns void`; `login_failures` keyed `(username, ip)`. A key locks for 15 minutes after 5 wrong passwords; a username locks for every IP after 30 wrong passwords across IPs within 15 minutes. A success clears that key only.
+- Test 42 rows: 5 wrong from IP A lock A but not B; 30 wrong across 6 IPs lock the username for a 7th IP; a success clears its own key.
+- `loginAction`: client IP from `x-forwarded-for` (first entry) else `x-real-ip` else `unknown`; `if (error || allowed !== true)` → refuse with `Masuk sedang tidak bisa. Coba lagi sebentar lagi.` (fail closed). Wiring test row: the action refuses unless `allowed === true`.
+
+### Task 8: The switch (`LOGIN_REQUIRED`)
+
+**Files:** `lib/auth-route.ts`, `tests/auth-route.test.ts`, `middleware.ts`, `app/keluar/route.ts`, `components/app/account.tsx`, `app/login/page.tsx`, `.env.example`, `tests/login-wiring.test.ts`.
+
+- `authRoute(path: string, search: string, signedIn: boolean, required: boolean): { kind: "continue" } | { kind: "redirect"; to: string } | { kind: "shared" }` replaces `authRedirect`.
+  - required: as before (signed out → `/login?next=`, signed in on `/login` → `safeNext`).
+  - not required: signed out on a non-public path → `shared` (middleware signs in as the site account and redirects to the same URL); `/login` and `/keluar` → continue whether signed in or not.
+- `loginRequired()` in `lib/auth-route.ts` reads `process.env.LOGIN_REQUIRED === "true"`.
+- `/keluar` redirects to `/login` when required, to `/` (shared account) when not.
+- Account menu: when not required, a link `Masuk sebagai akun lain` to `/login`; the login page says `Login belum diwajibkan: tanpa masuk, situs memakai akun bersama.` when not required.
+- `.env.example` gets `LOGIN_REQUIRED=` and the site-account lines back (used while it is off).
+- Tests: `auth-route` rows for both modes; wiring rows: middleware signs in with the site account only on `kind === "shared"`.
