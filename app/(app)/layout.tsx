@@ -14,7 +14,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // token for a deactivated (or missing) profile. Sign it out.
   if (!user) redirect("/keluar?nonaktif=1");
   return (
-    <SessionProvider user={{ name: user.name, username: user.username, role: user.role, loginRequired: loginRequired() }}>
+    <SessionProvider user={{
+      name: user.name, username: user.username, role: user.role, loginRequired: loginRequired(),
+      shared: !!process.env.SITE_ACCOUNT_EMAIL && user.email?.toLowerCase() === process.env.SITE_ACCOUNT_EMAIL.toLowerCase(),
+    }}>
       <div className="min-h-screen">
         <Nav role={user.role} />
         <div className="pb-20 lg:pb-0 lg:pl-56">

@@ -16,7 +16,7 @@ test('the middleware follows authRoute, and signs in as the site account only fo
   const shared = m.indexOf('"shared"');
   assert.ok(shared > 0 && m.indexOf('signInWithPassword') > shared, 'the site-account sign-in is not limited to the shared case');
 });
-test('only the middleware reads the site account; .env.example documents the switch', () => {
+test('the site account is read only by the middleware (sign-in) and the layout (is this the shared account?)', () => {
   for (const f of ['lib/auth.ts', 'app/login/actions.ts', 'lib/auth-route.ts']) assert.ok(!src(f).includes('SITE_ACCOUNT'), f);
   const env = src('.env.example');
   assert.ok(env.includes('LOGIN_REQUIRED=') && env.includes('SITE_ACCOUNT_EMAIL='), '.env.example lacks the switch or the site account');
@@ -53,9 +53,11 @@ test('the signed-in account and Keluar show on desktop and phone', () => {
   const acc = src('components/app/account.tsx');
   assert.ok(acc.includes('action="/keluar"') && acc.includes('method="post"'), 'Keluar does not POST to /keluar');
 });
-test('Nama Anda starts as the account name, not the last name typed on the device', () => {
+test('Nama Anda: a personal account\'s name; on the shared account, the name typed on this device (as today)', () => {
   const p = src('components/app/person-name.tsx');
-  assert.ok(p.includes('useSession()') && !p.includes('localStorage.getItem'), 'person name still read from the device');
+  assert.ok(p.includes('useSession()') && p.includes('shared'), 'person name ignores whether the session is the shared account');
+  assert.ok(p.includes('localStorage.getItem') && p.includes('localStorage.setItem'), 'the shared account no longer remembers the typed name');
+  assert.ok(src('app/(app)/layout.tsx').includes('SITE_ACCOUNT_EMAIL'), 'the layout does not tell the shared account apart');
 });
 
 test('sign-in fails closed: refused unless the limit check said yes; the client IP is part of the key', () => {
