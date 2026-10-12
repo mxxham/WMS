@@ -21,8 +21,9 @@
 --   · the username comes from app metadata (set only by the server's admin
 --     API), never user metadata, which the account holder controls.
 --   · sign-in runs on the server, so Supabase's per-IP limit sees one IP:
---     login_allowed / login_result lock a username for 15 minutes after 5
---     wrong passwords (any username, existing or not).
+--     login_allowed / login_result lock a username + client IP for 15
+--     minutes after 5 wrong passwords, and a username everywhere after 30
+--     across IPs (any username, existing or not).
 -- =====================================================================
 
 alter table public.profiles add column username text, add column active boolean not null default true;
@@ -140,30 +141,40 @@ begin
   end loop;
 end $$;
 
--- Sign-in limit per username (the server signs in for everyone, so a per-IP limit cannot tell
--- people apart). Any username is tracked, existing or not, so it reveals nothing.
+-- Sign-in limit (the server signs in for everyone, so Supabase's per-IP limit sees one IP). Keyed
+-- by username and the client's IP: 5 wrong passwords lock that pair for 15 minutes, so one person
+-- cannot lock a colleague out from their own device; 30 wrong across all IPs within 15 minutes lock
+-- the username everywhere, so guessing from many devices is still stopped. Any username is
+-- tracked, existing or not, so the answers reveal nothing.
 create table public.login_failures (
-  username     text primary key,
+  username     text not null,
+  ip           text not null,
   failures     int not null default 0,
-  locked_until timestamptz
+  last_failed  timestamptz not null default now(),
+  locked_until timestamptz,
+  primary key (username, ip)
 );
 alter table public.login_failures enable row level security;
 revoke all on public.login_failures from anon, authenticated;
 
-create or replace function public.login_allowed(p_username text) returns boolean
+create or replace function public.login_allowed(p_username text, p_ip text) returns boolean
 language sql stable security definer set search_path = public as $$
-  select not exists (select 1 from public.login_failures where username = lower(trim(p_username)) and locked_until > now())
+  select not exists (select 1 from public.login_failures where username = lower(trim(p_username)) and ip = coalesce(p_ip, '') and locked_until > now())
+     and coalesce((select sum(failures) from public.login_failures
+                   where username = lower(trim(p_username)) and last_failed > now() - interval '15 minutes'), 0) < 30
 $$;
 
-create or replace function public.login_result(p_username text, p_ok boolean) returns void
+create or replace function public.login_result(p_username text, p_ip text, p_ok boolean) returns void
 language plpgsql security definer set search_path = public as $$
-declare v text := lower(trim(p_username));
+declare v text := lower(trim(p_username)); k text := coalesce(p_ip, '');
 begin
-  if p_ok then delete from public.login_failures where username = v; return; end if;
-  insert into public.login_failures as f (username, failures) values (v, 1)
-  on conflict (username) do update set failures = case when f.locked_until > now() then f.failures else f.failures + 1 end;
-  update public.login_failures set failures = 0, locked_until = now() + interval '15 minutes'
-  where username = v and failures >= 5;
+  if p_ok then delete from public.login_failures where username = v and ip = k; return; end if;
+  insert into public.login_failures as f (username, ip, failures) values (v, k, 1)
+  on conflict (username, ip) do update
+    set failures = case when f.last_failed > now() - interval '15 minutes' then f.failures + 1 else 1 end,
+        last_failed = now();
+  update public.login_failures set locked_until = now() + interval '15 minutes'
+  where username = v and ip = k and failures >= 5 and (locked_until is null or locked_until <= now());
 end $$;
 
 -- Sign-in: username -> the account's auth email (active accounts only). Server only.
@@ -174,8 +185,8 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 revoke execute on function public.accounts_guard(uuid), public.derive_username(text, uuid) from public, anon, authenticated;
-revoke execute on function public.account_email(text), public.login_allowed(text), public.login_result(text, boolean) from public, anon, authenticated;
-grant execute on function public.account_email(text), public.login_allowed(text), public.login_result(text, boolean) to service_role;
+revoke execute on function public.account_email(text), public.login_allowed(text, text), public.login_result(text, text, boolean) from public, anon, authenticated;
+grant execute on function public.account_email(text), public.login_allowed(text, text), public.login_result(text, text, boolean) to service_role;
 grant execute on function public.check_request(), public.is_active() to anon, authenticated;
 revoke execute on function public.set_user_role(uuid, public.user_role), public.set_user_active(uuid, boolean) from public, anon;
 grant execute on function public.set_user_role(uuid, public.user_role), public.set_user_active(uuid, boolean) to authenticated;

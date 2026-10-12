@@ -12,9 +12,9 @@ begin execute p_sql; return false; exception when others then
   return sqlerrm like p_like; end $$;
 create or replace function pg_temp.as_user(p uuid) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claim.sub', p::text, true); end $$;
--- n wrong passwords for a username (login_result returns void).
-create or replace function pg_temp.wrong(u text, n int) returns boolean language plpgsql as $$
-begin for i in 1..n loop perform login_result(u, false); end loop; return true; end $$;
+-- n wrong passwords for a username from an IP (login_result returns void).
+create or replace function pg_temp.wrong(u text, ip text, n int) returns boolean language plpgsql as $$
+begin for i in 1..n loop perform login_result(u, ip, false); end loop; return true; end $$;
 -- A real stock row and another bin, read before switching to an account that may not read them
 -- (the stock check runs first, so the transfer must be one the stock allows).
 select i.item_id as item_x, i.bin_id as bin_a, i.batch_lot as batch_x, i.expiry_date as exp_x,
@@ -85,16 +85,22 @@ reset role;
 select pg_temp.check('account_email finds the auth email by username, whatever the email is',
   account_email(' Gudang ') = 'site@x' and account_email('ani') is null and account_email('nobody') is null);
 -- Each request is its own statement (login_allowed is stable: it sees the statement's snapshot).
-select pg_temp.check('a username starts unlocked', login_allowed('gudang') and login_allowed('nobody'));
-select pg_temp.wrong('gudang', 5), pg_temp.wrong('nobody', 5), pg_temp.wrong('ani', 4);
-select pg_temp.check('5 wrong passwords lock a username for 15 minutes, existing or not; 4 do not',
-  not login_allowed('gudang') and not login_allowed(' GUDANG ') and not login_allowed('nobody') and login_allowed('ani'));
-select login_result('ani', true);
-select pg_temp.wrong('ani', 1);
-select pg_temp.check('a successful sign-in clears the count (4 wrong, success, 1 wrong: not locked)', login_allowed('ani'));
+select pg_temp.check('a username starts unlocked', login_allowed('gudang', '10.0.0.1') and login_allowed('nobody', '10.0.0.1'));
+select pg_temp.wrong('gudang', '10.0.0.1', 5), pg_temp.wrong('nobody', '10.0.0.1', 5), pg_temp.wrong('ani', '10.0.0.1', 4);
+select pg_temp.check('5 wrong passwords lock that username from that IP for 15 minutes, existing or not; 4 do not',
+  not login_allowed('gudang', '10.0.0.1') and not login_allowed(' GUDANG ', '10.0.0.1') and not login_allowed('nobody', '10.0.0.1')
+  and login_allowed('ani', '10.0.0.1'));
+select pg_temp.check('someone else''s wrong passwords do not lock you out on your own device',
+  login_allowed('gudang', '10.0.0.2'));
+select pg_temp.wrong('dewi', '10.0.1.' || n, 5) from generate_series(1, 6) n;
+select pg_temp.check('30 wrong passwords across IPs lock the username everywhere (no guessing from many devices)',
+  not login_allowed('dewi', '10.9.9.9'));
+select login_result('ani', '10.0.0.1', true);
+select pg_temp.wrong('ani', '10.0.0.1', 1);
+select pg_temp.check('a successful sign-in clears the count (4 wrong, success, 1 wrong: not locked)', login_allowed('ani', '10.0.0.1'));
 select pg_temp.check('the sign-in limit is for the server only',
-  not has_function_privilege('authenticated', 'public.login_allowed(text)', 'execute')
-  and not has_function_privilege('anon', 'public.login_result(text, boolean)', 'execute'));
+  not has_function_privilege('authenticated', 'public.login_allowed(text, text)', 'execute')
+  and not has_function_privilege('anon', 'public.login_result(text, text, boolean)', 'execute'));
 select pg_temp.check('account_email is for the server only',
   not has_function_privilege('authenticated', 'public.account_email(text)', 'execute')
   and not has_function_privilege('anon', 'public.account_email(text)', 'execute'));

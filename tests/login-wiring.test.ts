@@ -48,5 +48,10 @@ test('Nama Anda starts as the account name, not the last name typed on the devic
   assert.ok(p.includes('useSession()') && !p.includes('localStorage.getItem'), 'person name still read from the device');
 });
 
+test('sign-in fails closed: refused unless the limit check said yes; the client IP is part of the key', () => {
+  const a = src('app/login/actions.ts');
+  assert.ok(/allowed !== true/.test(a), 'a failed limit check must refuse, not skip');
+  assert.ok(a.includes('x-forwarded-for') && a.includes('p_ip'), 'the limit is not keyed by client IP');
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
