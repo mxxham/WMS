@@ -75,7 +75,7 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
             <fieldset className="space-y-2">
               <legend className="mb-1 font-medium">Tata letak</legend>
               <label className="flex gap-2"><input type="radio" checked={layout === "strip"} onChange={() => setLayout("strip")} />
-                <span><b>Strip tiang rak</b>: satu halaman per tiang, sel level {STRIP_LEVEL_ORDER.join(", ")} berurutan + panah atas/bawah. Lebar {LABEL.cellWidthMm} mm, tiap sel {LABEL.cellHeightMm} mm. Untuk roll kontinu.</span></label>
+                <span><b>Strip tiang rak</b>: kertas A4, dua tiang per lembar, tiap strip lebar {LABEL.a4.stripWidthMm} mm berisi level {STRIP_LEVEL_ORDER.join(", ")} berurutan + panah atas/bawah. Gunting di garis abu-abu.</span></label>
               <label className="flex gap-2"><input type="radio" checked={layout === "cell"} onChange={() => setLayout("cell")} />
                 <span><b>Per sel</b>: satu label {LABEL.cellWidthMm}×{LABEL.cellHeightMm} mm per halaman, panah di pita kode. Untuk label die-cut.</span></label>
             </fieldset>
@@ -89,7 +89,7 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
                 <span>Hitam-putih — untuk printer thermal (pita hitam, teks putih).</span></label>
             </fieldset>
             <label className="flex gap-2"><input type="checkbox" checked={includeCode128} onChange={(e) => setCode128(e.target.checked)} />
-              <span>Tambahkan barcode Code 128 (QR mengecil ke 34 mm)</span></label>
+              <span>Tambahkan barcode Code 128 (Per sel: QR mengecil ke 34 mm)</span></label>
           </CardContent>
         </Card>
       </div>
@@ -97,7 +97,7 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
       <div className="space-y-4">
         <div className="rounded-lg border-2 border-warn bg-warn/10 p-4 text-sm">
           <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Cetak di skala 100% / Actual size</p>
-          <p className="mt-1">Matikan &quot;Fit to page&quot; di dialog print. Setel ukuran kertas driver ke {LABEL.cellWidthMm} mm lebar. Skala lain membuat QR mengecil dan susah discan.</p>
+          <p className="mt-1">Matikan &quot;Fit to page&quot; di dialog print. Strip tiang rak: kertas A4. Per sel: setel ukuran kertas driver ke {LABEL.cellWidthMm}×{LABEL.cellHeightMm} mm. Skala lain membuat QR mengecil dan susah discan.</p>
         </div>
         {error && <p role="alert" className="rounded-md bg-bad/10 p-3 text-sm text-bad">{error}</p>}
         <Button size="lg" className="w-full" onClick={generate} disabled={busy || (scope === "bins" && !codes.trim())}>

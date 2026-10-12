@@ -48,6 +48,11 @@ export const LABEL = {
   quietZoneMm: 3,
   minBinCodePt: 28,
   minInfoPt: 8,
+  /**
+   * "Strip tiang rak" on A4 portrait (210 x 297 mm): two uprights side by side, all five levels of
+   * each on one sheet. 5 + 95 + 10 + 95 + 5 = 210 across; 5 + 16 + 5 x 51 + 16 + 5 = 297 down.
+   */
+  a4: { stripWidthMm: 95, gapMm: 10, marginMm: 5, cellHeightMm: 51, arrowBlockMm: 16, levels: 5 },
 };
 
 export type BinParts = { zone: string; rack: string | null; level: string | null; position: string | null };

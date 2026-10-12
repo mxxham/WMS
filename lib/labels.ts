@@ -9,7 +9,7 @@ const WHITE = rgb(1, 1, 1);
 
 export type LabelBin = { bin_code: string; zone: string; rack: string | null; level: string | null; position: string | null; abc_class: string | null };
 export type LabelOptions = {
-  layout: "cell" | "strip";     // cell = one 80x85 mm page per bin; strip = one long page per rack upright
+  layout: "cell" | "strip";     // cell = one 80x85 mm page per bin; strip = rack uprights, two per A4 sheet
   colorMode: "color" | "mono";  // mono for direct-thermal printers (black only)
   includeCode128: boolean;      // add a Code 128 above the colour band
 };
@@ -125,13 +125,66 @@ function drawCell(page: PDFPage, bin: LabelBin, originY: number, opt: LabelOptio
   centered(page, info, fonts.reg, infoSize, cx, bandY - 2 * MM - infoSize * 0.8, BLACK);
 }
 
+/**
+ * One level of an A4 strip (LABEL.a4), laid out sideways to fit five levels on a sheet:
+ * warehouse name across the top; QR on the left (quiet zone >= 3 mm to the cell edge); on the right
+ * the colour band with the bin code, [Code 128], and the rack / level / position / ABC line.
+ */
+function drawStripCell(page: PDFPage, bin: LabelBin, x: number, originY: number, W: number, H: number, opt: LabelOptions, fonts: { bold: PDFFont; reg: PDFFont }) {
+  const q = LABEL.quietZoneMm * MM;
+  const top = originY + H;
+
+  // Warehouse name, full width.
+  const nameSize = 6.5;
+  centered(page, WAREHOUSE_NAME, fonts.reg, nameSize, x + W / 2, top - 2 * MM - nameSize * 0.8, BLACK);
+  const bodyTop = top - 5 * MM;
+
+  // QR, left, vertically centred in the body.
+  const pad = q + 1 * MM;
+  const qrSize = 36 * MM;
+  const bodyH = bodyTop - originY;
+  drawQr(page, bin.bin_code, x + pad, originY + (bodyH + qrSize) / 2, qrSize);
+
+  // Right column.
+  const rx = x + pad + qrSize + pad;
+  const rw = x + W - rx - 3 * MM;
+  const rcx = rx + rw / 2;
+  let cursor = bodyTop - 1 * MM;
+
+  const bandH = (opt.includeCode128 ? 15 : 19) * MM;
+  const levelHex = bin.level ? LEVEL_COLORS[bin.level]?.hex : undefined;
+  const bandColor = opt.colorMode === "color" && levelHex ? hexToRgb(levelHex) : BLACK;
+  const textColor = opt.colorMode === "color" && levelHex ? BLACK : WHITE;
+  page.drawRectangle({ x: rx, y: cursor - bandH, width: rw, height: bandH, color: bandColor });
+  // As large as the band allows (>= LABEL.minBinCodePt), never wider than it.
+  const codeSize = Math.max(LABEL.minBinCodePt, Math.min(34, (rw - 3 * MM) / fonts.bold.widthOfTextAtSize(bin.bin_code, 1)));
+  centered(page, bin.bin_code, fonts.bold, codeSize, rcx, cursor - bandH / 2 - codeSize * 0.35, textColor);
+  cursor -= bandH + 2 * MM;
+
+  if (opt.includeCode128) {
+    const bh = 9 * MM;
+    drawCode128(page, bin.bin_code, rx + q, cursor, rw - 2 * q, bh);
+    cursor -= bh + 2 * MM;
+  }
+
+  const infoSize = Math.max(LABEL.minInfoPt, 8);
+  const lines = bin.rack
+    ? [`Rak ${bin.rack}  Level ${bin.level}  Pos ${bin.position}`, `Aisle ${bin.zone}  ABC ${bin.abc_class ?? "-"}`]
+    : [`Area ${bin.zone}${bin.position ? `  Lajur ${bin.position}` : ""}`, `ABC ${bin.abc_class ?? "-"}`];
+  lines.forEach((l, i) => centered(page, l, fonts.reg, infoSize, rcx, cursor - infoSize * 0.8 - i * (infoSize + 1.5), BLACK));
+}
+
 /** Groups rack bins into upright strips: same aisle + rack + position, levels A..E. */
 function toStrips(bins: LabelBin[]): LabelBin[][] {
   const groups = new Map<string, LabelBin[]>();
   for (const b of bins) {
-    const key = b.rack ? `${b.zone}-${b.rack}-${b.position}` : `floor-${b.bin_code}`;
+    if (!b.rack) continue;
+    const key = `${b.zone}-${b.rack}-${b.position}`;
     groups.set(key, [...(groups.get(key) ?? []), b]);
   }
+  // Floor bins have no upright: five to a strip, in order, so they fill the sheet like racks do.
+  const floor = bins.filter((b) => !b.rack);
+  for (let i = 0; i < floor.length; i += LABEL.a4.levels) groups.set(`floor-${i}`, floor.slice(i, i + LABEL.a4.levels));
   const order = (l: string | null) => (l ? STRIP_LEVEL_ORDER.indexOf(l as (typeof STRIP_LEVEL_ORDER)[number]) : 0);
   return [...groups.values()].map((g) => g.sort((a, b) => order(a.level) - order(b.level)));
 }
@@ -149,21 +202,32 @@ export async function buildLabelPdf(bins: LabelBin[], opt: LabelOptions): Promis
       drawCell(page, b, 0, opt, fonts, true);
     }
   } else {
-    const A = LABEL.arrowBlockMm * MM;
-    for (const strip of toStrips(bins)) {
-      const dir = strip[0].position ? POSITION_ARROW[strip[0].position] : undefined;
-      const hasArrows = Boolean(strip[0].rack && dir);
-      const pageH = strip.length * H + (hasArrows ? 2 * A : 0);
-      const page = pdf.addPage([W, pageH]);
-      if (hasArrows) {
-        drawArrow(page, dir!, W / 2, pageH - A / 2, 34 * MM, BLACK);
-        drawArrow(page, dir!, W / 2, A / 2, 34 * MM, BLACK);
-      }
-      strip.forEach((b, i) => {
-        const originY = pageH - (hasArrows ? A : 0) - (i + 1) * H;
-        drawCell(page, b, originY, opt, fonts, false);
-        // Hairline between cells so a continuous strip can also be cut into cells.
-        if (i > 0) page.drawLine({ start: { x: 0, y: originY + H }, end: { x: W, y: originY + H }, thickness: 0.3, color: rgb(0.6, 0.6, 0.6) });
+    // A4 portrait, two uprights side by side (LABEL.a4). Print at 100% / actual size.
+    const g = LABEL.a4;
+    const SW = g.stripWidthMm * MM, CH = g.cellHeightMm * MM, A = g.arrowBlockMm * MM, M = g.marginMm * MM;
+    const xs = [M, M + SW + g.gapMm * MM];
+    const strips = toStrips(bins);
+    for (let s = 0; s < strips.length; s += 2) {
+      const page = pdf.addPage([210 * MM, 297 * MM]);
+      strips.slice(s, s + 2).forEach((strip, col) => {
+        const x = xs[col];
+        const dir = strip[0].position ? POSITION_ARROW[strip[0].position] : undefined;
+        const hasArrows = Boolean(strip[0].rack && dir);
+        const stripTop = 297 * MM - M;
+        const cellsTop = stripTop - A;
+        if (hasArrows) {
+          drawArrow(page, dir!, x + SW / 2, stripTop - A / 2, 34 * MM, BLACK);
+          drawArrow(page, dir!, x + SW / 2, cellsTop - g.levels * CH - A / 2, 34 * MM, BLACK);
+        }
+        strip.forEach((b, i) => {
+          const originY = cellsTop - (i + 1) * CH;
+          drawStripCell(page, b, x, originY, SW, CH, opt, fonts);
+          // Hairline between cells so a strip can also be cut into single cells.
+          if (i > 0) page.drawLine({ start: { x, y: originY + CH }, end: { x: x + SW, y: originY + CH }, thickness: 0.3, color: rgb(0.6, 0.6, 0.6) });
+        });
+        // Cutting outline around the whole strip.
+        const bottom = cellsTop - g.levels * CH - A;
+        page.drawRectangle({ x, y: bottom, width: SW, height: stripTop - bottom, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.3 });
       });
     }
   }
