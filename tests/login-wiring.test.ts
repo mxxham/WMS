@@ -37,5 +37,16 @@ test('sign-in is limited per username on the server (Supabase\'s per-IP limit on
   assert.ok(a.includes('"login_allowed"') && a.includes('"login_result"'), 'login does not use the per-username limit');
   assert.ok(a.indexOf('"login_allowed"') < a.indexOf('signInWithPassword'), 'the limit is not checked before trying the password');
 });
+test('the signed-in account and Keluar show on desktop and phone', () => {
+  assert.ok(src('components/app/nav.tsx').includes('<AccountBox'), 'sidebar has no AccountBox');
+  assert.ok(src('components/app/page-header.tsx').includes('<AccountButton'), 'phone header has no AccountButton');
+  const acc = src('components/app/account.tsx');
+  assert.ok(acc.includes('action="/keluar"') && acc.includes('method="post"'), 'Keluar does not POST to /keluar');
+});
+test('Nama Anda starts as the account name, not the last name typed on the device', () => {
+  const p = src('components/app/person-name.tsx');
+  assert.ok(p.includes('useSession()') && !p.includes('localStorage.getItem'), 'person name still read from the device');
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

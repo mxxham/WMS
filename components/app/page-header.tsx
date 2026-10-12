@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LiveRefresh, type LiveTable } from "@/components/app/live-refresh";
 import { BRAND } from "@/config/brand";
+import { AccountButton } from "./account";
 
 /** `live`: tables whose changes re-render this page (see LiveRefresh). */
 export function PageHeader({ title, live, liveDebounceMs, children }: {
@@ -18,6 +19,8 @@ export function PageHeader({ title, live, liveDebounceMs, children }: {
         {live && <LiveRefresh tables={live} debounceMs={liveDebounceMs} />}
       </div>
       {children}
+      {/* Phones: who is signed in, and Keluar (the sidebar shows it on a desktop). */}
+      <AccountButton />
     </header>
   );
 }

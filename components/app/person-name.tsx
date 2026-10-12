@@ -2,28 +2,28 @@
 import { useEffect, useState } from "react";
 import { Input, Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-
-const KEY = "k1.personName";
+import { useSession } from "./session";
 
 const EVENT = "k1-person-name";
 
 /**
- * The name of whoever is doing a control step (count, approval, receipt,
- * hold …). The database records it with the step and refuses the step
- * without one; this device remembers the last name typed.
+ * The name of whoever is doing a control step (count, approval, receipt, hold …). The database
+ * records it with the step and refuses the step without one. It starts as the signed-in account's
+ * name (0071 personal accounts); it can still be edited for this page, but is not remembered on
+ * the device, so the next person on a shared handheld starts with their own name.
  */
 export function usePersonName(): [string, (v: string) => void] {
-  const [name, setName] = useState("");
+  const account = useSession()?.name ?? "";
+  const [name, setName] = useState(account);
   useEffect(() => {
-    try { setName(localStorage.getItem(KEY) ?? ""); } catch { /* storage unavailable: type it each time */ }
+    setName(account);
     // Every field on the page shows the same person.
     const sync = (e: Event) => setName((e as CustomEvent<string>).detail);
     window.addEventListener(EVENT, sync);
     return () => window.removeEventListener(EVENT, sync);
-  }, []);
+  }, [account]);
   const set = (v: string) => {
     setName(v);
-    try { localStorage.setItem(KEY, v); } catch { /* storage unavailable */ }
     window.dispatchEvent(new CustomEvent(EVENT, { detail: v }));
   };
   return [name, set];
