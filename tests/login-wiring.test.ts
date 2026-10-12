@@ -65,5 +65,9 @@ test('sign-in fails closed: refused unless the limit check said yes; the client 
   assert.ok(/allowed !== true/.test(a), 'a failed limit check must refuse, not skip');
   assert.ok(a.includes('x-forwarded-for') && a.includes('p_ip'), 'the limit is not keyed by client IP');
 });
+test('after a wrong password the username stays filled in (React resets the form after an action)', () => {
+  const f = src('app/login/login-form.tsx');
+  assert.ok(/value=\{username\}/.test(f) && f.includes('setUsername'), 'the username input is not kept in state');
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
