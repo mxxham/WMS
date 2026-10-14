@@ -1,6 +1,6 @@
 # DEPLOYMENT SUMMARY — 2026-09-18
 
-**Repository:** https://github.com/mxxham/allocator_k-one  
+**Repository:** https://github.com/mxxham/WMS  
 **Commit:** `32215c0` feat: complete physical ledger verifier with RELOC_OUT accounting  
 **Status:** ✅ **DEPLOYED TO GITHUB**  
 **Production Readiness:** ✅ **READY**
@@ -322,7 +322,7 @@ All documentation deployed to repository root:
 
 ## CONTACT & SUPPORT
 
-**Repository:** https://github.com/mxxham/allocator_k-one  
+**Repository:** https://github.com/mxxham/WMS  
 **Latest Commit:** `32215c0` (2026-09-18)
 
 For questions about:

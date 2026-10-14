@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="public/k-one-logo.png" width="120" alt="K-one logo" />
+<img src="public/je-ir-logo.png" width="120" alt="JE-IR WMS logo" />
 
-# K-one · CKB Warehouse WMS
+# JE-IR WMS · CKB Warehouse WMS
 
 **PT Cipta Krida Bahari · WSM SUB 2 Surabaya** — Shell lubricant warehouse
 
@@ -18,6 +18,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_16-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
 ![Three.js](https://img.shields.io/badge/Three.js-0.186-000000?style=flat-square&logo=threedotjs&logoColor=white)
 ![Version](https://img.shields.io/badge/version-2.0.0-F97316?style=flat-square)
+[![GitHub](https://img.shields.io/badge/GitHub-mxxham%2FWMS-181717?style=flat-square&logo=github)](https://github.com/mxxham/WMS)
 
 [![Features](https://img.shields.io/badge/Features-0F172A?style=for-the-badge)](#features)
 [![Daily routine](https://img.shields.io/badge/Daily_routine-0F766E?style=for-the-badge)](#daily-routine)
@@ -55,7 +56,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 
 <table>
 <tr><th align="left">Area</th><th align="left">What it does</th></tr>
-<tr><td><b>Labels</b></td><td>Rack column strips A–E on A4 (two 95 mm strips per sheet) or single 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
+<tr><td><b>Labels</b></td><td>Rack column strips A–E on A4 (two 95 × 85 mm columns per sheet) or single 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
 <tr><td><b>Scan</b></td><td>Phone camera or USB/Bluetooth scanner, always focused, submits on Enter</td></tr>
 <tr><td><b>3D warehouse</b></td><td>2,570 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
 <tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>
@@ -244,7 +245,7 @@ Test: `Import` → choose the WMS file → sheet `WMS` and title row 4 are detec
 
 Files: `lib/labels.ts`, `app/api/labels/route.ts`, `app/(app)/labels/*`.
 
-Test: `Label` → one rack → CA / 01 → `Strip` → create the PDF. A4 portrait, two columns (position 01 and 02) side by side, each 95 mm wide: a 16 mm arrow block, 5 cells × 51 mm (QR left, colour band with the bin code right), and the arrow again: 5 + 95 + 10 + 95 + 5 = 210 mm across, 5 + 16 + 255 + 16 + 5 = 297 mm down (`LABEL.a4` in `config/warehouse.ts`). Cut along the grey outline. `Per sel` mode is an 80 × 85 mm page. Print at **100%** scale (`Cetak di skala 100%`). Sample output: `docs/label-samples/`.
+Test: `Label` → one rack → CA / 01 → `Strip` → create the PDF. A4 portrait, two columns (position 01 and 02) side by side, the same cell as `Per sel` but 95 mm wide (QR, Code 128, colour band with the bin code, info line), no arrows: 5 + 95 + 10 + 95 + 5 = 210 mm across; three 85 mm levels per sheet, so levels D and E of the same two columns continue on the next sheet (`LABEL.a4` in `config/warehouse.ts`). Cut along the grey outline. `Per sel` mode is an 80 × 85 mm page. Print at **100%** scale (`Cetak di skala 100%`). Sample output: `docs/label-samples/`.
 
 ### Phase 4 — Scan and bin detail
 
