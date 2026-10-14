@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "CKB WSM SUB 2: bin labels, scanning, 3D stock view, FEFO allocation, picklists and wave execution on one Supabase ledger",
+  "homepage": "https://github.com/mxxham/WMS",
+  "repository": { "type": "git", "url": "https://github.com/mxxham/WMS.git" },
+  "bugs": { "url": "https://github.com/mxxham/WMS/issues" },
   "engines": {
     "node": ">=20"
   },

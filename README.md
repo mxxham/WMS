@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="public/k-one-logo.png" width="120" alt="K-one logo" />
+<img src="public/je-ir-logo.png" width="120" alt="JE-IR WMS logo" />
 
-# K-one · CKB Warehouse WMS
+# JE-IR WMS · CKB Warehouse WMS
 
 **PT Cipta Krida Bahari · WSM SUB 2 Surabaya** — Shell lubricant warehouse
 
@@ -18,6 +18,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_16-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
 ![Three.js](https://img.shields.io/badge/Three.js-0.186-000000?style=flat-square&logo=threedotjs&logoColor=white)
 ![Version](https://img.shields.io/badge/version-2.0.0-F97316?style=flat-square)
+[![GitHub](https://img.shields.io/badge/GitHub-mxxham%2FWMS-181717?style=flat-square&logo=github)](https://github.com/mxxham/WMS)
 
 [![Features](https://img.shields.io/badge/Features-0F172A?style=for-the-badge)](#features)
 [![Daily routine](https://img.shields.io/badge/Daily_routine-0F766E?style=for-the-badge)](#daily-routine)
