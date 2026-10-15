@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDateTime, fmtNum } from "@/lib/utils";
 import { shipmentHref } from "./shipment-list";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 const pct = (x: number | null) => (x === null ? "–" : `${fmtNum(x, 1)}%`);
 
@@ -56,8 +57,8 @@ export async function AccuracyView({ days }: { days: number }) {
       </nav>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         {tiles.map((t) => (
-          <div key={t.label} className={cn("rounded-lg border-l-4 bg-white p-3", t.bad ? "border-bad" : "border-ckb")}>
-            <div className="font-cond text-3xl font-semibold tabular">{t.value}</div>
+          <div key={t.label} className="rounded-lg bg-white p-3">
+            <div className="flex items-start justify-between gap-2"><div className="font-cond text-3xl font-semibold tabular">{t.value}</div>{t.bad && <StatusIcon tone="bad" />}</div>
             <div className="text-sm font-medium">{t.label}</div>
             <div className="text-xs text-steel-500">{t.note}</div>
           </div>

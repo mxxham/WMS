@@ -144,9 +144,9 @@ export function ImportClient() {
       {step === "review" && (
         <>
           <div className="grid grid-cols-3 gap-3">
-            {([["ok", "Siap diimpor", "border-ok"], ["warning", "Peringatan (tetap diimpor)", "border-warn"], ["error", "Error (tidak diimpor)", "border-bad"]] as const).map(([k, l, b]) => (
-              <button key={k} onClick={() => setFilter(filter === k ? "all" : k)} className={cn("rounded-lg border-l-4 bg-white p-3 text-left", b, filter === k && "ring-2 ring-ckb")}>
-                <div className="font-cond text-3xl font-semibold tabular">{fmtNum(counts[k])}</div><div className="text-xs text-steel-500">{l}</div>
+            {([["ok", "Siap diimpor", "bg-ok"], ["warning", "Peringatan (tetap diimpor)", "bg-warn"], ["error", "Error (tidak diimpor)", "bg-bad"]] as const).map(([k, l, b]) => (
+              <button key={k} onClick={() => setFilter(filter === k ? "all" : k)} aria-pressed={filter === k} className={cn("rounded-lg p-3 text-left", filter === k ? "bg-ckb-tint/40 ring-2 ring-ckb" : "bg-white hover:bg-steel-100")}>
+                <div className="font-cond text-3xl font-semibold tabular">{fmtNum(counts[k])}</div><div className="flex items-center gap-1.5 text-xs text-steel-500"><span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", b)} />{l}</div>
               </button>
             ))}
           </div>

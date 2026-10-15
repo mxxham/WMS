@@ -6,8 +6,8 @@ import { BRAND } from "@/config/brand";
  * `photo` to a file in public/ (e.g. "/team/ilham.jpg"); without one, the person's initials are shown.
  */
 export const ABOUT = {
-  name: "CKB Warehouse WMS",
-  welcome: "Selamat datang.",
+  name: BRAND.appName,
+  welcome: `Selamat datang di ${BRAND.appName}.`,
   about: "Sistem manajemen gudang untuk CKB Logistics.",
   creditTitle: "Dibuat oleh",
   credit: "Dibuat oleh Ilham & Rahman",
@@ -16,6 +16,7 @@ export const ABOUT = {
     { name: "Rahman", photo: undefined as string | undefined },
   ],
   modulesTitle: "Modul",
+  modulesButton: "Lihat modul",
   welcomeButton: "Lanjut",
 
   copyright: `© ${BRAND.year} ${BRAND.owner}`,

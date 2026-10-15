@@ -51,7 +51,7 @@ export function AccountButton() {
   if (!s) return null;
   return (
     <ActionMenu title={s.name} trigger={
-      <button type="button" aria-label={`Akun: ${s.name}`} className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-plate font-cond text-lg font-bold text-steel lg:hidden">
+      <button type="button" aria-label={`Akun: ${s.name}`} className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-jeir-teal font-cond text-lg font-bold text-jeir-navy lg:hidden">
         {s.name.charAt(0).toUpperCase()}
       </button>
     }>

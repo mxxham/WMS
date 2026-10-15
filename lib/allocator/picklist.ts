@@ -3,6 +3,7 @@ import type { AllocatorConfig } from './config';
 import type { AllocationLine, AllocationResult, DemandLine, Picklist, PickType } from './types';
 import { stockIdentityKey } from './ledger';
 import { parseLocation } from './pickpath';
+import { compareWaveNo } from './earlier-waves';
 
 /**
  * Turn raw allocations into printable pick tasks.
@@ -93,16 +94,11 @@ export function buildPicklists(
   return picklists.sort(
     (a, b) =>
       ws.get(a.waveNo)!.localeCompare(ws.get(b.waveNo)!) ||
-      waveSortKey(a.waveNo) - waveSortKey(b.waveNo) ||
+      compareWaveNo(a.waveNo, b.waveNo) ||
       (a.slotTime ?? '99:99').localeCompare(b.slotTime ?? '99:99') ||
       (a.shipmentNumbers[0] ?? '').localeCompare(b.shipmentNumbers[0] ?? '') ||
       a.taskType.localeCompare(b.taskType),
   );
-}
-
-function waveSortKey(waveNo: string): number {
-  const n = Number(waveNo);
-  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {

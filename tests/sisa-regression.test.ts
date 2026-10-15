@@ -156,19 +156,19 @@ describe('SKU 550076636 multi-wave regression', () => {
     }
   });
 
-  it('wave 6 picks 2, wave 13 picks 11, total 13', () => {
-    const w6 = skuLines.find(l => l.waveNo === '6')!;
-    const w13 = skuLines.find(l => l.waveNo === '13')!;
+  it('shipment 109661338 picks 2, shipment 109661352 picks 11, total 13', () => {
+    const w6 = skuLines.find(l => l.waveNo === '109661338')!;
+    const w13 = skuLines.find(l => l.waveNo === '109661352')!;
     eq(w6.qtyPick, 2, 'wave 6 qtyPick');
     eq(w13.qtyPick, 11, 'wave 13 qtyPick');
     eq(skuLines.reduce((s, l) => s + l.qtyPick, 0), 13, 'total qtyPick');
   });
 
   it('sisa after wave 6 = 13, after wave 13 = 2', () => {
-    const w6 = skuLines.find(l => l.waveNo === '6')!;
-    const w13 = skuLines.find(l => l.waveNo === '13')!;
-    eq(w6.qtyRemainingInBin, 13, 'wave 6 sisa');
-    eq(w13.qtyRemainingInBin, 2, 'wave 13 sisa');
+    const w6 = skuLines.find(l => l.waveNo === '109661338')!;
+    const w13 = skuLines.find(l => l.waveNo === '109661352')!;
+    eq(w6.qtyRemainingInBin, 13, 'shipment 109661338 sisa');
+    eq(w13.qtyRemainingInBin, 2, 'shipment 109661352 sisa');
   });
 
   it('no pallet breaks', () => {

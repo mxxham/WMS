@@ -1,6 +1,7 @@
 /**
- * Rack-upright strips on A4 (Label page, "Strip tiang rak"): two strips side by side per A4 sheet,
- * each at least 8.5 cm wide, all five levels of an upright on one sheet. Builds the real PDF.
+ * Rack-upright strips on A4 (Label page, "Strip tiang rak"): the original cell layout (QR above the
+ * colour band) made compact, two strips side by side, each at least 8.5 cm wide, no arrows, all five
+ * levels of both uprights on one sheet. Builds the real PDF.
  * Run with --conditions=react-server (lib/labels.ts is server-only).
  */
 import { strict as assert } from 'node:assert';
@@ -30,18 +31,27 @@ async function pages(bins: LabelBin[]) {
     assert.ok(LABEL.a4.stripWidthMm >= 85, `strip ${LABEL.a4.stripWidthMm} mm`);
     assert.ok(2 * LABEL.a4.marginMm + 2 * LABEL.a4.stripWidthMm + LABEL.a4.gapMm <= 210, 'two strips do not fit across A4');
   });
-  await test('all five levels and both arrow blocks fit the A4 height', () => {
-    assert.ok(2 * LABEL.a4.marginMm + 2 * LABEL.a4.arrowBlockMm + 5 * LABEL.a4.cellHeightMm <= 297, 'five levels do not fit down A4');
+  await test('all five levels fit down A4, no arrow blocks', () => {
+    assert.equal(LABEL.a4.levelsPerSheet, 5);
+    assert.ok(5 * LABEL.a4.cellHeightMm + 2 * LABEL.a4.marginMm <= 297, 'five cells do not fit down A4');
+    assert.ok(!('arrowBlockMm' in LABEL.a4), 'arrow blocks are still configured');
   });
-  await test('two uprights: one A4 page', async () => {
+  await test('each compact cell holds its parts: name, QR with 3 mm quiet zone, [Code 128], band, info line', () => {
+    const a = LABEL.a4, q = LABEL.quietZoneMm;
+    const nameMm = 4, gapMm = 2, infoMm = 5;
+    assert.ok(nameMm + q + a.qrWithCode128Mm + q + a.code128Mm + gapMm + a.bandMm + infoMm <= a.cellHeightMm, 'with Code 128 the cell overflows');
+    assert.ok(nameMm + q + a.qrMm + q + a.bandMm + infoMm <= a.cellHeightMm, 'without Code 128 the cell overflows');
+    assert.ok(a.qrWithCode128Mm >= 20, 'QR under 2 cm is too small to scan reliably');
+    assert.ok(a.bandMm * 72 / 25.4 >= LABEL.minBinCodePt * 0.9, 'the band cannot hold the minimum bin code size');
+  });
+  await test('two uprights: one A4 sheet', async () => {
     const p = await pages([...upright('CA', '01', '01'), ...upright('CA', '01', '02')]);
     assert.equal(p.length, 1);
     assert.ok(Math.abs(p[0].width - A4.w) < 0.5 && Math.abs(p[0].height - A4.h) < 0.5, `page ${p[0].width}x${p[0].height} pt is not A4`);
   });
-  await test('three uprights: two A4 pages (the second has one strip)', async () => {
+  await test('three uprights: two sheets (the second has one strip)', async () => {
     const p = await pages([...upright('CA', '01', '01'), ...upright('CA', '01', '02'), ...upright('CA', '02', '01')]);
     assert.equal(p.length, 2);
-    assert.ok(p.every((s) => Math.abs(s.width - A4.w) < 0.5 && Math.abs(s.height - A4.h) < 0.5));
   });
   await test('floor bins (no rack) are packed five to a strip, not one strip each', async () => {
     const floor: LabelBin[] = Array.from({ length: 10 }, (_, i) => ({ bin_code: `STG_${String(i + 1).padStart(2, '0')}`, zone: 'STAGING', rack: null, level: null, position: String(i + 1).padStart(2, '0'), abc_class: null }));

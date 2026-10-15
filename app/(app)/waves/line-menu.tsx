@@ -21,6 +21,8 @@ import { CancelButton, WaitNotice, type Rpc, type TaskWait } from "./wave-parts"
 export type LineItem = ReturnType<typeof pairMoves<TaskRow>>[number];
 export type LineProps = {
   item: LineItem; label: string; isShort: boolean; wait?: TaskWait;
+  /** 0073: this pick's pallet relokasi is already posted; cancelling finishes the pallet break */
+  postedMove?: TaskRow;
   canPost: boolean; canUndo: boolean; canRestore: boolean; supervisor: boolean; rpc: Rpc; onDone: () => void;
 };
 
@@ -38,8 +40,29 @@ export function LinePrimary({ item, isShort, wait, canPost, supervisor, rpc, onD
 }
 
 /** Which rows the line's menu has. Exported so the page can hide an empty menu. */
-export function lineMenuRows({ item, isShort, canPost, canUndo, canRestore, supervisor, rpc }: LineProps) {
+export function lineMenuRows({ item, label, isShort, canPost, canUndo, canRestore, supervisor, rpc, postedMove }: LineProps) {
   const rows: { key: string; node: React.ReactNode; danger?: boolean }[] = [];
+  const head = item.kind === "pair" ? item.pick : item.task;
+  // 0073: the relokasi of this pick's pallet was posted alone (to unblock another wave). Cancelling
+  // the pick then finishes the pallet break: what the pick would have taken goes up to the same
+  // pickface, so the source bin is left empty and nothing has to be corrected afterwards.
+  const cancelTitle = postedMove
+    ? `Batalkan pick #${head.seq} · palet sudah setengah pindah`
+    : `Batalkan tugas #${head.seq}`;
+  const cancelSummary = postedMove
+    ? `Sisa palet dari ${head.from_bin} sudah diposting ke ${postedMove.to_bin} (relokasi #${postedMove.seq}). `
+      + `Baris pick ini dibatalkan dan ${fmtNum(Number(head.quantity))} karton yang tertinggal di ${head.from_bin} ikut naik ke ${postedMove.to_bin}, `
+      + `supaya ${head.from_bin} kosong dan tidak ada karton yang perlu dikoreksi kemudian.`
+    : `Baris pick ini dibatalkan. Tidak ada stok yang bergerak.`;
+  if (postedMove) {
+    rows.push({ key: "posted-move", node: (
+      <span className="block text-xs text-steel-500">
+        Sisa palet sudah diposting: relokasi #{postedMove.seq} → {postedMove.to_bin}. Batalkan pick ini
+        menyelesaikan paletnya — {fmtNum(Number(head.quantity))} karton dari {head.from_bin} naik ke {postedMove.to_bin}.
+        Kalau pick lain masih mengambil dari {head.from_bin}, pembatalan ditolak sampai itu dibersihkan.
+      </span>
+    ) });
+  }
   if (item.kind === "pair") {
     const { pick, move } = item;
     const moveOnly = (
@@ -58,7 +81,7 @@ export function lineMenuRows({ item, isShort, canPost, canUndo, canRestore, supe
         rows.push({ key: "edit", node: <EditRowButton pick={pick} move={move} /> });
         if (move.status === "PLANNED") rows.push({ key: "move", node: moveOnly });
         // A pair is one picklist line: cancelling takes the pick and its leftover move together.
-        if (canRestore) rows.push({ key: "cancel", danger: true, node: <CancelButton run={async () => {
+        if (canRestore) rows.push({ key: "cancel", danger: true, node: <CancelButton title={cancelTitle} summary={cancelSummary} run={async () => {
           const e1 = await rpc("set_task_status", { p_task_id: pick.id, p_status: "CANCELLED" });
           if (e1) return e1;
           if (move.status !== "COMPLETED") {
@@ -89,7 +112,7 @@ export function lineMenuRows({ item, isShort, canPost, canUndo, canRestore, supe
         if (t.task_type === "PICK") rows.push({ key: "post-edit", node: <EditRowButton pick={t} mode="post" /> });
         if (t.task_type === "PICK") rows.push({ key: "edit", node: <EditRowButton pick={t} /> });
         if (t.task_type === "PICK" && Number(t.quantity) > 1) rows.push({ key: "split", node: <SplitButton task={t} /> });
-        rows.push({ key: "cancel", danger: true, node: <CancelButton run={() => rpc("set_task_status", { p_task_id: t.id, p_status: "CANCELLED" })} /> });
+        rows.push({ key: "cancel", danger: true, node: <CancelButton title={cancelTitle} summary={cancelSummary} run={() => rpc("set_task_status", { p_task_id: t.id, p_status: "CANCELLED", p_reason: 'order dibatalkan' })} /> });
       }
     }
   }

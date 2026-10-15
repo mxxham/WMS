@@ -53,17 +53,25 @@ export interface PlanPayload {
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
+function waveDestination(d: DemandLine): string {
+  const company = d.destination?.trim() ?? "";
+  const location = d.shipToLocation?.trim() ?? "";
+  if (!company) return location;
+  if (!location || location === company) return company;
+  return `${company} · ${location}`;
+}
+
 function groupWaves(demand: DemandLine[]): PlanWave[] {
   const byWave = new Map<string, PlanWave>();
   for (const d of demand) {
     let w = byWave.get(d.waveNo);
     if (!w) {
-      w = { wave_no: d.waveNo, shipment_numbers: [], truck: d.truckType, destination: d.destination, planned_slot: d.slotTime };
+      w = { wave_no: d.waveNo, shipment_numbers: [], truck: d.truckType, destination: waveDestination(d), planned_slot: d.slotTime };
       byWave.set(d.waveNo, w);
     }
     if (!w.shipment_numbers.includes(d.shipmentNumber)) w.shipment_numbers.push(d.shipmentNumber);
     w.truck ??= d.truckType;
-    w.destination ||= d.destination;
+    if (!w.destination) w.destination = waveDestination(d);
     // A wave's slot is its earliest shipment's (see waveSlots in allocator.ts).
     if (d.slotTime && (!w.planned_slot || d.slotTime < w.planned_slot)) w.planned_slot = d.slotTime;
   }

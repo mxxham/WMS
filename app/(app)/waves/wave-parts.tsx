@@ -50,6 +50,70 @@ export async function printBinToBin(waves: WaveRow[], tasks: TaskRow[], filename
   downloadBinToBinPdf(binToBinRows(waves, tasks), filename);
 }
 
+export async function printExcel(waves: WaveRow[], allWaves: WaveRow[], tasks: TaskRow[], outbound: (OutboundRow & OutboundDetail)[], filename: string) {
+  const db = createClient();
+  const bins = [...new Set(tasks.flatMap((t) => [t.from_bin, t.to_bin, t.actual_from_bin]).filter((b): b is string => !!b))];
+  const invPromise = bins.length
+    ? db.from("inventory_detail").select("bin_code, sku, batch_lot, expiry_date, quantity").in("bin_code", bins)
+    : Promise.resolve({ data: [] as any });
+  const pfPromise = db.from("pickface_detail").select("sku, bin_code");
+  const itemsPromise = db.from("items").select("sku, description, upp");
+  const [{ data: inv }, { data: pf }, { data: items }] = await Promise.all([invPromise, pfPromise, itemsPromise]);
+
+  const { downloadAllocationWorkbook } = await import("@/lib/allocator/browser/downloads");
+  const { buildMovementReport } = await import("@/lib/allocator/movement");
+  const picklists = picklistsFromTasks(waves, tasks, outbound, (inv ?? []) as StockNow[], allWaves);
+
+  const descBySku = new Map(tasks.map((t) => [t.sku, t.description]));
+  const shortages = (outbound ?? [])
+    .filter((o) => o.quantity_requested !== undefined && Number(o.quantity_allocated ?? 0) < Number(o.quantity_requested))
+    .map((o) => ({
+      shipmentNumber: o.shipment_number,
+      orderNos: o.order_nos ?? [],
+      sku: o.sku,
+      description: descBySku.get(o.sku) ?? o.sku,
+      qtyRequested: Number(o.quantity_requested),
+      qtyAllocated: Number(o.quantity_allocated ?? 0),
+      qtyShort: Number(o.quantity_requested) - Number(o.quantity_allocated ?? 0),
+      reason: (o.shortage_reason as string) || "NO_STOCK",
+      qtyRejectedByShelfLife: 0,
+      qtyInStaging: 0,
+    }));
+
+  const result = {
+    generatedAt: new Date(),
+    picklists,
+    lines: picklists.flatMap((p) => p.lines),
+    shortages,
+    warnings: [],
+    stats: {
+      demandLines: 0, cartonsRequested: 0, cartonsAllocated: 0, fillRatePct: 0,
+      palletPicks: 0, casePicks: 0, palletsBroken: 0, binsTouched: 0, shipments: 0,
+    },
+  } as any;
+
+  const movement = buildMovementReport(result);
+
+  let pickfaces: Map<string, any> | undefined;
+  if (pf?.length) {
+    const itemMap = new Map((items ?? []).map((i: any) => [i.sku, i]));
+    const m = new Map();
+    for (const p of pf) {
+      const it = itemMap.get(p.sku);
+      m.set(p.sku, {
+        sku: p.sku,
+        description: it?.description ?? p.sku,
+        location: p.bin_code,
+        targetQtyCartons: Number(it?.upp) || 0,
+        isAuto: false,
+      });
+    }
+    pickfaces = m;
+  }
+
+  await downloadAllocationWorkbook(result, movement, pickfaces as any, filename);
+}
+
 const STATUS_TONE: Record<string, string> = {
   PENDING: "bg-steel-100 text-steel-700", PLANNED: "bg-steel-100 text-steel-700",
   COMPLETED: "bg-ok text-white", RESCHEDULED: "bg-warn text-steel", CANCELLED: "bg-bad/15 text-bad line-through",
@@ -117,15 +181,21 @@ export function TundaButton({ wave: w, tasks, rpc }: { wave: WaveRow; tasks: Tas
  * Batal without a confirmation step: cancelling is undone with one tap on
  * Pulihkan on the cancelled row, so a dialog here only slowed the floor down.
  */
-export function CancelButton({ run }: { run: () => Promise<string | null> }) {
+export function CancelButton({ run, title, summary }: { run: () => Promise<string | null>; title?: string; summary?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const button = (
+    <Button size="sm" variant="ghost" disabled={busy}
+      onClick={async () => { setBusy(true); setError(null); const e = await run(); setBusy(false); setError(e); }}>
+      {busy ? "Membatalkan…" : "Batal"}
+    </Button>
+  );
+  if (!title) return <span className="inline-flex flex-col">{button}{error && <span role="alert" className="text-xs text-bad">{error}</span>}</span>;
   return (
     <span className="inline-flex flex-col">
-      <Button size="sm" variant="ghost" disabled={busy}
-        onClick={async () => { setBusy(true); setError(null); const e = await run(); setBusy(false); setError(e); }}>
-        {busy ? "Membatalkan…" : "Batal"}
-      </Button>
+      <ConfirmButton size="sm" variant="danger" title={title} confirmLabel="Batal" summary={summary ?? ""} onConfirm={run}>
+        Batal
+      </ConfirmButton>
       {error && <span role="alert" className="text-xs text-bad">{error}</span>}
     </span>
   );

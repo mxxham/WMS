@@ -36,7 +36,7 @@ export function MovementActions({ bin, inventory, role, onDone }: { bin: Bin; in
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Button size="lg" variant="plate" disabled={blocked} onClick={() => setOpen("putaway")}><ArrowDownToLine className="h-5 w-5" />Putaway</Button>
+        <Button size="lg" variant="accent" disabled={blocked} onClick={() => setOpen("putaway")}><ArrowDownToLine className="h-5 w-5" />Putaway</Button>
         <Button size="lg" disabled={lines.length === 0} onClick={() => setOpen("pick")}><PackageMinus className="h-5 w-5" />Pick</Button>
         <Button size="lg" variant="outline" disabled={lines.length === 0} onClick={() => setOpen("transfer")}><ArrowRightLeft className="h-5 w-5" />Transfer</Button>
         {canAdjust && <Button size="lg" variant="outline" onClick={() => setOpen("adjust")}><SlidersHorizontal className="h-5 w-5" />Adjust</Button>}

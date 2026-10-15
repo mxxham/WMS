@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, Info, Plus, RefreshCw, RotateCcw, X, XCircle } from "lucide-react";
+import { AlertTriangle, Check, Info, Plus, RefreshCw, RotateCcw, Scissors, X, XCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { usePersonName } from "@/components/app/person-name";
 import { fetchAll } from "@/lib/fetch-all";
 import { cn, fmtNum } from "@/lib/utils";
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
-import { buildSheet, leftoverAfter, lineChanged, sheetNotes, sheetPayload, sheetSummary, type SheetIncoming, type SheetLine, type SheetRow, type SheetSource, type SheetStock } from "@/lib/wave-sheet";
+import { buildSheet, followPick, leftoverAfter, lineChanged, pecahLine, sheetNotes, sheetPayload, sheetSummary, type SheetIncoming, type SheetLine, type SheetRow, type SheetSource, type SheetStock } from "@/lib/wave-sheet";
 
 const REASONS = ["sesuai picklist cetak", "bin kosong / kurang", "palet terhalang", "karton rusak"];
 type Auto = { kind: "correction"; bin: string; sku: string; batch: string; qty: number; had: number }
@@ -99,6 +99,9 @@ export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { i
   const update = (key: string, f: (l: SheetLine) => SheetLine) => setLines((ls) => ls.map((l) => (l.key === key ? f(structuredClone(l)) : l)));
   function setSource(l: SheetLine, i: number, patch: Partial<SheetSource>) {
     update(l.key, (x) => {
+      // The pallet's cartons not picked go down with the sisa (12 Oct CB11C01), until the sisa is typed itself.
+      const init = initial.get(x.key);
+      if (i === 0 && patch.qty !== undefined && init) x.moveQty = followPick(x, init, patch.qty);
       const s = { ...x.sources[i], ...patch };
       // A bin holding one batch of this SKU fills batch and expiry; a batch with one expiry there fills the expiry.
       const here = (bySku.get(x.sku) ?? []).filter((r) => r.bin === s.bin.trim().toUpperCase() && r.qty > 0);
@@ -283,12 +286,17 @@ export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { i
                               )}
                             </div>
                           )) : <span className="inline-block pt-2 text-steel-300">–</span>}
-                          {l.pick && (
-                            <button type="button" className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-xs text-ckb hover:bg-ckb-tint"
-                              onClick={() => update(l.key, (x) => ({ ...x, sources: [...x.sources, { bin: "", batch: x.sources[0].batch, expiry: x.sources[0].expiry, qty: "" }] }))}>
-                              <Plus className="h-3 w-3" />bin lain
-                            </button>
-                          )}
+                          {l.pick && (() => {
+                            // Pecah: fewer typed than planned, the rest from another bin (12 Oct NO 6 #1, no Tambah item).
+                            const short = Number(l.pick.quantity) - l.sources.reduce((n, s) => n + (Number(s.qty) || 0), 0);
+                            return (
+                              <button type="button" className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-xs text-ckb hover:bg-ckb-tint"
+                                onClick={() => update(l.key, (x) => (short > 0 ? pecahLine(x, initial.get(x.key)!) : null)
+                                  ?? { ...x, sources: [...x.sources, { bin: "", batch: x.sources[0].batch, expiry: x.sources[0].expiry, qty: "" }] })}>
+                                {short > 0 ? <><Scissors className="h-3 w-3" />Pecah: {fmtNum(short)} dari bin lain</> : <><Plus className="h-3 w-3" />bin lain</>}
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td>
                           <div className="flex items-start gap-1">

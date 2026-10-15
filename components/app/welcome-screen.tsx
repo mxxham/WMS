@@ -20,21 +20,19 @@ export function WelcomeScreen() {
       <D.Portal>
         {/* No trigger button, so Radix would drop focus on <body>: put it back where it was. */}
         <D.Content aria-modal="true" onCloseAutoFocus={(e) => { e.preventDefault(); restoreFocus(); }}
-          className="welcome-fade fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-ckb p-6 text-white focus:outline-none">
+          className="welcome-fade fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-jeir-navy bg-jeir-side p-6 text-white focus:outline-none">
           <div className="w-full max-w-sm space-y-6 text-center">
-            <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-xl bg-white p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={BRAND.logo} alt="" width={64} height={64} className="h-16 w-16" />
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={BRAND.logo} alt="" width={80} height={80} className="mx-auto block h-20 w-20 rounded-xl" />
             <div className="space-y-2">
               <D.Title className="font-cond text-4xl font-bold leading-tight">{TEXT.name}</D.Title>
               <D.Description className="text-lg text-white/85">{TEXT.welcome}</D.Description>
             </div>
             <div className="space-y-1">
-              <p className="inline-block rounded-plate bg-plate px-2 py-0.5 font-cond text-lg font-bold text-steel">{TEXT.credit}</p>
+              <p className="inline-block rounded-plate bg-white/10 px-2 py-0.5 font-cond text-lg font-bold text-jeir-teal">{TEXT.credit}</p>
               <p className="text-sm text-white/75">{TEXT.about}</p>
             </div>
-            <Button variant="plate" className="h-12 w-full text-base" onClick={close}>{TEXT.button}</Button>
+            <Button variant="accent" className="h-12 w-full text-base" onClick={close}>{TEXT.button}</Button>
           </div>
         </D.Content>
       </D.Portal>

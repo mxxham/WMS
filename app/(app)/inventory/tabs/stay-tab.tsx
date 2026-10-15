@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import type { FefoLine } from "../page";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 type StayLine = { bin: string; batch: string; expiry: string | null; qty: number; received: string | null };
 type Stay = {
@@ -142,8 +143,8 @@ export function StayTab({ lines }: { lines: FefoLine[] }) {
     <div className="space-y-6 p-4 lg:p-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {tiles.map(([label, value, note, bad]) => (
-          <div key={label} className={cn("rounded-lg bg-white p-3", bad && "border-l-4 border-warn")}>
-            <div className="text-xs text-steel-500">{label}</div>
+          <div key={label} className="rounded-lg bg-white p-3">
+            <div className="flex items-start justify-between gap-2 text-xs text-steel-500">{label}{bad && <StatusIcon tone="warn" />}</div>
             <div className="font-cond text-3xl font-semibold tabular">{value}</div>
             <div className="text-xs text-steel-500">{note}</div>
           </div>

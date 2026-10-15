@@ -33,10 +33,9 @@ export interface StockBin {
 export interface DemandLine {
   shipmentNumber: string;
   /**
-   * The "NO" column on Schedule of the day — groups one or more shipments
-   * into a single outbound run/wave. Forward-filled: a blank NO cell belongs
-   * to the same wave as the nearest NO above it. Falls back to the shipment
-   * number when the sheet has no NO column, so grouping never breaks.
+   * Wave key. One wave per shipment: the shipment number is the wave key.
+   * The "NO" column of Schedule of the day is retained for reference only and
+   * no longer merges shipments.
    */
   waveNo: string;
   orderNos: string[];

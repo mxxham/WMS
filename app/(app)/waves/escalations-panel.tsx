@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { unitOf } from "@/lib/pick-line";
 import type { SheetRow } from "@/lib/wave-sheet";
 import { fmtNum } from "@/lib/utils";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 export type LineRequest = {
   id: string; wave_id: string; pick_id: string | null; move_id: string | null; row: SheetRow; by_name: string; kind: string;
@@ -41,8 +42,8 @@ export function EscalationsPanel({ rows, supervisor, person, onOpenSheet, layout
   }
 
   return (
-    <Card className="border-l-4 border-warn">
-      <CardHeader><CardTitle>Perlu ditangani · Minta supervisor · {fmtNum(rows.length)}</CardTitle></CardHeader>
+    <Card className="bg-warn/5 ring-1 ring-warn/30">
+      <CardHeader><CardTitle className="flex items-center gap-2"><StatusIcon tone="warn" />Perlu ditangani · Minta supervisor · {fmtNum(rows.length)}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         {error && <p role="alert" className="text-sm text-bad">{error}</p>}
         {rows.map((r) => {

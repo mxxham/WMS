@@ -34,8 +34,9 @@ export function DayNav({ date, prevDate, nextDate, compact = false }: { date: st
 }
 
 /** The day: where you are, how far, and the one most urgent thing. Desktop layout. */
-export function DayBar({ date, prevDate, nextDate, posted, total, step, onStep, dayMenu }: {
+export function DayBar({ date, prevDate, nextDate, posted, total, postedQty, totalQty, step, onStep, dayMenu }: {
   date: string; prevDate: string | null; nextDate: string | null; posted: number; total: number;
+  postedQty?: number; totalQty?: number;
   step: DayStep; onStep: () => void; dayMenu: React.ReactNode;
 }) {
   return (
@@ -44,7 +45,7 @@ export function DayBar({ date, prevDate, nextDate, posted, total, step, onStep, 
         <DayNav date={date} prevDate={prevDate} nextDate={nextDate} />
         <div className="flex items-center gap-1"><WaveGuide variant="desktop" />{dayMenu}</div>
       </div>
-      <p className="text-sm text-steel-500 tabular">{fmtNum(posted)}/{fmtNum(total)} baris diposting</p>
+      <p className="text-sm text-steel-500 tabular">{fmtNum(posted)}/{fmtNum(total)} baris diposting{totalQty ? ` · ${fmtNum(postedQty ?? 0)}/${fmtNum(totalQty)} karton` : ""}</p>
       <StepLine step={step} onStep={onStep} />
     </div>
   );

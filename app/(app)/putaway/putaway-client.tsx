@@ -14,16 +14,17 @@ import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { PutawayFixPanel } from "./putaway-fix-panel";
 import { PutawayHistory } from "./putaway-history";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 type Step = "upload" | "review" | "done";
 type Status = PutawayVerdict["status"] | "error";
 type Result = { rows: PutawayVerdict[]; movements: number; count_tasks?: number; set_over_limit?: number[]; requests?: number };
 
-const STATUS: Record<Status, { label: string; card: string; row: string }> = {
-  new: { label: "Baru (akan diposting)", card: "border-ok", row: "" },
-  same: { label: "Sudah tercatat (dilewati)", card: "border-steel-300", row: "text-steel-500" },
-  conflict: { label: "Konflik (perlu keputusan)", card: "border-warn", row: "bg-warn/10" },
-  error: { label: "Error baris (tidak dikirim)", card: "border-bad", row: "bg-bad/10" },
+const STATUS: Record<Status, { label: string; dot: string; row: string }> = {
+  new: { label: "Baru (akan diposting)", dot: "bg-ok", row: "" },
+  same: { label: "Sudah tercatat (dilewati)", dot: "bg-steel-300", row: "text-steel-500" },
+  conflict: { label: "Konflik (perlu keputusan)", dot: "bg-warn", row: "bg-warn/10" },
+  error: { label: "Error baris (tidak dikirim)", dot: "bg-bad", row: "bg-bad/10" },
 };
 
 function actionLabel(kind: PutawayKind, a: PutawayAction) {
@@ -223,8 +224,8 @@ export function PutawayClient() {
           )}
 
           {step === "review" && unknownSkus.length > 0 && (
-            <Card className="border-l-4 border-warn"><CardContent className="space-y-2 text-sm">
-              <p className="font-semibold">{fmtNum(unknownSkus.length)} SKU belum ada di master item, jadi barisnya belum bisa diposting.</p>
+            <Card className="bg-warn/5 ring-1 ring-warn/30"><CardContent className="space-y-2 text-sm">
+              <p className="flex items-start gap-2 font-semibold"><StatusIcon tone="warn" className="mt-0.5" />{fmtNum(unknownSkus.length)} SKU belum ada di master item, jadi barisnya belum bisa diposting.</p>
               {fromFile.length > 0 && (
                 <>
                   <p>Data dari sheet MASTER DATA / Master SKU file ini:</p>
@@ -243,8 +244,8 @@ export function PutawayClient() {
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {(Object.keys(STATUS) as Status[]).map((k) => (
-              <button key={k} onClick={() => setFilter(filter === k ? "all" : k)} className={cn("rounded-lg border-l-4 bg-white p-3 text-left", STATUS[k].card, filter === k && "ring-2 ring-ckb")}>
-                <div className="font-cond text-3xl font-semibold tabular">{fmtNum(counts[k])}</div><div className="text-xs text-steel-500">{STATUS[k].label}</div>
+              <button key={k} onClick={() => setFilter(filter === k ? "all" : k)} aria-pressed={filter === k} className={cn("rounded-lg p-3 text-left", filter === k ? "bg-ckb-tint/40 ring-2 ring-ckb" : "bg-white hover:bg-steel-100")}>
+                <div className="font-cond text-3xl font-semibold tabular">{fmtNum(counts[k])}</div><div className="flex items-center gap-1.5 text-xs text-steel-500"><span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", STATUS[k].dot)} />{STATUS[k].label}</div>
               </button>
             ))}
           </div>
@@ -312,7 +313,7 @@ export function PutawayClient() {
           )}
 
           {step === "review" && confirming && (
-            <Card className="border-l-4 border-ckb"><CardContent className="space-y-3 text-sm">
+            <Card className="bg-ckb-tint/40 ring-1 ring-ckb/30"><CardContent className="space-y-3 text-sm">
               <p className="font-cond text-lg font-semibold">Konfirmasi posting</p>
               <p>{fmtNum(toPost)} baris diposting sebagai putaway{toCount > 0 && `, ${fmtNum(toCount)} konflik menjadi tugas Hitung stok`}.</p>
               {fixRows.length > 0 && (

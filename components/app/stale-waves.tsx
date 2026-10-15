@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { fmtDate, fmtNum } from "@/lib/utils";
+import { compareWaveNo } from "@/lib/allocator/earlier-waves";
 
 /** A wave of an earlier date whose open tasks still reserve stock and bring in Bin To Bin moves. */
 export type StaleWave = { id: string; wave_no: string; planned_date: string; status: "PENDING" | "RESCHEDULED"; shipments: string[]; open: number };
@@ -30,7 +31,7 @@ export async function loadStaleWaves(db: SupabaseClient, before: string): Promis
   for (const t of (tasks ?? []) as { wave_id: string }[]) open.set(t.wave_id, (open.get(t.wave_id) ?? 0) + 1);
   return ws.filter((w) => (open.get(w.id) ?? 0) > 0)
     .map((w) => ({ id: w.id, wave_no: w.wave_no, planned_date: w.planned_date, status: w.status, shipments: w.shipment_numbers ?? [], open: open.get(w.id) ?? 0 }))
-    .sort((a, b) => a.planned_date.localeCompare(b.planned_date) || Number(a.wave_no) - Number(b.wave_no));
+    .sort((a, b) => a.planned_date.localeCompare(b.planned_date) || compareWaveNo(a.wave_no, b.wave_no));
 }
 
 /**

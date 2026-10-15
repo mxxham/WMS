@@ -4,6 +4,7 @@ import { expiryText, withConfig } from './config';
 import { lookupUom } from './uom-master';
 import { restNoteAt, type RestStep } from './picklist';
 import { movesOfPicks } from './pair-moves';
+import { compareWaveNo } from './earlier-waves';
 
 /** One row of the `pick_task_detail` view. */
 export interface TaskRow {
@@ -75,9 +76,9 @@ const idKey = (bin: string, sku: string, batch: string | null, exp: string | nul
 /** The day's live tasks in execution order: waves by slot then NO, tasks by seq (the Sisa replay order). */
 function executionOrder(waves: WaveRow[], tasks: TaskRow[]): TaskRow[] {
   const slot = new Map(waves.map((w) => [w.id, w.planned_slot ?? '99:99']));
-  const waveNo = new Map(waves.map((w) => [w.id, Number(w.wave_no) || Number.MAX_SAFE_INTEGER]));
+  const waveNo = new Map(waves.map((w) => [w.id, w.wave_no]));
   return tasks.filter((t) => t.status !== 'CANCELLED' && slot.has(t.wave_id)).sort((a, b) =>
-    slot.get(a.wave_id)!.localeCompare(slot.get(b.wave_id)!) || waveNo.get(a.wave_id)! - waveNo.get(b.wave_id)! || a.seq - b.seq);
+    slot.get(a.wave_id)!.localeCompare(slot.get(b.wave_id)!) || compareWaveNo(waveNo.get(a.wave_id)!, waveNo.get(b.wave_id)!) || a.seq - b.seq);
 }
 
 /**
@@ -316,7 +317,7 @@ export function binToBinRowsFromResult(result: AllocationResult, asOf: string): 
       if (l.moveTo && l.moveQty > 0) lines.push(l);
     }
   }
-  lines.sort((a, b) => String(a.waveNo).localeCompare(String(b.waveNo), undefined, { numeric: true }) || a.seq - b.seq);
+  lines.sort((a, b) => compareWaveNo(String(a.waveNo), String(b.waveNo)) || a.seq - b.seq);
 
   const cfg = withConfig();
   const rank = (aisle: string) => {

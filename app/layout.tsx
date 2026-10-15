@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description: `${BRAND.appName}: label bin, scan, alokasi FEFO, dan stok gudang ${BRAND.site}`,
   other: { "darkreader-lock": "lock" },
 };
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#135F45", colorScheme: "only light" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#032741", colorScheme: "only light" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

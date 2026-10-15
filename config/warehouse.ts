@@ -49,10 +49,13 @@ export const LABEL = {
   minBinCodePt: 28,
   minInfoPt: 8,
   /**
-   * "Strip tiang rak" on A4 portrait (210 x 297 mm): two uprights side by side, all five levels of
-   * each on one sheet. 5 + 95 + 10 + 95 + 5 = 210 across; 5 + 16 + 5 x 51 + 16 + 5 = 297 down.
+   * "Strip tiang rak" on A4 portrait (210 x 297 mm): the Per sel cell layout made compact, 95 mm
+   * wide, two uprights side by side, all five levels on one sheet, no arrows.
+   * 5 + 95 + 10 + 95 + 5 = 210 across; 5 x 57 = 285 down, centred (6 mm top and bottom). QR 22 mm with Code 128 (31 mm
+   * without), still with the 3 mm quiet zone; the bin code stays >= minBinCodePt in an 11 mm band.
    */
-  a4: { stripWidthMm: 95, gapMm: 10, marginMm: 5, cellHeightMm: 51, arrowBlockMm: 16, levels: 5 },
+  a4: { stripWidthMm: 95, gapMm: 10, marginMm: 5, cellHeightMm: 57, levelsPerSheet: 5, levels: 5,
+        qrMm: 31, qrWithCode128Mm: 22, code128Mm: 7, bandMm: 11 },
 };
 
 export type BinParts = { zone: string; rack: string | null; level: string | null; position: string | null };

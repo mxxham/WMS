@@ -10,6 +10,7 @@ import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { ActionMenu, MenuDanger, MenuSection } from "@/components/app/action-menu";
 import { cn, fmtNum } from "@/lib/utils";
 import type { TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
+import { movesOfPicks } from "@/lib/allocator/pair-moves";
 import { AddItems, TundaButton, type Rpc } from "./wave-parts";
 
 /**
@@ -188,6 +189,11 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
   const open = tasks.filter((t) => t.status === "PLANNED");
   const live = tasks.filter((t) => t.status !== "CANCELLED").length;
   const pending = w.status === "PENDING";
+  // 0073: picks whose pallet relokasi is already posted. Cancelling finishes their pallet break:
+  // what is left in the pallet bin goes up to the pickface, unless another open pick needs it.
+  const halfPosted = new Set([...movesOfPicks([...tasks].sort((a, b) => a.seq - b.seq), { anyState: true })]
+    .filter(([, m]) => m.status === "COMPLETED")
+    .map(([pickId]) => pickId)).size;
   const canSheet = layout === "desktop" && supervisor && w.status !== "CANCELLED" && live > 0 && !!onOpenSheet;
   return (
     <ActionMenu title={`NO ${w.wave_no}`}>
@@ -210,7 +216,7 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
       {supervisor && (pending || w.status === "RESCHEDULED") && (
         <MenuDanger>
           <div><ConfirmButton size="sm" variant="danger" title={`Batalkan NO ${w.wave_no}`} confirmLabel="Batalkan wave"
-            summary={`Batalkan wave dan ${open.length} tugas yang belum dikerjakan. Stok yang sudah dipindah tidak dikembalikan otomatis. Bisa dipulihkan lagi lewat Pulihkan wave.`}
+            summary={`Batalkan wave dan ${open.length} tugas yang belum dikerjakan. Stok yang sudah dipindah tidak dikembalikan otomatis. Bisa dipulihkan lagi lewat Pulihkan wave.${halfPosted > 0 ? ` ${halfPosted} palet di wave ini sudah setengah pindah (relokasi sudah diposting, pick belum): karton yang tertinggal di bin asal ikut naik ke pickface, jadi binnya kosong dan tidak ada sisa yang harus dikoreksi. Kalau ada pick lain yang masih mengambil dari bin itu, pembatalan ditolak.` : ""}`}
             onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "CANCELLED" })}>Batalkan wave</ConfirmButton></div>
         </MenuDanger>
       )}

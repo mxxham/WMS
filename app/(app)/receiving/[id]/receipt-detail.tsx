@@ -169,7 +169,7 @@ function PostReceipt({ receipt: r, issues }: { receipt: ReceiptSummary; issues: 
     router.refresh(); return null;
   };
   return (
-    <Card className="border-l-4 border-plate">
+    <Card className="bg-ckb-tint/40 ring-1 ring-ckb/30">
       <CardHeader><CardTitle>Posting</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         {issues > 0 && <p className="text-sm text-warn">{issues} selisih dengan dokumen. Tulis keterangan (mis. sudah dilaporkan ke Shell / transporter).</p>}

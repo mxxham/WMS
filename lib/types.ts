@@ -17,8 +17,13 @@ export type InventoryRow = {
 
 export type Movement = {
   id: string; type: MovementType; quantity: number; batch_lot: string; created_at: string; note: string | null;
+  task_id?: string | null;
   reason_code?: string | null; by_name?: string | null; approved_by_name?: string | null;
   items: { sku: string; description: string } | null;
   from_bin: { bin_code: string } | null; to_bin: { bin_code: string } | null;
   profiles: { name: string } | null;
+  pick_tasks?: {
+    id: string; wave_id: string; shipment_number: string | null; seq: number;
+    waves: { planned_date: string; wave_no: string } | { planned_date: string; wave_no: string }[] | null;
+  } | null;
 };

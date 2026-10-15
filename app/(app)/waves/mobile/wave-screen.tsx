@@ -67,7 +67,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="min-w-0 flex-1 py-1">
-          <h1 className="font-cond text-xl font-semibold leading-tight">NO {w.wave_no}{w.planned_slot ? ` · ${w.planned_slot}` : ""}</h1>
+          <h1 className="font-cond text-xl font-semibold leading-tight">{/^\d{8,}$/.test(w.wave_no) ? w.wave_no : `NO ${w.wave_no}`}{w.planned_slot ? ` · ${w.planned_slot}` : ""}</h1>
           <p className="truncate text-xs text-steel-500 tabular">{w.shipment_numbers.join(", ")}</p>
         </div>
         <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" onStartPicking={onStartPicking} onPrint={() => m.printWave(w)} />
@@ -77,10 +77,10 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
         <div className="space-y-2 rounded-lg bg-white p-3">
           <div className="flex items-center gap-2 text-sm tabular">
             {w.status !== "PENDING" && <StatusTag status={w.status} />}
-            <span className="ml-auto">{fmtNum(done)}/{fmtNum(f.total)} baris</span>
+            <span className="ml-auto">{fmtNum(done)}/{fmtNum(f.total)} baris{f.qtyTotal ? ` · ${fmtNum(f.qtyDone ?? 0)}/${fmtNum(f.qtyTotal)} karton` : ""}</span>
           </div>
           <div className="h-2 overflow-hidden rounded bg-steel-100" aria-hidden>
-            <div className="h-full bg-ok" style={{ width: `${f.total ? (done / f.total) * 100 : 0}%` }} />
+            <div className="h-full bg-ok" style={{ width: `${f.qtyTotal ? (((f.qtyDone ?? 0) / (f.qtyTotal ?? 1)) * 100) : (f.total ? (done / f.total) * 100 : 0)}%` }} />
           </div>
           <p className={cn("text-sm", TONE[next.tone])}>{next.text}</p>
           {w.shipment_numbers.some((sh) => m.audit[`${w.id}|${sh}`]) && (

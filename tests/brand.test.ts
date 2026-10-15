@@ -23,8 +23,8 @@ function files(dir: string): string[] {
 }
 const source = ['app', 'components', 'lib'].flatMap(files);
 
-test('the app name and logo file are written only in config/brand.ts', () => {
-  const hits = source.filter((f) => { const s = readFileSync(f, 'utf8'); return s.includes('K-one') || s.includes('k-one-logo'); });
+test('the app name, logo and banner files are written only in config/brand.ts', () => {
+  const hits = source.filter((f) => { const s = readFileSync(f, 'utf8'); return [BRAND.appName, BRAND.logo, BRAND.banner].some((v) => s.includes(v)); });
   assert.deepEqual(hits, [], `hardcoded name or logo in: ${hits.join(', ')}`);
 });
 test('the company name is written only in config/', () => {

@@ -38,7 +38,7 @@ export function DayScreen({ model: m, filter, onFilter, onOpenWave, onShowProble
       <div className="sticky top-0 z-20 flex items-center justify-between border-b border-steel-100 bg-white/95 px-1 backdrop-blur">
         <DayNav date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} compact />
         <div className="flex items-center">
-          <button type="button" aria-label="Cari SKU atau bin" aria-expanded={search}
+          <button type="button" aria-label="Cari SKU, bin, shipment" aria-expanded={search}
             className={cn("inline-flex h-11 w-11 items-center justify-center rounded-md text-steel-700 hover:bg-steel-100", search && "bg-steel-100")}
             onClick={() => { if (search) onFilter({ ...filter, q: "" }); setSearch(!search); }}>
             {search ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
@@ -50,10 +50,10 @@ export function DayScreen({ model: m, filter, onFilter, onOpenWave, onShowProble
 
       <div className="space-y-3 px-4 pt-3">
         {search && (
-          <Input autoFocus aria-label="Cari SKU atau bin" placeholder="Cari SKU atau bin di semua wave" value={filter.q}
+          <Input autoFocus aria-label="Cari SKU, bin, shipment" placeholder="Cari SKU, bin, shipment di semua wave" value={filter.q}
             onChange={(e) => onFilter({ ...filter, q: e.target.value })} />
         )}
-        <p className="text-sm text-steel-500 tabular">{fmtNum(m.posted)}/{fmtNum(m.total)} baris diposting</p>
+        <p className="text-sm text-steel-500 tabular">{fmtNum(m.posted)}/{fmtNum(m.total)} baris diposting{m.totalQty ? ` · ${fmtNum(m.postedQty ?? 0)}/${fmtNum(m.totalQty)} karton` : ""}</p>
         <StepLine step={m.step} onStep={onStep} />
         <ProblemsSummary counts={m.problems} open={false} onOpenChange={onShowProblems}>{null}</ProblemsSummary>
 
@@ -85,11 +85,11 @@ function WaveTile({ model: m, wave: w, hits, onOpen }: { model: WaveModel; wave:
   return (
     <a href={waveHref(m.date, w.id)} onClick={(e) => { e.preventDefault(); onOpen(); }}
       className={cn("block min-h-16 rounded-lg bg-white p-3 active:bg-steel-100", next.tone === "bad" && "ring-1 ring-bad/50", !running && "text-steel-500")}>
-      <span className="flex items-baseline gap-2">
-        <span className={cn("font-cond text-xl font-semibold", running && "text-steel")}>NO {w.wave_no}</span>
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className={cn("whitespace-nowrap font-cond text-lg font-semibold tabular-nums", running && "text-steel")}>{/^\d{8,}$/.test(w.wave_no) ? w.wave_no : `NO ${w.wave_no}`}</span>
         <span className="text-sm tabular">{w.planned_slot ?? "–"}</span>
         {w.status !== "PENDING" && <StatusTag status={w.status} />}
-        <span className="ml-auto text-sm tabular">{fmtNum(done)}/{fmtNum(f.total)} baris</span>
+        <span className="ml-auto text-right text-sm tabular">{fmtNum(done)}/{fmtNum(f.total)} baris{f.qtyTotal ? <span className="block text-xs text-steel-500">{fmtNum(f.qtyDone ?? 0)}/{fmtNum(f.qtyTotal)} karton</span> : null}</span>
       </span>
       <span className="mt-0.5 flex flex-wrap gap-x-2 text-sm text-steel-500">
         {w.shipment_numbers.map((sh) => {
@@ -98,7 +98,7 @@ function WaveTile({ model: m, wave: w, hits, onOpen }: { model: WaveModel; wave:
         })}
       </span>
       <span className="mt-2 block h-1.5 overflow-hidden rounded bg-steel-100" aria-hidden>
-        <span className="block h-full bg-ok" style={{ width: `${f.total ? (done / f.total) * 100 : 0}%` }} />
+        <span className="block h-full bg-ok" style={{ width: `${f.qtyTotal ? (((f.qtyDone ?? 0) / (f.qtyTotal ?? 1)) * 100) : (f.total ? (done / f.total) * 100 : 0)}%` }} />
       </span>
       <span className={cn("mt-2 block text-sm", TONE[next.tone])}>{next.text}</span>
       {hits !== null && <span className="mt-1 block text-xs font-semibold text-ckb">{fmtNum(hits)} baris cocok</span>}

@@ -17,7 +17,7 @@ export function FileView({ date, shipments, racks, view, source }: {
 }) {
   const lines = shipments.reduce((s, x) => s + x.lines, 0);
   const tile = (n: number, label: string) => (
-    <div key={label} className="rounded-lg border-l-4 border-ckb bg-white p-3">
+    <div key={label} className="rounded-lg bg-white p-3">
       <div className="font-cond text-3xl font-semibold tabular">{fmtNum(n)}</div>
       <div className="text-xs text-steel-500">{label}</div>
     </div>

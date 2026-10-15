@@ -75,7 +75,7 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
             <fieldset className="space-y-2">
               <legend className="mb-1 font-medium">Tata letak</legend>
               <label className="flex gap-2"><input type="radio" checked={layout === "strip"} onChange={() => setLayout("strip")} />
-                <span><b>Strip tiang rak</b>: kertas A4, dua tiang per lembar, tiap strip lebar {LABEL.a4.stripWidthMm} mm berisi level {STRIP_LEVEL_ORDER.join(", ")} berurutan + panah atas/bawah. Gunting di garis abu-abu.</span></label>
+                <span><b>Strip tiang rak</b>: kertas A4, dua tiang berdampingan, tiap sel {LABEL.a4.stripWidthMm}×{LABEL.a4.cellHeightMm} mm, level {STRIP_LEVEL_ORDER.join(", ")} berurutan ({LABEL.a4.levelsPerSheet} level per lembar, sisanya di lembar berikutnya). Gunting di garis abu-abu.</span></label>
               <label className="flex gap-2"><input type="radio" checked={layout === "cell"} onChange={() => setLayout("cell")} />
                 <span><b>Per sel</b>: satu label {LABEL.cellWidthMm}×{LABEL.cellHeightMm} mm per halaman, panah di pita kode. Untuk label die-cut.</span></label>
             </fieldset>
@@ -89,7 +89,7 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
                 <span>Hitam-putih — untuk printer thermal (pita hitam, teks putih).</span></label>
             </fieldset>
             <label className="flex gap-2"><input type="checkbox" checked={includeCode128} onChange={(e) => setCode128(e.target.checked)} />
-              <span>Tambahkan barcode Code 128 (Per sel: QR mengecil ke 34 mm)</span></label>
+              <span>Tambahkan barcode Code 128 (QR mengecil ke 34 mm)</span></label>
           </CardContent>
         </Card>
       </div>

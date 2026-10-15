@@ -9,15 +9,15 @@
   /* Every dropdown list, everywhere: white panel with dark text, regardless of
      device theme or browser default. Covers native <select> popups (including
      Chrome's styleable ::picker), option hover/checked states, and datalists. */
-  select option, select optgroup, datalist option { background-color: #fff; color: #1B2B25; }
-  option:checked, option:hover, option:focus { background-color: #fff; color: #1B2B25; }
+  select option, select optgroup, datalist option { background-color: #fff; color: #102331; }
+  option:checked, option:hover, option:focus { background-color: #fff; color: #102331; }
   /* Only applies to selects opted into appearance: base-select; kept for when we do. */
-  select::picker(select), ::picker(select) { background-color: #fff; color: #1B2B25; }
+  select::picker(select), ::picker(select) { background-color: #fff; color: #102331; }
   /* Any future custom dropdown/menu surface (Radix, headless, ARIA) defaults white. */
-  [role="listbox"], [role="menu"] { background-color: #fff; color: #1B2B25; }
+  [role="listbox"], [role="menu"] { background-color: #fff; color: #102331; }
   /* Every form control, everywhere: light regardless of the device theme. */
   input, select, textarea, button { color-scheme: only light; }
-  select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { background-color: #fff; color: #1B2B25; }
+  select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { background-color: #fff; color: #102331; }
   body { @apply bg-paper text-steel font-sans antialiased; }
   :focus-visible { @apply outline outline-2 outline-offset-2 outline-ckb; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
@@ -26,10 +26,27 @@
   .tabular { font-variant-numeric: tabular-nums; }
 }
 
-/* The single fade-in of the welcome screen and the Home page; off with reduced motion above. */
+/* The single fade-in of the welcome screen; off with reduced motion above. */
 @keyframes welcome-fade { from { opacity: 0; } to { opacity: 1; } }
 .welcome-fade { animation: welcome-fade 400ms ease-out both; }
-.home-fade { animation: welcome-fade 400ms ease-out both; }
+
+/* Home banner (components/home/home-page.tsx). Every animation runs once except the soft glow on the
+   main button; all of it is off with reduced motion above, and the end state is the plain layout. */
+.home-hero { container-type: inline-size; }
+/* The open navy under "Warehouse Management System" in public/home-banner.jpg (1600 x 900), left of the dot grid. */
+.home-actions { position: absolute; left: 56.3%; top: 70.5%; }
+.home-cta { height: auto; min-height: 36px; padding: 0.8cqw 1.9cqw; font-size: clamp(12px, 1.5cqw, 17px); }
+@keyframes home-banner-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
+.home-banner-in { animation: home-banner-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes home-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.home-rise { animation: home-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+/* One teal light sweep across the banner, like the light bands in it. */
+.home-shine::after { content: ""; position: absolute; inset: 0; pointer-events: none; transform: translateX(-100%);
+  background: linear-gradient(105deg, transparent 35%, rgb(24 195 193 / 0.16) 50%, transparent 65%);
+  animation: home-shine 1800ms ease-in-out 700ms 1 both; }
+@keyframes home-shine { to { transform: translateX(100%); } }
+@keyframes home-glow { 0%, 100% { box-shadow: 0 0 0 0 rgb(24 195 193 / 0.5); } 50% { box-shadow: 0 0 0 8px rgb(24 195 193 / 0); } }
+.home-glow { animation: home-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms) both, home-glow 2.8s ease-in-out 1.6s infinite; }
 
 /* A page with a bar pinned above the bottom navigation (the phone Wave screen): keep the footer clear of it. */
 body:has([data-pinned-bar]) .site-footer { padding-bottom: 6rem; }

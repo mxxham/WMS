@@ -12,6 +12,7 @@ import type { BinSummary } from "@/lib/warehouse-types";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
 import { jakartaDate, locType } from "@/lib/inventory-view";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 // fefo_exceptions timed out (over 8 s) before 0070 made it ~0.1 s; the counts
 // are still cached for 15 min so dashboard loads don't wait on it. A cached function may not read cookies
@@ -37,13 +38,13 @@ type Task = { status: string; task_type: string; quantity: number; actual_quanti
 type Mv = { type: string; quantity: number; from_bin_id: string | null };
 type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH" };
 
-// Occupancy heat grid: one hue (brand green), light -> dark, 5 fixed steps.
+// Occupancy heat grid: one hue (brand navy), light -> dark, 5 fixed steps.
 const OCC_STEPS = [
-  { min: 0, bg: "#E3ECE9", fg: "text-steel" },
-  { min: 0.2, bg: "#B8CFC7", fg: "text-steel" },
-  { min: 0.4, bg: "#89AFA2", fg: "text-steel" },
-  { min: 0.6, bg: "#3E7C66", fg: "text-white" },
-  { min: 0.8, bg: "#135F45", fg: "text-white" },
+  { min: 0, bg: "#E0E8EE", fg: "text-steel" },
+  { min: 0.2, bg: "#B3C5D3", fg: "text-steel" },
+  { min: 0.4, bg: "#7F9CB3", fg: "text-steel" },
+  { min: 0.6, bg: "#2C5677", fg: "text-white" },
+  { min: 0.8, bg: "#032741", fg: "text-white" },
 ];
 const occStep = (p: number) => [...OCC_STEPS].reverse().find((s) => p >= s.min)!;
 const LEVELS = ["A", "B", "C", "D", "E"];
@@ -427,12 +428,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 function Kpi({ label, value, note, tone, href }: { label: string; value: string; note: string; tone?: "bad" | "warn"; href?: string }) {
   const body = (
     <>
-      <div className="text-sm text-steel-500">{label}</div>
+      <div className="flex items-start justify-between gap-2 text-sm text-steel-500">
+        {label}
+        {tone && <StatusIcon tone={tone} />}
+      </div>
       <div className="font-cond text-4xl font-semibold tabular">{value}</div>
       <div className="text-xs text-steel-500">{note}</div>
     </>
   );
-  const cls = cn("block rounded-lg bg-white p-4", tone === "bad" && "border-l-4 border-bad", tone === "warn" && "border-l-4 border-warn", href && "hover:ring-2 hover:ring-ckb");
+  const cls = cn("block rounded-lg bg-white p-4", href && "hover:ring-2 hover:ring-ckb");
   return href ? <Link href={href} className={cls}>{body}</Link> : <div className={cls}>{body}</div>;
 }
 

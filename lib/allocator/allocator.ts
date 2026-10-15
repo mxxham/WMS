@@ -2,6 +2,7 @@ import { daysBetween, hasExpiry, isStagingLocation, minShelfLifeDays, type Alloc
 import { selectNextBin, toLedger, type Ledger } from './binselect';
 import { derivePickfaces } from './pickface';
 import { stockIdentityKey } from './ledger';
+import { compareWaveNo } from './earlier-waves';
 import { parseLocation, pickSequenceKey, walkPosition } from './pickpath';
 import type {
   AllocationLine,
@@ -273,11 +274,6 @@ export function allocate(
   };
 }
 
-function waveSortKey(waveNo: string): number {
-  const n = Number(waveNo);
-  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
-}
-
 /**
  * Physical accounting event type.
  *
@@ -334,7 +330,7 @@ export function executionOrder(lines: AllocationLine[], config: AllocatorConfig)
   const ws = waveSlots(lines);
   return [...lines].sort((a, b) =>
     ws.get(a.waveNo)!.localeCompare(ws.get(b.waveNo)!) ||
-    waveSortKey(a.waveNo) - waveSortKey(b.waveNo) ||
+    compareWaveNo(a.waveNo, b.waveNo) ||
     (a.slotTime ?? '99:99').localeCompare(b.slotTime ?? '99:99') ||
     a.shipmentNumber.localeCompare(b.shipmentNumber) ||
     pickRowCompare(a, b, config) ||

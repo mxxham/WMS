@@ -13,7 +13,7 @@ export const filterActive = (f: RowFilter) => f.q.trim() !== "" || f.onlyOpen ||
 export function rowMatches(it: LineItem, f: RowFilter, short: Set<string>, waits: Record<string, TaskWait>): boolean {
   const ts = it.kind === "pair" ? [it.pick, it.move] : [it.task];
   const q = f.q.trim().toUpperCase();
-  if (q && !ts.some((t) => [t.sku, t.from_bin, t.to_bin ?? "", t.description ?? ""].some((v) => v.toUpperCase().includes(q)))) return false;
+  if (q && !ts.some((t) => [t.sku, t.from_bin, t.to_bin ?? "", t.description ?? "", t.shipment_number ?? "", t.wave_no ?? ""].some((v) => String(v).toUpperCase().includes(q)))) return false;
   if (f.onlyOpen && !ts.some((t) => t.status === "PLANNED")) return false;
   if (f.onlyProblems && !ts.some((t) => short.has(t.id) || !!waits[t.id])) return false;
   return true;
@@ -35,8 +35,10 @@ export type WaveModel = {
   waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   supervisor: boolean; rpc: Rpc; onDone: () => void;
   short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
+  /** pick id → its pallet's relokasi when that relokasi is already posted (0073): cancelling finishes the pallet break */
+  postedMoveOf: Map<string, TaskRow>;
   facts: Map<string, WaveFacts>; ordered: WaveRow[]; step: DayStep; problems: ProblemCounts;
-  posted: number; total: number;
+  posted: number; total: number; postedQty?: number; totalQty?: number;
   /** the existing Perlu ditangani panels, unchanged */
   panels: (layout: "desktop" | "phone") => ReactNode;
   /** the day's menu: Tambah order, the PDFs, Hitung ulang; an icon-only trigger on the phone */
@@ -50,6 +52,8 @@ export function lineProps(m: WaveModel, w: WaveRow, it: LineItem): LineProps {
   const pending = w.status === "PENDING";
   return {
     item: it, label: `NO ${w.wave_no} #${head.seq}`, isShort: lineIds(it).some((t) => m.short.has(t.id)), wait: m.waits[head.id],
+    // 0073: the pick half of a broken pallet whose relokasi was already posted cannot be cancelled.
+    postedMove: (it.kind === "single" && head.task_type === "PICK") ? m.postedMoveOf.get(head.id) : undefined,
     canPost: pending, canUndo: w.status !== "CANCELLED", canRestore: pending || w.status === "RESCHEDULED",
     supervisor: m.supervisor, rpc: m.rpc, onDone: m.onDone,
   };

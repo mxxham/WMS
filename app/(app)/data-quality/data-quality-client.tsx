@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { fmtDate, fmtNum } from "@/lib/utils";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 export function DataQualityClient({ issues, countBins }: { issues: Issue[]; countBins: string[] }) {
   const kinds = Object.keys(ISSUES) as IssueKind[];
@@ -24,8 +25,8 @@ export function DataQualityClient({ issues, countBins }: { issues: Issue[]; coun
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
         {kinds.map((k) => (
-          <a key={k} href={`#${k}`} className="rounded-lg border-l-4 border-warn bg-white p-3">
-            <div className="font-cond text-3xl font-semibold tabular">{fmtNum(issues.filter((i) => i.kind === k).length)}</div>
+          <a key={k} href={`#${k}`} className="rounded-lg bg-white p-3 hover:ring-2 hover:ring-ckb">
+            <div className="flex items-start justify-between gap-2"><div className="font-cond text-3xl font-semibold tabular">{fmtNum(issues.filter((i) => i.kind === k).length)}</div>{issues.some((i) => i.kind === k) && <StatusIcon tone="warn" />}</div>
             <div className="text-xs text-steel-500">{ISSUES[k].title}</div>
           </a>
         ))}

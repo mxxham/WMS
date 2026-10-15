@@ -6,7 +6,7 @@
  */
 import { strict as assert } from 'node:assert';
 import type { TaskRow } from '../lib/allocator/picklist-from-tasks';
-import { buildSheet, leftoverAfter, sheetNotes, sheetPayload, sheetSummary, type SheetLine, type SheetStock } from '../lib/wave-sheet';
+import { buildSheet, followPick, leftoverAfter, pecahLine, sheetNotes, sheetPayload, sheetSummary, type SheetLine, type SheetStock } from '../lib/wave-sheet';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -248,6 +248,110 @@ test('summary counts what will happen', () => {
   const notes = sheetNotes(lines, initial, [stock('CE28D02', 44)], BINS);
   const s = sheetSummary(lines, initial, notes);
   assert.deepEqual({ send: s.send, asPlanned: s.asPlanned, changed: s.changed, left: s.left, errors: s.errors }, { send: 2, asPlanned: 1, changed: 1, left: 1, errors: 0 });
+});
+
+// 12 Oct NO 6 #1: CB11C01 (level C) held one pallet of 48; plan pick 35 + Bin To Bin 13 to the pickface.
+// The paper said 32 and the sisa was left at 13: 3 phantom cartons stayed at CB11C01, and the pickface
+// booked +3 as a koreksi picklist when its 3 extra cartons were picked.
+const cb11 = () => {
+  n = 0;
+  return setup([
+    task({ seq: 1, sku: '550044709', from_bin: 'CB11C01', batch_lot: '20I26JJ', expiry_date: '2030-09-20', quantity: 35, upp: 48, breaks_pallet: true }),
+    task({ seq: 2, sku: '550044709', task_type: 'REPLENISH', shipment_number: null, from_bin: 'CB11C01', to_bin: 'CB08A02', batch_lot: '20I26JJ', expiry_date: '2030-09-20', quantity: 13, upp: 48 }),
+  ]);
+};
+const cb11Stock = [stock('CB11C01', 48, '20I26JJ', '2030-09-20', '550044709')];
+const cb11Bins = new Set(['CB11C01', 'CB08A02', 'CB11D01']);
+
+test('12 Oct CB11C01: a lower pick moves its cartons with the sisa, so the opened pallet still ends empty', () => {
+  const { lines, initial } = cb11();
+  const l = lines[0];
+  assert.equal(followPick(l, initial.get(l.key)!, '32'), '16');
+  assert.equal(followPick(l, initial.get(l.key)!, '40'), '8');
+  // Taken whole: nothing left to move, the sisa is not invented.
+  assert.equal(followPick(l, initial.get(l.key)!, '48'), '13');
+  // Not a number yet (being typed): the sisa stays.
+  assert.equal(followPick(l, initial.get(l.key)!, ''), '13');
+});
+
+test('a sisa the paper already changed is not overwritten by the pick', () => {
+  const { lines, initial } = cb11();
+  const l = lines[0];
+  edit(l, { moveQty: '16' });
+  assert.equal(followPick(l, initial.get(l.key)!, '32'), '16');
+  // A line without a Bin To Bin has nothing to follow.
+  n = 0;
+  const plain = setup([task({ seq: 1 })]);
+  assert.equal(followPick(plain.lines[0], plain.initial.get(plain.lines[0].key)!, '4'), '');
+});
+
+test('12 Oct CB11C01: a reserve pallet left with loose cartons after pick + Bin To Bin is a warning that names the sisa', () => {
+  const { lines, initial } = cb11();
+  edit(lines[0], { sources: [{ ...lines[0].sources[0], qty: '32' }] });
+  const notes = sheetNotes(lines, initial, cb11Stock, cb11Bins).get(lines[0].key)!;
+  const w = notes.find((x) => x.text.includes('masih 3'));
+  assert.ok(w && w.tone === 'warn', notes.map((x) => x.text).join(' | '));
+  assert.ok(w.text.includes('CB11C01') && w.text.includes('level C') && w.text.includes('Sisa 16?'), w.text);
+  // With the sisa following the pick, the pallet ends at 0 and nothing is said.
+  edit(lines[0], { moveQty: '16' });
+  const ok = sheetNotes(lines, initial, cb11Stock, cb11Bins).get(lines[0].key)!;
+  assert.ok(!ok.some((x) => x.text.includes('masih')), ok.map((x) => x.text).join(' | '));
+});
+
+test('Pecah: the cartons short of the plan become a second bin on the line, the sisa back to the plan', () => {
+  const { lines, initial } = cb11();
+  const l = lines[0];
+  const init = initial.get(l.key)!;
+  // Nothing short: no Pecah.
+  assert.equal(pecahLine(l, init), null);
+  // 32 typed (the sisa followed to 16), then Pecah: 32 here + 3 from a bin still to type, sisa 13 as planned.
+  edit(l, { sources: [{ ...l.sources[0], qty: '32' }], moveQty: followPick(l, init, '32') });
+  assert.equal(l.moveQty, '16');
+  const p = pecahLine(l, init)!;
+  assert.deepEqual(p.sources.map((s) => [s.bin, s.batch, s.qty]), [['CB11C01', '20I26JJ', '32'], ['', '20I26JJ', '3']]);
+  assert.equal(p.moveQty, '13');
+  assert.equal(l.sources.length, 1, 'pecahLine returns a copy');
+  // A sisa typed apart from the pick (paper says 20) is kept.
+  edit(l, { moveQty: '20' });
+  assert.equal(pecahLine(l, init)!.moveQty, '20');
+  // The second bin is still to be typed: the line cannot post until it is.
+  edit(l, { moveQty: '13' });
+  const notes = sheetNotes([p], initial, cb11Stock, cb11Bins).get(l.key)!;
+  assert.ok(notes.some((x) => x.tone === 'bad' && x.text === 'Isi kode bin.'), notes.map((x) => x.text).join(' | '));
+});
+
+test('Pecah posts as one line from two bins: no order raised, no leftover at the pallet', () => {
+  const { lines, initial } = cb11();
+  const l = lines[0];
+  const p = pecahLine(Object.assign(l, { sources: [{ ...l.sources[0], qty: '32' }] }), initial.get(l.key)!)!;
+  p.sources[1] = { bin: 'CB11D01', batch: '20I26JJ', expiry: '2030-09-20', qty: '3' };
+  // The pallet held 45 (32 for the truck + 13 down); CB11D01 has the 3.
+  const st = [stock('CB11C01', 45, '20I26JJ', '2030-09-20', '550044709'), stock('CB11D01', 48, '20I26JJ', '2030-09-20', '550044709')];
+  const notes = sheetNotes([p], initial, st, cb11Bins).get(l.key)!;
+  assert.ok(!notes.some((x) => x.tone === 'bad' || x.text.includes('koreksi') || x.text.includes('masih')), notes.map((x) => x.text).join(' | '));
+  assert.ok(notes.some((x) => x.text === 'Dari 2 bin: baris dipecah.'));
+  const [row] = sheetPayload([p], initial);
+  assert.deepEqual(row.sources.map((s) => [s.bin, s.qty]), [['CB11C01', 32], ['CB11D01', 3]]);
+  assert.equal(row.move_qty, 13);
+});
+
+test('no leftover warning when a later line of the paper takes the rest, or the source is a level A pickface', () => {
+  n = 0;
+  const later = setup([
+    task({ seq: 1, sku: '550044709', from_bin: 'CB11C01', batch_lot: '20I26JJ', expiry_date: '2030-09-20', quantity: 30, upp: 48, breaks_pallet: true }),
+    task({ seq: 2, sku: '550044709', task_type: 'REPLENISH', shipment_number: null, from_bin: 'CB11C01', to_bin: 'CB08A02', batch_lot: '20I26JJ', expiry_date: '2030-09-20', quantity: 13, upp: 48 }),
+    task({ seq: 3, sku: '550044709', from_bin: 'CB11C01', batch_lot: '20I26JJ', expiry_date: '2030-09-20', quantity: 5, upp: 48, shipment_number: 'SH2' }),
+  ]);
+  const a = sheetNotes(later.lines, later.initial, cb11Stock, cb11Bins).get(later.lines[0].key)!;
+  assert.ok(!a.some((x) => x.text.includes('masih')), a.map((x) => x.text).join(' | '));
+
+  n = 0;
+  const pf = setup([
+    task({ seq: 1, from_bin: 'CE30A02', quantity: 10, breaks_pallet: true }),
+    task({ seq: 2, task_type: 'REPLENISH', shipment_number: null, from_bin: 'CE30A02', to_bin: 'CE10A02', quantity: 20 }),
+  ]);
+  const b = sheetNotes(pf.lines, pf.initial, [stock('CE30A02', 44)], BINS).get(pf.lines[0].key)!;
+  assert.ok(!b.some((x) => x.text.includes('masih')), b.map((x) => x.text).join(' | '));
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed`);

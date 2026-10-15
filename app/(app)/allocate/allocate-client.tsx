@@ -10,17 +10,18 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { StaleWavesNotice, loadStaleWaves, type StaleWave } from "@/components/app/stale-waves";
 import { StockBasis, useStockBasis } from "@/components/app/stock-basis";
-import { cn, fmtNum } from "@/lib/utils";
+import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { expiryText, withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
 import { inventoryToStock } from "@/lib/allocator/adapters/inventory-stock";
-import { keptShipments, loadDispatchRules, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, loadStockCheckRows, savePlan, type PlanContext } from "@/lib/allocator/browser/plan-client";
+import { keptShipments, loadDispatchRules, loadEarlierWaves, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, loadStockCheckRows, savePlan, type PlanContext } from "@/lib/allocator/browser/plan-client";
 import { checkPlanStock, type StockCheckRow, type StockProblem } from "@/lib/allocator/stock-check";
 import { runPipeline, type PipelineResult } from "@/lib/allocator/pipeline";
 import { buildPlan } from "@/lib/allocator/plan";
 import { binToBin, sisaPrinted, uomLabel } from "@/lib/allocator/picklist";
 import { parseLocation } from "@/lib/allocator/pickpath";
 import { matchParked, type CarryMatch, type ParkedOrder } from "@/lib/allocator/carry-over";
+import { fileDate, sortEarlier, type EarlierDecision } from "@/lib/allocator/earlier-waves";
 
 type Source = "db" | "file";
 type Tab = "picklist" | "shortage" | "movement" | "pickface" | "double" | "warning";
@@ -64,12 +65,15 @@ export function AllocateClient() {
   const [run, setRun] = useState<(PipelineResult & {
     source: Source; asOf: string; demand: ReturnType<typeof loadWorkbookFromBuffer>["demand"];
     ctx: PlanContext | null; skipped: string[];
+    /** shipments of this schedule that had a wave on an earlier day (earlier-waves.ts) */
+    earlier: EarlierDecision[];
     /** file source: the plan's bins against the database; save only when ok */
     check: { ok: boolean; rows: StockCheckRow[] } | null;
     /** parked (Tunda) orders of earlier days found again on this schedule: carried over on save (0036) */
     carry: CarryMatch[];
   }) | null>(null);
   const [tab, setTab] = useState<Tab>("picklist");
+  const fileDay = file ? fileDate(file.name) : null;
 
   async function execute() {
     if (!file) return;
@@ -100,6 +104,10 @@ export function AllocateClient() {
       const kept = keptShipments(ctx);
       const skipped = [...new Set(demand.filter((d) => kept.has(d.shipmentNumber)).map((d) => d.shipmentNumber))];
       demand = demand.filter((d) => !kept.has(d.shipmentNumber));
+      // A shipment of an earlier day's wave, listed again under its old NO (13 Oct: 12 Oct's NO 5-7):
+      // Batal -> its own "<NO> RESCHEDULE" wave, picked -> not planned again, still open -> not twice.
+      const earlier = sortEarlier(demand, await loadEarlierWaves(supabase, asOf, [...new Set(demand.map((d) => d.shipmentNumber))]));
+      demand = earlier.demand;
       // Orders parked on an earlier day, back on today's schedule (0036/0037). Nothing posted
       // yet: planned fresh, whole shipment in one wave, with the parked stock counted as free.
       // Something posted: the old wave is carried over and only the new items are planned.
@@ -119,7 +127,7 @@ export function AllocateClient() {
       const check = source === "file"
         ? checkPlanStock(buildPlan(result.allocation, demand, result.pickfaces).tasks, wb.stock, await loadStockCheckRows(supabase, asOf, release))
         : null;
-      setRun({ ...result, source, asOf, demand, ctx, skipped, carry, check });
+      setRun({ ...result, source, asOf, demand, ctx, skipped, earlier: earlier.decisions, carry, check });
       setTab("picklist");
     } catch (e) {
       setError((e as Error).message);
@@ -177,7 +185,15 @@ export function AllocateClient() {
             <input id="wb" type="file" accept=".xlsx,.xlsm" className="sr-only"
               onChange={async (e) => { const f = e.target.files?.[0]; if (f) { setFile({ name: f.name, buf: await f.arrayBuffer() }); setRun(null); } }} />
           </div>
-          <div><Label htmlFor="asof">Tanggal alokasi</Label><Input id="asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></div>
+          <div>
+            <Label htmlFor="asof">Tanggal alokasi</Label><Input id="asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+            {file && fileDay && fileDay !== asOf && (
+              <p role="alert" className="mt-1 rounded-md bg-warn/10 p-2 text-sm text-warn">
+                File ini untuk {fmtDate(fileDay)}, tanggal alokasi {fmtDate(asOf)}.{" "}
+                <button type="button" className="font-semibold underline" onClick={() => setAsOf(fileDay)}>Pakai {fmtDate(fileDay)}</button>
+              </p>
+            )}
+          </div>
           <div>
             <Label htmlFor="src">Sumber stok</Label>
             <Select id="src" value={source} onChange={(e) => setSource(e.target.value as Source)}>
@@ -244,6 +260,7 @@ export function AllocateClient() {
               Stok yang dipakai sudah dikurangi tugas yang masih terbuka.
             </p>
           )}
+          {run.earlier.length > 0 && <EarlierPanel decisions={run.earlier} />}
           {run.check && <StockCheckPanel check={run.check} />}
           {run.carry.length > 0 && (
             <CarryPanel matches={run.carry} asOf={run.asOf} />
@@ -268,7 +285,7 @@ export function AllocateClient() {
                 }}><FileText className="h-4 w-4" />PDF picklist</Button>
                 <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadAllocationWorkbook(run.allocation, run.movement, run.pickfaces, `picklist_${run.asOf}.xlsx`)}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
                 {run.source === "db" || run.check?.ok ? (
-                  <ConfirmButton size="sm" variant="plate" title="Simpan rencana"
+                  <ConfirmButton size="sm" variant="accent" title="Simpan rencana"
                     summary={`Simpan ${plan.waves.length} wave dan ${plan.tasks.length} tugas untuk ${run.asOf}${run.source === "file" ? " (picklist dari file WMS; stok di semua bin-nya sama dengan database)" : ""}.`
                       + (run.ctx?.replaceable.length ? ` ${run.ctx.replaceable.length} wave tanggal ini yang belum dikerjakan akan diganti.` : "")
                       + (run.ctx?.kept.length ? ` ${run.ctx.kept.length} wave yang sudah berjalan tidak diubah.` : "")
@@ -449,6 +466,27 @@ function CarryPanel({ matches, asOf }: { matches: CarryMatch[]; asOf: string }) 
           {m.ambiguous && <p className="text-xs font-semibold text-bad">Satu shipment lama cocok dengan beberapa shipment baru: dipakai yang pertama. Periksa sebelum menyimpan.</p>}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Shipments of this schedule that had a wave on an earlier day: what the plan does with each. */
+function EarlierPanel({ decisions }: { decisions: EarlierDecision[] }) {
+  const from = (d: EarlierDecision) => `${fmtDate(d.from.planned_date)} NO ${d.from.wave_no}`;
+  return (
+    <div role="status" className="space-y-1 rounded-md border border-steel-300 bg-white p-3 text-sm">
+      <p className="font-semibold">{decisions.length} shipment sudah punya wave di hari sebelumnya</p>
+      <ul className="space-y-1">
+        {decisions.map((d) => (
+          <li key={d.shipment} className={cn(d.kind !== "reschedule" && "rounded bg-warn/10 px-1 text-warn")}>
+            <b className="tabular">{d.shipment}</b>{" "}
+            {d.kind === "reschedule" && <>dibatalkan di {from(d)}: direncanakan ulang di wave sendiri <b>{d.waveNo}</b>, tidak digabung dengan NO hari ini.</>}
+            {d.kind === "picked" && <>sudah dipick di {from(d)} ({fmtNum(d.quantity)} karton), belum dimuat: tidak direncanakan lagi. Muat dari wave itu.</>}
+            {d.kind === "open" && <>masih terbuka di {from(d)}: tidak direncanakan dua kali. Selesaikan, tunda, atau batalkan wave itu dulu.</>}
+            {d.kind === "loaded" && <>sudah dimuat di {from(d)}: direncanakan sebagai order baru. Periksa jadwalnya.</>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

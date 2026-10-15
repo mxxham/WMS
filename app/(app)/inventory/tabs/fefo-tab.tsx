@@ -9,6 +9,7 @@ import { findIssues } from "@/lib/data-quality";
 import { SHELF_BUCKETS, shelfBucket } from "@/lib/inventory-view";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import type { FefoLine } from "../page";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 export type FefoException = {
   movement_id: string; picked_at: string; sku: string; description: string; from_bin: string; batch_lot: string;
@@ -82,8 +83,8 @@ export function FefoTab({ lines, nearDays, days, exceptions, picks, error, shelf
     <div className="space-y-6 p-4 lg:p-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {tiles.map(([label, value, note, bad]) => (
-          <div key={label} className={cn("rounded-lg bg-white p-3", bad && "border-l-4 border-warn")}>
-            <div className="text-xs text-steel-500">{label}</div>
+          <div key={label} className="rounded-lg bg-white p-3">
+            <div className="flex items-start justify-between gap-2 text-xs text-steel-500">{label}{bad && <StatusIcon tone="warn" />}</div>
             <div className="font-cond text-3xl font-semibold tabular">{value}</div>
             <div className="text-xs text-steel-500">{note}</div>
           </div>
@@ -103,9 +104,9 @@ export function FefoTab({ lines, nearDays, days, exceptions, picks, error, shelf
       </Card>
 
       {issues.length > 0 && (
-        <Card className="border-l-4 border-warn">
+        <Card className="bg-warn/5 ring-1 ring-warn/30">
           <CardContent className="space-y-1">
-            <p className="text-sm"><b>{fmtNum(issues.length)} baris stok</b> punya tanggal expired yang tidak cocok dengan kode batchnya (mis. hari dan bulan tertukar). FEFO mengurutkan stok memakai tanggal itu, jadi urutan ambilnya salah.</p>
+            <p className="flex items-start gap-2 text-sm"><StatusIcon tone="warn" className="mt-0.5" /><span><b>{fmtNum(issues.length)} baris stok</b> punya tanggal expired yang tidak cocok dengan kode batchnya (mis. hari dan bulan tertukar). FEFO mengurutkan stok memakai tanggal itu, jadi urutan ambilnya salah.</span></p>
             <Link className="text-sm underline" href="/data-quality#expiry_vs_batch">Perbaiki di Kualitas data →</Link>
           </CardContent>
         </Card>

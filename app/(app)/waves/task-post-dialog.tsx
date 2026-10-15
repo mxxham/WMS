@@ -236,7 +236,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
               <p>Sisa batch ini di {t.from_bin} sekarang <b>{fmtNum(left)} {t.uom ?? ""}</b>, rencana pindah {fmtNum(Number(t.quantity))}.
                 {left > Number(t.quantity) ? " Pick sebelumnya mengambil kurang dari rencana: pindahkan semua sisa supaya bin kosong." : " Stok di bin kurang dari rencana."}</p>
               {left > 0 && (
-                <Button size="sm" variant="plate" onClick={() => {
+                <Button size="sm" variant="accent" onClick={() => {
                   setDifferent(true); setQty(String(left)); setReason("pindahkan semua sisa bin"); if (!sources) loadSources();
                 }}>Pindahkan semua sisa ({fmtNum(left)})</Button>
               )}

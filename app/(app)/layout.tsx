@@ -20,7 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }}>
       <div className="min-h-screen">
         <Nav role={user.role} />
-        <div className="pb-20 lg:pb-0 lg:pl-56">
+        <div className="pb-20 lg:pb-0 lg:pl-72">
           {children}
           <SiteFooter />
         </div>

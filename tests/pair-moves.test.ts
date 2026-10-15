@@ -1,6 +1,6 @@
 /** Pick + pallet-leftover move shown as one wave row (lib/allocator/pair-moves.ts). */
 import { strict as assert } from 'node:assert';
-import { pairMoves } from '../lib/allocator/pair-moves';
+import { movesOfPicks, pairMoves } from '../lib/allocator/pair-moves';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -67,6 +67,21 @@ test('posted from another bin than planned: pick and its move (both there) still
 });
 test('planned tasks ignore actual fields (none yet): same rows as before', () => {
   assert.deepEqual(shape(pairMoves([t('p', 1), t('m', 2, { task_type: 'REPLENISH' }), t('n', 3)])), ['p+m', 'n']);
+});
+// 0073: the relokasi posted alone to unblock another wave splits the row (one PLANNED pick, one
+// COMPLETED move). anyState finds that pair anyway, so the page can refuse to cancel the pick.
+test('0073: a half-posted pair is two rows on the page, but anyState still finds the move', () => {
+  const rows = [
+    t('p', 1),
+    t('m', 2, { task_type: 'REPLENISH', status: 'COMPLETED', actual_from_bin: 'CB25D01', actual_batch_lot: '18I26JJ', actual_expiry_date: '2030-09-18' }),
+  ];
+  assert.deepEqual(shape(pairMoves(rows)), ['p', 'm']);
+  const moveOf = movesOfPicks(rows, { anyState: true });
+  assert.equal(moveOf.get('p')?.id, 'm');
+  assert.equal(moveOf.get('m'), undefined);
+  // A cancelled task is never its pick's move, in any state.
+  assert.equal(movesOfPicks([...rows, t('x', 3, { status: 'CANCELLED' })], { anyState: true }).get('p')?.id, 'm');
+  assert.equal(movesOfPicks([t('p', 1, { status: 'CANCELLED' }), t('m', 2, { task_type: 'REPLENISH' })], { anyState: true }).size, 0);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

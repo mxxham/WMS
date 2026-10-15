@@ -7,7 +7,7 @@ import { Input, Label } from "@/components/ui/input";
 import { BinScanInput } from "@/components/app/bin-scan-input";
 import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { BinLeftCheck } from "./bin-left-check";
-import type { SheetLine, SheetStock } from "@/lib/wave-sheet";
+import { followPick, type SheetLine, type SheetStock } from "@/lib/wave-sheet";
 import { draftNotes, isPlannedSource, linePayload, lineProblem, lineSummary, restAtOpen, samePerson, scanTarget, takeFrom } from "@/lib/pick-line";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 
@@ -27,6 +27,8 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
   // Sesuai = the plan as is; Berbeda / Ubah = edited (decides the default reason).
   const [edited, setEdited] = useState(false);
   const [draft, setDraft] = useState<SheetLine>(line);
+  // The line as the card opened it: the pallet a lower pick sends down with the sisa (followPick).
+  const [opened, setOpened] = useState<SheetLine>(line);
   const [reason, setReason] = useState("");
   // The rack label read for this line (0068); it stays across Sesuai / Berbeda until posted.
   const [rack, setRack] = useState<RackConfirm | null>(null);
@@ -54,7 +56,7 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
     const d = structuredClone(from);
     // The rest the pallet really keeps, once the stock has loaded; the plan only until then.
     d.moveQty = restAtOpen(d, stock, stockLoaded);
-    setDraft(d); setReason(""); setMessage(null); setEdited(edit);
+    setDraft(d); setOpened(d); setReason(""); setMessage(null); setEdited(edit);
     setMode(edit ? "edit" : "confirm");
   }
   // Ambil dari <scanned>: Berbeda with the scanned bin as the first source (batch/expiry when it holds one batch).
@@ -66,6 +68,7 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
   }
   const setSource = (i: number, patch: Partial<SheetLine["sources"][number]>) => setDraft((d) => {
     const x = structuredClone(d);
+    if (i === 0 && patch.qty !== undefined) x.moveQty = followPick(x, opened, patch.qty);
     const s = { ...x.sources[i], ...patch };
     if (patch.bin !== undefined) {
       const here = sources.filter((r) => r.bin === s.bin.trim().toUpperCase());
