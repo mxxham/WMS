@@ -96,7 +96,7 @@ select pg_temp.check('restoring it (0069) keeps the posted pick and the stock as
 
 -- NO 5 is cancelled before its own pallet is finished, while NO 6 still needs CB11E01.
 select pg_temp.check('NO 5 refuses while NO 6 still takes from that bin',
-  pg_temp.fails($$select set_wave_status(pg_temp.w('5'), 'CANCELLED')$$, '%pick lain yang masih mengambil%'));
+  pg_temp.fails($$select set_wave_status(pg_temp.w('5'), 'CANCELLED')$$, '%pick lain (wave NO%yang masih mengambil%'));
 select pg_temp.check('nothing moved on that refusal', pg_temp.qty('CB11E01') = 2 and pg_temp.qty('CB12A02') = 166);
 
 -- The other half-posted pallets cancel in any order: NO 2, NO 3, NO 1, NO 4.

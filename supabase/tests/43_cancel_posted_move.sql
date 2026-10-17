@@ -69,11 +69,11 @@ select pg_temp.check('34 moved to each pickface, 2 left at each source',
 
 -- NO 3 still has an open pick from CB11A01: those 2 cartons are its stock, not ours to move.
 select pg_temp.check('cancelling the pick is refused while another open pick needs those cartons',
-  pg_temp.fails($$select set_task_status(pg_temp.t('2', 1), 'CANCELLED')$$, '%pick lain yang masih mengambil%'));
+  pg_temp.fails($$select set_task_status(pg_temp.t('2', 1), 'CANCELLED')$$, '%pick lain (wave NO%yang masih mengambil%'));
 select pg_temp.check('nothing moved and the pick is still PLANNED',
   pg_temp.st('2', 1) = 'PLANNED' and pg_temp.qty('CB11A01') = 2 and pg_temp.qty('CB11A02') = 34);
 select pg_temp.check('cancelling that whole wave is refused as well',
-  pg_temp.fails($$select set_wave_status(pg_temp.w('2'), 'CANCELLED')$$, '%pick lain yang masih mengambil%'));
+  pg_temp.fails($$select set_wave_status(pg_temp.w('2'), 'CANCELLED')$$, '%pick lain (wave NO%yang masih mengambil%'));
 select pg_temp.check('the wave and its tasks are untouched after the refusal',
   (select status from waves where id = pg_temp.w('2')) = 'PENDING'
   and pg_temp.st('2', 1) = 'PLANNED' and pg_temp.st('2', 2) = 'COMPLETED');

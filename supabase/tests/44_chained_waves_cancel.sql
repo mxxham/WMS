@@ -89,7 +89,7 @@ select pg_temp.check('their picks are cancelled and nothing was counted as picke
 
 -- NO 5 cannot go yet: NO 6 is still going to take its 2 from CB11E01.
 select pg_temp.check('cancelling NO 5 is refused while NO 6 still takes from that bin',
-  pg_temp.fails($$select set_wave_status((select id from waves where planned_date = '2026-11-30' and wave_no = '5'), 'CANCELLED')$$, '%pick lain yang masih mengambil%'));
+  pg_temp.fails($$select set_wave_status((select id from waves where planned_date = '2026-11-30' and wave_no = '5'), 'CANCELLED')$$, '%pick lain (wave NO%yang masih mengambil%'));
 select pg_temp.check('nothing moved: CB11E01 keeps its 2 and the pickface stays at 174',
   pg_temp.qty('CB11E01') = 2 and pg_temp.qty('CB12A02') = 174
   and (select status from waves where planned_date = '2026-11-30' and wave_no = '5') = 'PENDING');
