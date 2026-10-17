@@ -103,12 +103,12 @@ export function StaleWavesNotice({ before, onChange, intro }: {
       <div className="flex flex-wrap gap-2">
         {pending.length > 0 && (
           <ConfirmButton size="sm" variant="outline" title="Batalkan wave lama" confirmLabel={`Batalkan ${pending.length} wave`}
-            summary={`Batalkan ${pending.length} wave belum selesai (${fmtNum(tasks(pending))} tugas terbuka): ${names(pending)}. Tugas yang belum diposting dibatalkan; yang sudah diposting tetap.`}
+            summary={`Batalkan ${pending.length} wave belum selesai (${fmtNum(tasks(pending))} tugas terbuka): ${names(pending)}. Tugas yang belum diposting dibatalkan; yang sudah diposting tetap. Palet yang sudah dibuka: sisa kartonnya naik ke pickface, jadi bin asal jadi kosong.`}
             onConfirm={() => cancel(pending)}>Batalkan {pending.length} wave belum selesai</ConfirmButton>
         )}
         {parked.length > 0 && (
           <ConfirmButton size="sm" variant="ghost" title="Batalkan wave ditunda" confirmLabel={`Batalkan ${parked.length} wave`}
-            summary={`Batalkan ${parked.length} wave ditunda (${fmtNum(tasks(parked))} tugas terbuka): ${names(parked)}. Stok yang ditahan untuk order ini dilepas.`}
+            summary={`Batalkan ${parked.length} wave ditunda (${fmtNum(tasks(parked))} tugas terbuka): ${names(parked)}. Stok yang ditahan untuk order ini dilepas. Palet yang sudah dibuka: sisa kartonnya naik ke pickface, jadi bin asal jadi kosong.`}
             onConfirm={() => cancel(parked)}>Batalkan juga {parked.length} wave ditunda</ConfirmButton>
         )}
       </div>

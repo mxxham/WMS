@@ -96,9 +96,11 @@ export function lineMenuRows({ item, label, isShort, canPost, canUndo, canRestor
     const t = item.task;
     if (t.status === "CANCELLED") {
       // A task cancelled by mistake goes back to the plan (set_task_status allows CANCELLED -> PLANNED).
+      // 0073: if this pick's pallet relokasi was already posted, the DB will refuse restoration
+      // (the leftover already moved up and the source bin is empty). The wording below covers both cases.
       if (supervisor && canRestore) rows.push({ key: "restore", node: (
         <ConfirmButton size="sm" variant="ghost" title={`Pulihkan tugas #${t.seq}`} confirmLabel="Pulihkan"
-          summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana dan bisa diposting lagi. Pakai hanya bila dibatalkan tidak sengaja: jika jumlah order sudah diubah, tugas ini bisa membuat pick lebih.`}
+          summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana. Pakai hanya bila dibatalkan tidak sengaja: jika paletnya sudah pecah dan sisa dipindah ke pickface, database akan menolak (stok sudah bergerak) — alihkan ke Alokasi ulang order ini.`}
           onConfirm={() => rpc("set_task_status", { p_task_id: t.id, p_status: "PLANNED", p_reason: "dipulihkan: dibatalkan tidak sengaja" })}>
           <Undo2 className="h-4 w-4" />Pulihkan</ConfirmButton>
       ) });
