@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ClipboardList, Wrench } from "lucide-react";
+import { AlertTriangle, ClipboardList, Wrench, Package } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { usePersonName } from "@/components/app/person-name";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,8 @@ import { DEFAULT_CONFIG } from "@/lib/allocator/config";
 import { pairMoves } from "@/lib/allocator/pair-moves";
 import type { TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import { planFixes, type FixItem, type FixProposal } from "@/lib/wave-fix";
-import { cn, fmtDateTime, fmtNum } from "@/lib/utils";
+import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { Input, Label } from "@/components/ui/input";
 import { BinButton } from "./bin-panel";
 import { PostMoveEarlyButton, type Rpc } from "./post-move-early";
 import { fixMoveOf, fixRowOf, loadSkuContext } from "./sku-context";
@@ -21,6 +22,28 @@ import type { TaskWait } from "./waves-client";
 
 export type OpenCount = { id: string; bin_code: string; status: string; reason: string | null; created_at: string };
 type ShortItem = { pick: TaskRow; move: TaskRow | null; waveNo: string };
+
+/** Row from the stranded_residue view (0075). */
+type StrandedRow = {
+  pick_task_id: string;
+  move_task_id: string;
+  wave_no: string;
+  planned_date: string;
+  shipment_number: string | null;
+  pick_seq: number;
+  sku: string;
+  description: string;
+  uom: string;
+  bin: string;
+  to_bin: string;
+  to_bin_id: string;
+  bin_id: string;
+  batch_lot: string | null;
+  expiry_date: string | null;
+  in_bin: number;
+  residue: number;
+  move_posted_at: string;
+};
 
 /**
  * "Perlu ditangani": every row of every wave of the day that needs a person,
@@ -47,7 +70,41 @@ export function ProblemsPanel({ waves, tasks, short, waits, counts: allCounts, l
   // questioned. Only counts opened after the last full import are work; the older ones fold into one line to close.
   const counts = lastImport ? allCounts.filter((c) => c.created_at >= lastImport) : allCounts;
   const stale = lastImport ? allCounts.filter((c) => c.created_at < lastImport) : [];
-  const total = shortItems.length + otherShort.length + waiting.length + counts.length + (stale.length ? 1 : 0);
+
+  // Stranded residue (0075): cancelled picks whose relokasi was posted, leaving cartons in a reserve bin
+  // that are physically at the pickface. A supervisor settles it: the loose part goes up to that bin.
+  // No loading state: with no row there is nothing to show, and "memuat" on every page load would be
+  // noise on the days the warehouse is clean. A failed check is the one thing that must not look like
+  // "nothing to do", so it counts in the total and prints its message.
+  const [stranded, setStranded] = useState<StrandedRow[]>([]);
+  const [strandedError, setStrandedError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setStrandedError(null);
+      try {
+        const db = createClient();
+        const { data, error } = await db
+          .from("stranded_residue")
+          .select("pick_task_id, move_task_id, wave_no, planned_date, shipment_number, pick_seq, sku, description, uom, bin, to_bin, to_bin_id, bin_id, batch_lot, expiry_date, in_bin, residue, move_posted_at")
+          .order("move_posted_at", { ascending: false });
+        if (cancelled) return;
+        if (error) throw error;
+        setStranded((data ?? []) as StrandedRow[]);
+      } catch (e) {
+        if (!cancelled) setStrandedError((e as Error).message);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const baseTotal = shortItems.length + otherShort.length + waiting.length + counts.length + (stale.length ? 1 : 0);
+  // Settling is supervisor work: neither the rows nor a failure to check count toward an operator's panel.
+  const strandedCount = supervisor ? stranded.length : 0;
+  const strandedFailed = supervisor && !!strandedError;
+  const total = baseTotal + strandedCount + (strandedFailed ? 1 : 0);
   if (!total) return null;
   const parked = (t: TaskRow) => waveOf.get(t.wave_id)?.status === "RESCHEDULED";
 
@@ -108,6 +165,23 @@ export function ProblemsPanel({ waves, tasks, short, waits, counts: allCounts, l
             <Link href="/counts" className="inline-flex items-center gap-1 font-semibold underline"><ClipboardList className="h-4 w-4" />Cycle count</Link>
           </li>
         ))}
+        {(strandedCount > 0 || strandedFailed) && (
+          <>
+            {/* No "(0)" header beside a failure: the count only means something once the check returned. */}
+            {strandedFailed && <li className="py-2 text-bad text-center" role="alert">Sisa palet: gagal diperiksa — {strandedError}</li>}
+            {strandedCount > 0 && (
+              <li className="px-2 py-1 text-xs font-semibold text-steel-500 uppercase tracking-wide border-t border-steel-100">
+                Sisa palet tertinggal ({strandedCount})
+              </li>
+            )}
+            {stranded.map((r) => (
+              <li key={r.pick_task_id} className="py-2">
+                <StrandedRowItem row={r} rpc={rpc}
+                  onDone={() => setStranded((prev) => prev.filter((x) => x.pick_task_id !== r.pick_task_id))} />
+              </li>
+            ))}
+          </>
+        )}
       </ul>
     </section>
   );
@@ -211,5 +285,78 @@ function CloseStaleCounts({ counts, lastImport }: { counts: OpenCount[]; lastImp
         router.refresh();
         return failed.length ? `${counts.length - failed.length} ditutup, ${failed.length} gagal: ${failed.join("; ")}` : null;
       }}>Tutup {counts.length} hitung lama</ConfirmButton>
+  );
+}
+
+/** One stranded residue row: shows the bin → pickface move and a button to settle it (0075). */
+function StrandedRowItem({ row, rpc, onDone }: { row: StrandedRow; rpc: Rpc; onDone: () => void }) {
+  const router = useRouter();
+  const [person] = usePersonName();
+  const [reason, setReason] = useState("sisa palet sudah ikut naik ke pickface");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function settle(): Promise<string | null> {
+    if (person.trim().length < 2) return "Isi nama Anda di atas daftar wave dulu.";
+    if (reason.trim().length === 0) return "Alasan wajib diisi.";
+    setBusy(true);
+    setError(null);
+    const err = await rpc("settle_stranded_residue", {
+      p_pick_id: row.pick_task_id,
+      p_by_name: person,
+      p_reason: reason.trim(),
+    });
+    setBusy(false);
+    if (err) { setError(err); return err; }
+    // The whole loose part moved in one transfer, so this row is finished. Drop it here: the panel
+    // fetches the view once, and router.refresh() would not re-run that effect.
+    onDone();
+    router.refresh();
+    return null;
+  }
+
+  const residue = Number(row.residue);
+  const inBin = Number(row.in_bin);
+  const reasonId = `stranded-reason-${row.pick_task_id}`;
+  const summary = `Pindahkan sisa palet ${fmtNum(residue)} karton dari ${row.bin} (reserve) ke ${row.to_bin} (pickface). Pick batal NO ${row.wave_no} #${row.pick_seq} — paletnya sudah dipindah fisik, jadi ${fmtNum(residue)} karton longgar yang masih tercatat di bin reserve itu ikut naik.`;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-start gap-2 text-sm">
+        <span className="font-mono text-steel-700">{row.bin}</span>
+        <Package className="h-4 w-4 text-steel-400 shrink-0 mt-0.5" aria-hidden="true" />
+        <span className="font-mono text-ok font-semibold">{row.to_bin}</span>
+        <span className="text-steel-500">·</span>
+        <span><b>{row.sku}</b> {row.description}</span>
+        {row.batch_lot && <span className="text-steel-500">·</span>}
+        {row.batch_lot && <span>Batch {row.batch_lot}</span>}
+        {row.expiry_date && <span className="text-steel-500">·</span>}
+        {row.expiry_date && <span>Exp {fmtDate(row.expiry_date)}</span>}
+        <span className="text-steel-500">·</span>
+        <span>{fmtNum(residue)} / {fmtNum(inBin)} {row.uom} (sisa / di bin)</span>
+        <span className="text-steel-500">·</span>
+        <span>NO {row.wave_no} SH {row.shipment_number ?? "-"} #{row.pick_seq}</span>
+        <span className="text-steel-500">·</span>
+        <span>Relokasi diposting {fmtDateTime(row.move_posted_at)}</span>
+      </div>
+      <ConfirmButton
+        size="sm"
+        variant="outline"
+        title="Selesaikan sisa palet"
+        confirmLabel={`Selesaikan ${fmtNum(residue)} karton`}
+        summary={summary}
+        extra={
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-steel-300 p-3 text-sm">
+            <Label htmlFor={reasonId}>Alasan (wajib)</Label>
+            <Input id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} className="flex-1 min-w-[160px] text-sm" />
+          </div>
+        }
+        onConfirm={settle}
+        disabled={busy}
+      >
+        {busy ? "Menyelesaikan…" : `Selesaikan ${fmtNum(residue)} karton`}
+      </ConfirmButton>
+      {error && <p role="alert" className="text-xs text-bad">{error}</p>}
+    </div>
   );
 }

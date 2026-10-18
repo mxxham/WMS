@@ -146,7 +146,7 @@ export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outb
     totalQty: live.reduce((s, t) => s + Number(t.quantity), 0),
     panels: (layout) => (
       <>
-        <PersonNameField className="max-w-xs" value={person} onChange={setPerson} label="Nama Anda (untuk Tutup, Perbaiki)" />
+        <PersonNameField className="max-w-xs" value={person} onChange={setPerson} label="Nama Anda (untuk Tutup, Perbaiki, Selesaikan)" />
         <ProblemsPanel waves={waves} tasks={tasks} short={short} waits={waits} counts={counts} lastImport={lastImport} supervisor={supervisor} rpc={rpc}
           extra={supervisor && untouched.length > 0 && shortInUntouched ? replanButton("accent") : undefined} />
         <EscalationsPanel rows={requests} supervisor={supervisor} person={person} layout={layout} onOpenSheet={setSheetAt} />
