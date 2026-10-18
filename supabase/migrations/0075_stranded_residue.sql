@@ -67,7 +67,9 @@ join lateral (
 ) i on true
 -- The relokasi this pick was paired with: adjacent (the pair rule of the wave page) first, then
 -- nearest. One ordered choice, so a pick can never list twice and the destination is
--- deterministic (0073 / 0074 posted_pallet_move_seq makes the same single choice).
+-- deterministic. 0073 / 0074 posted_pallet_move_seq and open_pallet_leftovers accept an *adjacent*
+-- move only, which is right for the cancel path; this view also matches a pair that stopped being
+-- adjacent (split, Ubah baris), because that strand is exactly what the cancel path cannot reach.
 join lateral (
   select m.* from public.pick_tasks m
   where m.task_type = 'REPLENISH' and m.status = 'COMPLETED'
