@@ -54,7 +54,8 @@ select save_plan('2026-11-30', '{
   "waves":[{"wave_no":"1","shipment_numbers":["109722231"],"planned_slot":"00:52"}],
   "tasks":[
    {"wave_no":"1","shipment_number":"109722231","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","breaks_pallet":true,"seq":1},
-   {"wave_no":"1","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb) \g /dev/null
+   {"wave_no":"1","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}],
+  "outbound":[{"wave_no":"1","shipment_number":"109722231","sku":"550070614","quantity_requested":2,"quantity_allocated":2}]}'::jsonb) \g /dev/null
 
 -- Post relokasi alone (simulating post-move-early)
 select post_task_by(p_task_id => pg_temp.t('1', 2), p_by_name => 'Ani', p_scanned => 'CB11B01') \g /dev/null
@@ -80,26 +81,36 @@ select pg_temp.check('note does not have empty parentheses',
 -- Test 2: reserve 38 (CB11B01, level B) -> relokasi 34 posted alone -> reserve 4, pickface 34
 --         cancel pick (qty 2) -> reserve 36 (whole pallet stays), pickface 36
 -- ============================================================================
+-- Fixtures run as the owner: inventory has no write policy, so a delete from an authenticated
+-- account would silently remove nothing, and guard_adjustment_policy refuses an adjustment
+-- without a reason code.
+reset role;
+reset request.jwt.claim.sub;
 select pg_temp.drop_plan_temps();
 delete from inventory where bin_id in (select id from bins where bin_code in ('CB11B01','CB11A01'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 38,
        (select id from bins where bin_code = 'CB11B01'), '2030-09-01', 'fixture';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 select save_plan('2026-11-30', '{
   "waves":[{"wave_no":"2","shipment_numbers":["109722232"],"planned_slot":"01:22"}],
   "tasks":[
    {"wave_no":"2","shipment_number":"109722232","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","breaks_pallet":true,"seq":1},
-   {"wave_no":"2","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb) \g /dev/null
+   {"wave_no":"2","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}],
+  "outbound":[{"wave_no":"2","shipment_number":"109722232","sku":"550070614","quantity_requested":2,"quantity_allocated":2}]}'::jsonb) \g /dev/null
 
 select post_task_by(p_task_id => pg_temp.t('2', 2), p_by_name => 'Ani', p_scanned => 'CB11B01') \g /dev/null
 select pg_temp.check('after relokasi posted alone (38 start): reserve (CB11B01) 4, pickface (CB11A01) 34',
   pg_temp.qty('CB11B01') = 4 and pg_temp.qty('CB11A01') = 34);
 
 select set_task_status(pg_temp.t('2', 1), 'CANCELLED') \g /dev/null
-select pg_temp.check('cancel pick (38 start): reserve (level B) 36 (whole pallet), pickface (level A) 38 (34+4)',
+-- 38 in the bin is one pallet (36) plus 2 loose. The relokasi took 34, so 4 are left at level B --
+-- all of them loose. All 4 must go up: a reserve bin may never rest holding a sub-UPP quantity (0074).
+select pg_temp.check('cancel pick (38 start): reserve (level B) 0, pickface (level A) 38 (34+4)',
   pg_temp.st('2', 1) = 'CANCELLED'
-  and pg_temp.qty('CB11B01') = 36 and pg_temp.qty('CB11A01') = 38); -- 34 + 4 = 38
+  and pg_temp.qty('CB11B01') = 0 and pg_temp.qty('CB11A01') = 38); -- 34 + 4 = 38
 select pg_temp.check('level B bin ends at 36 (whole pallets invariant satisfied)',
   pg_temp.qty('CB11B01') % 36 = 0);
 select pg_temp.check('note does not have empty parentheses (no reason passed)',
@@ -109,17 +120,22 @@ select pg_temp.check('note does not have empty parentheses (no reason passed)',
 -- Test 3: reserve 36 -> relokasi 34 posted alone -> reserve 2, pickface 34
 --         cancel pick (qty 2) -> reserve 0, pickface 36
 -- ============================================================================
+reset role;
+reset request.jwt.claim.sub;
 select pg_temp.drop_plan_temps();
 delete from inventory where bin_id in (select id from bins where bin_code in ('CB11B01','CB11A01'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 36,
        (select id from bins where bin_code = 'CB11B01'), '2030-09-01', 'fixture';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 select save_plan('2026-11-30', '{
   "waves":[{"wave_no":"3","shipment_numbers":["109722233"],"planned_slot":"01:52"}],
   "tasks":[
    {"wave_no":"3","shipment_number":"109722233","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","breaks_pallet":true,"seq":1},
-   {"wave_no":"3","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb) \g /dev/null
+   {"wave_no":"3","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":34,"pick_type":"CASE","breaks_pallet":true,"seq":2}],
+  "outbound":[{"wave_no":"3","shipment_number":"109722233","sku":"550070614","quantity_requested":2,"quantity_allocated":2}]}'::jsonb) \g /dev/null
 
 select post_task_by(p_task_id => pg_temp.t('3', 2), p_by_name => 'Ani', p_scanned => 'CB11B01') \g /dev/null
 select pg_temp.check('after relokasi: reserve (CB11B01) 2, pickface (CB11A01) 34',
@@ -136,11 +152,15 @@ select pg_temp.check('level B bin ends at 0 (whole pallets invariant satisfied)'
 -- Test 4: reserve 36 -> relokasi 34 posted + pick 2 posted -> reserve 0, pickface 36
 --         (normal completion) -> cancel pick should move nothing (already COMPLETED)
 -- ============================================================================
+reset role;
+reset request.jwt.claim.sub;
 select pg_temp.drop_plan_temps();
 delete from inventory where bin_id in (select id from bins where bin_code in ('CB11B01','CB11A01'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 36,
        (select id from bins where bin_code = 'CB11B01'), '2030-09-01', 'fixture';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 select save_plan('2026-11-30', '{
   "waves":[{"wave_no":"4","shipment_numbers":["109722234"],"planned_slot":"02:22"}],
@@ -150,8 +170,10 @@ select save_plan('2026-11-30', '{
 
 select post_task_by(p_task_id => pg_temp.t('4', 2), p_by_name => 'Ani', p_scanned => 'CB11B01') \g /dev/null
 select post_task_by(p_task_id => pg_temp.t('4', 1), p_by_name => 'Ani', p_scanned => 'CB11B01') \g /dev/null
-select pg_temp.check('after full post: reserve (level B) 0, pickface (level A) 36',
-  pg_temp.qty('CB11B01') = 0 and pg_temp.qty('CB11A01') = 36);
+-- The picked 2 leave the building (a `picking` movement with no destination bin), so the pickface
+-- keeps the 34 the relokasi brought up and the reserve bin ends empty (whole pallets invariant).
+select pg_temp.check('after full post: reserve (level B) 0, pickface (level A) 34',
+  pg_temp.qty('CB11B01') = 0 and pg_temp.qty('CB11A01') = 34);
 select pg_temp.check('pick is COMPLETED, cannot cancel',
   pg_temp.fails($$select set_task_status(pg_temp.t('4', 1), 'CANCELLED')$$, '%Task is already completed%'));
 

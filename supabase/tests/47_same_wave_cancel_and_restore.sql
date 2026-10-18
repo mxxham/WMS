@@ -80,11 +80,18 @@ select pg_temp.check('level B bin ends at 0 (whole pallets invariant satisfied)'
 -- Test 2: Cross-wave blocking still refuses, and message names the blocking wave NO
 --   Use CB11C01 (level C, reserve) / CB11A02 (level A, pickface) for wave 2 and 3
 -- ============================================================================
+-- Fixtures run as the owner: inventory has no write policy, so a delete from an authenticated
+-- account would silently remove nothing, and guard_adjustment_policy refuses an adjustment
+-- without a reason code.
+reset role;
+reset request.jwt.claim.sub;
 select pg_temp.drop_plan_temps();
 delete from inventory where bin_id in (select id from bins where bin_code in ('CB11C01','CB11A02'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 36,
        (select id from bins where bin_code = 'CB11C01'), '2030-09-01', 'fixture';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 select save_plan('2026-11-30', '{
   "waves":[
@@ -129,35 +136,46 @@ select pg_temp.check('level C bin ends at 0 (whole pallets invariant satisfied)'
 -- Use the wave 1 from Test 1 which was cancelled after relokasi was posted
 -- pick #1 (seq 1) was CANCELLED and its pallet break completed
 select pg_temp.check('restore pick #1 (pallet break completed) is refused',
-  pg_temp.fails($$select set_task_status(pg_temp.t('1', 1), 'PLANNED')$$, '%palet sudah dipindahkan%relokasi #2%'));
+  pg_temp.fails($$select set_task_status(pg_temp.t('1', 1), 'PLANNED')$$, '%paletnya sudah dipindahkan%relokasi #2%'));
 select pg_temp.check('pick #1 stays CANCELLED', pg_temp.st('1', 1) = 'CANCELLED');
 select pg_temp.check('pick #3 (also cancelled with wave, pallet break completed) also refused',
-  pg_temp.fails($$select set_task_status(pg_temp.t('1', 3), 'PLANNED')$$, '%palet sudah dipindahkan%relokasi #2%'));
+  pg_temp.fails($$select set_task_status(pg_temp.t('1', 3), 'PLANNED')$$, '%paletnya sudah dipindahkan%relokasi #2%'));
 
 -- ============================================================================
 -- Test 4: restore_wave skips such lines and reports them under skipped_pallet_breaks
 -- ============================================================================
 -- Wave 1 is already CANCELLED and both picks had their pallet breaks completed
 -- (the relokasi #2 was posted before the wave cancel)
-select pg_temp.check('restore_wave on wave 1: restores 0, skips 2 pallet breaks',
-  (select (r->>'restored')::int = 0 and jsonb_array_length(r->'skipped_pallet_breaks') = 2
-   from restore_wave(pg_temp.w('1'), 'Supervisor', 'salah batal') r));
-select pg_temp.check('skipped lines have correct info',
-  (select (r->'skipped_pallet_breaks'->0->>'seq')::int = 1 and (r->'skipped_pallet_breaks'->0->>'reason') like '%relokasi #2%'
-   from restore_wave(pg_temp.w('1'), 'Supervisor', 'salah batal') r));
-select pg_temp.check('wave restored to PENDING, other lines (relokasi) also restored',
+-- One call, both assertions: restore_wave changes state, so a second call would be refused
+-- (the wave is PENDING by then) and would prove nothing.
+do $$ declare r jsonb; begin
+  r := restore_wave(pg_temp.w('1'), 'Supervisor', 'salah batal');
+  perform pg_temp.check('restore_wave on wave 1: restores 0, skips 2 pallet breaks',
+    (r->>'restored')::int = 0 and jsonb_array_length(r->'skipped_pallet_breaks') = 2);
+  perform pg_temp.check('skipped lines have correct info',
+    (r->'skipped_pallet_breaks'->0->>'seq')::int = 1 and (r->'skipped_pallet_breaks'->0->>'reason') like '%relokasi #2%');
+end $$;
+-- The relokasi stays COMPLETED: Pulihkan wave restores the lines the *wave cancel* cancelled, and
+-- that pallet really did move. Un-posting a posted move is reopen_wave's job, not this one's.
+select pg_temp.check('wave back to PENDING, the posted relokasi stays COMPLETED',
   (select status from waves where id = pg_temp.w('1')) = 'PENDING'
-  and pg_temp.st('1', 2) = 'PLANNED');
+  and pg_temp.st('1', 2) = 'COMPLETED');
 
 -- ============================================================================
--- Test 5: restore_wave on a wave with mixed lines (some with completed pallet break,
---         some without) restores the others and skips the pallet-break ones
+-- Test 5: a pick cancelled by hand is not a wave-cancelled line
+--   wave_cancelled_lines() returns only the lines the *wave cancel* cancelled (their own
+--   last task event is not a cancel), so a pick cancelled earlier on its own is neither
+--   restored nor reported as a skipped pallet break. The wave itself still comes back.
 -- ============================================================================
+reset role;
+reset request.jwt.claim.sub;
 select pg_temp.drop_plan_temps();
 delete from inventory where bin_id in (select id from bins where bin_code in ('CB11B01','CB11A01'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 36,
        (select id from bins where bin_code = 'CB11B01'), '2030-09-01', 'fixture';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 select save_plan('2026-11-30', '{
   "waves":[{"wave_no":"4","shipment_numbers":["109722234"],"planned_slot":"02:22"}],
@@ -171,16 +189,18 @@ select set_task_status(pg_temp.t('4', 1), 'CANCELLED', 'order dibatalkan') \g /d
 select pg_temp.check('pick cancelled, pallet break completed: reserve (level B) 0, pickface (level A) 36',
   pg_temp.qty('CB11B01') = 0 and pg_temp.qty('CB11A01') = 36);
 
--- Now cancel the wave (which only has the relokasi left as PLANNED? No, relokasi is COMPLETED)
--- Actually wave status is still PENDING, pick is CANCELLED, relokasi is COMPLETED
--- Let's test restore_wave on a wave where the pick was cancelled with completed pallet break
+-- The wave itself is still PENDING (only the pick was cancelled), so it can still be cancelled.
 select set_wave_status(pg_temp.w('4'), 'CANCELLED', 'truck batal') \g /dev/null
 select pg_temp.check('wave 4 cancelled', (select status from waves where id = pg_temp.w('4')) = 'CANCELLED');
 
--- restore_wave should skip the pick (pallet break completed) but restore the wave status
-select pg_temp.check('restore_wave wave 4: restores wave to PENDING, skips pick #1',
-  (select (r->>'restored')::int = 0 and jsonb_array_length(r->'skipped_pallet_breaks') = 1
-   from restore_wave(pg_temp.w('4'), 'Supervisor', 'salah batal') r));
+-- Nothing to restore and nothing to skip: pick #1 was cancelled by hand before the wave cancel,
+-- so wave_cancelled_lines() does not return it at all.
+do $$ declare r jsonb; begin
+  r := restore_wave(pg_temp.w('4'), 'Supervisor', 'salah batal');
+  perform pg_temp.check('restore_wave wave 4: nothing restored, nothing skipped',
+    (r->>'restored')::int = 0 and jsonb_array_length(r->'skipped_pallet_breaks') = 0);
+  perform pg_temp.check('pick #1 is still CANCELLED', pg_temp.st('4', 1) = 'CANCELLED');
+end $$;
 select pg_temp.check('wave 4 is PENDING again', (select status from waves where id = pg_temp.w('4')) = 'PENDING');
 
 rollback;
