@@ -51,14 +51,14 @@ export function lineMenuRows({ item, label, isShort, canPost, canUndo, canRestor
     : `Batalkan tugas #${head.seq}`;
   const cancelSummary = postedMove
     ? `Sisa palet dari ${head.from_bin} sudah diposting ke ${postedMove.to_bin} (relokasi #${postedMove.seq}). `
-      + `Baris pick ini dibatalkan dan ${fmtNum(Number(head.quantity))} karton yang tertinggal di ${head.from_bin} ikut naik ke ${postedMove.to_bin}, `
+      + `Baris pick ini dibatalkan dan seluruh karton sisa di ${head.from_bin} — bagian yang tidak utuh satu palet — ikut naik ke ${postedMove.to_bin}, `
       + `supaya ${head.from_bin} kosong dan tidak ada karton yang perlu dikoreksi kemudian.`
     : `Baris pick ini dibatalkan. Tidak ada stok yang bergerak.`;
   if (postedMove) {
     rows.push({ key: "posted-move", node: (
       <span className="block text-xs text-steel-500">
         Sisa palet sudah diposting: relokasi #{postedMove.seq} → {postedMove.to_bin}. Batalkan pick ini
-        menyelesaikan paletnya — {fmtNum(Number(head.quantity))} karton dari {head.from_bin} naik ke {postedMove.to_bin}.
+        menyelesaikan paletnya — seluruh karton sisa di {head.from_bin} naik ke {postedMove.to_bin}.
         Kalau pick lain masih mengambil dari {head.from_bin}, pembatalan ditolak sampai itu dibersihkan.
       </span>
     ) });
@@ -100,7 +100,7 @@ export function lineMenuRows({ item, label, isShort, canPost, canUndo, canRestor
       // (the leftover already moved up and the source bin is empty). The wording below covers both cases.
       if (supervisor && canRestore) rows.push({ key: "restore", node: (
         <ConfirmButton size="sm" variant="ghost" title={`Pulihkan tugas #${t.seq}`} confirmLabel="Pulihkan"
-          summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana. Pakai hanya bila dibatalkan tidak sengaja: jika paletnya sudah pecah dan sisa dipindah ke pickface, database akan menolak (stok sudah bergerak) — alihkan ke Alokasi ulang order ini.`}
+          summary={`Tugas #${t.seq} (${fmtNum(Number(t.quantity))} ${t.uom ?? ""} SKU ${t.sku} dari ${t.from_bin}) kembali ke rencana. Pakai hanya bila dibatalkan tidak sengaja: jika paletnya sudah pecah dan sisa dipindah ke pickface, database akan menolak (stok sudah bergerak) — alihkan ke Alokasi ulang order ini. Kalau jumlah order sudah diubah, tugas ini bisa membuat pick lebih dari yang diminta.`}
           onConfirm={() => rpc("set_task_status", { p_task_id: t.id, p_status: "PLANNED", p_reason: "dipulihkan: dibatalkan tidak sengaja" })}>
           <Undo2 className="h-4 w-4" />Pulihkan</ConfirmButton>
       ) });

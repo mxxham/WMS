@@ -216,7 +216,7 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
       {supervisor && (pending || w.status === "RESCHEDULED") && (
         <MenuDanger>
           <div><ConfirmButton size="sm" variant="danger" title={`Batalkan NO ${w.wave_no}`} confirmLabel="Batalkan wave"
-            summary={`Batalkan wave dan ${open.length} tugas yang belum dikerjakan. Stok yang sudah dipindah tidak dikembalikan otomatis. Bisa dipulihkan lagi lewat Pulihkan wave.${halfPosted > 0 ? ` ${halfPosted} palet di wave ini sudah setengah pindah (relokasi sudah diposting, pick belum): karton yang tertinggal di bin asal ikut naik ke pickface, jadi binnya kosong dan tidak ada sisa yang harus dikoreksi. Kalau ada pick lain yang masih mengambil dari bin itu, pembatalan ditolak.` : ""}`}
+            summary={`Batalkan wave dan ${open.length} tugas yang belum dikerjakan. Stok yang sudah dipindah tidak dikembalikan otomatis.${halfPosted > 0 ? ` ${halfPosted} palet di wave ini sudah setengah pindah (relokasi sudah diposting, pick belum): karton yang tertinggal di bin asal ikut naik ke pickface, jadi binnya kosong dan tidak ada sisa yang harus dikoreksi. Baris yang paletnya sudah pindah itu tidak ikut kembali lewat Pulihkan wave — ordernya dialokasikan ulang; baris lain tetap bisa dipulihkan. Kalau ada pick lain yang masih mengambil dari bin itu, pembatalan ditolak.` : " Bisa dipulihkan lagi lewat Pulihkan wave."}`}
             onConfirm={() => rpc("set_wave_status", { p_wave_id: w.id, p_status: "CANCELLED", p_reason: "wave dan pick-nya dibatalkan" })}>Batalkan wave</ConfirmButton></div>
         </MenuDanger>
       )}
