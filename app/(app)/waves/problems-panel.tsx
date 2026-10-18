@@ -42,7 +42,9 @@ type StrandedRow = {
   expiry_date: string | null;
   in_bin: number;
   residue: number;
-  move_posted_at: string;
+  move_posted_at: string | null;
+  /** 'pick_cancelled' (0075) or 'move_cancelled' (0078: pick posted, its relokasi cancelled) */
+  kind: "pick_cancelled" | "move_cancelled";
 };
 
 /**
@@ -87,7 +89,7 @@ export function ProblemsPanel({ waves, tasks, short, waits, counts: allCounts, l
         const db = createClient();
         const { data, error } = await db
           .from("stranded_residue")
-          .select("pick_task_id, move_task_id, wave_no, planned_date, shipment_number, pick_seq, sku, description, uom, bin, to_bin, to_bin_id, bin_id, batch_lot, expiry_date, in_bin, residue, move_posted_at")
+          .select("pick_task_id, move_task_id, wave_no, planned_date, shipment_number, pick_seq, sku, description, uom, bin, to_bin, to_bin_id, bin_id, batch_lot, expiry_date, in_bin, residue, move_posted_at, kind")
           .order("move_posted_at", { ascending: false });
         if (cancelled) return;
         if (error) throw error;
@@ -292,7 +294,7 @@ function CloseStaleCounts({ counts, lastImport }: { counts: OpenCount[]; lastImp
 function StrandedRowItem({ row, rpc, onDone }: { row: StrandedRow; rpc: Rpc; onDone: () => void }) {
   const router = useRouter();
   const [person] = usePersonName();
-  const [reason, setReason] = useState("sisa palet sudah ikut naik ke pickface");
+  const [reason, setReason] = useState(row.kind === "move_cancelled" ? "sisa palet sudah dipindah ke pickface" : "sisa palet sudah ikut naik ke pickface");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -318,7 +320,9 @@ function StrandedRowItem({ row, rpc, onDone }: { row: StrandedRow; rpc: Rpc; onD
   const residue = Number(row.residue);
   const inBin = Number(row.in_bin);
   const reasonId = `stranded-reason-${row.pick_task_id}`;
-  const summary = `Pindahkan sisa palet ${fmtNum(residue)} karton dari ${row.bin} (reserve) ke ${row.to_bin} (pickface). Pick batal NO ${row.wave_no} #${row.pick_seq} — paletnya sudah dipindah fisik, jadi ${fmtNum(residue)} karton longgar yang masih tercatat di bin reserve itu ikut naik.`;
+  const summary = row.kind === "move_cancelled"
+    ? `Pindahkan sisa palet ${fmtNum(residue)} karton dari ${row.bin} (reserve) ke ${row.to_bin} (pickface). Pick NO ${row.wave_no} #${row.pick_seq} sudah diposting, tetapi relokasinya dibatalkan — ${fmtNum(residue)} karton longgar tertinggal di bin reserve. Posting hanya kalau kamu sudah memindahkannya (atau akan memindahkannya sekarang) ke ${row.to_bin}.`
+    : `Pindahkan sisa palet ${fmtNum(residue)} karton dari ${row.bin} (reserve) ke ${row.to_bin} (pickface). Pick batal NO ${row.wave_no} #${row.pick_seq} — paletnya sudah dipindah fisik, jadi ${fmtNum(residue)} karton longgar yang masih tercatat di bin reserve itu ikut naik.`;
 
   return (
     <div className="space-y-2">
