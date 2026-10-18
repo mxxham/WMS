@@ -8,7 +8,8 @@
 --  wave, and the 8 stay in the system at CB01D01 until the pick is
 --  confirmed. The wave is then cancelled, or its pick never gets confirmed,
 --  and the floor has already moved the whole pallet. The system keeps 8 in
---  CB01D01: stock that does not exist, reserved for nothing.
+--  CB01D01 that are physically at the pickface already: a location error,
+--  not stock that does not exist.
 --
 --  0073 / 0074 finish the pallet break at the moment a pick is cancelled
 --  through set_task_status / set_wave_status. They cannot help a pick that
@@ -28,11 +29,13 @@
 --                                      would be two errors in the accuracy
 --                                      KPI for one physical move)
 --
---  The quantity is bounded three ways so the view cannot flag a pallet that
---  was put away later: at most the cancelled pick's own planned quantity, at
---  most what the bin holds, and only the loose part (bin quantity modulo
---  UPP, the same rule as 0074). A pick already settled by 0073 / 0074 (its
---  ledger transfer has the pick's task id) is not listed again.
+--  The quantity is the bin's loose part (bin quantity modulo UPP, the same
+--  rule as 0074), so settling leaves the bin at 0 or a whole pallet. It is
+--  NOT clamped to the cancelled pick's own planned quantity: that quantity
+--  is stale memory of what the pick once wanted, and clamping to it would
+--  leave a sub-UPP remainder resting in a level B-E bin -- the very defect
+--  this migration exists to clear. A pick already settled by 0073 / 0074
+--  (its ledger transfer carries the pick's task id) is not listed again.
 -- =====================================================================
 
 create or replace view public.stranded_residue with (security_invoker = true) as
@@ -42,33 +45,41 @@ select pk.id as pick_task_id, m.id as move_task_id,
        fb.bin_code as bin, tb.bin_code as to_bin, tb.id as to_bin_id, fb.id as bin_id,
        i.batch_lot, i.expiry_date,
        i.quantity as in_bin,
+       -- The bin's loose part. NOT clamped to pk.quantity: a stranded pick's quantity is stale
+       -- memory of what it once wanted, and clamping only ever moves less, i.e. leaves a sub-UPP
+       -- remainder resting in a level B-E bin -- the defect this migration exists to clear.
        case when coalesce(it.upp, 0) > 0 then i.quantity % it.upp
-            else least(i.quantity, pk.quantity) end  as raw_residue,
-       least(pk.quantity,
-             case when coalesce(it.upp, 0) > 0 then i.quantity % it.upp
-                  else least(i.quantity, pk.quantity) end) as residue,
+            else least(i.quantity, pk.quantity) end as residue,
        m.completed_at as move_posted_at
 from public.pick_tasks pk
 join public.waves w          on w.id = pk.wave_id
 join public.items it         on it.id = pk.item_id
-join public.pick_tasks m     on m.task_type = 'REPLENISH' and m.status = 'COMPLETED'
-                            and m.wave_id = pk.wave_id and m.item_id = pk.item_id
-                            and m.from_bin_id = pk.from_bin_id
-                            and coalesce(m.batch_lot, '') = coalesce(pk.batch_lot, '')
 join public.bins fb          on fb.id = pk.from_bin_id
+-- The one stock row this move took: the pick's own expiry first, else the bin's first row of
+-- that batch. The same lookup as 0073 / 0074 open_pallet_leftovers, so the cancel path and this
+-- view agree on what "the leftover" is.
+join lateral (
+  select i.* from public.inventory i
+  where i.bin_id = pk.from_bin_id and i.item_id = pk.item_id
+    and coalesce(i.batch_lot, '') = coalesce(pk.batch_lot, '')
+  order by (coalesce(i.expiry_date, '0001-01-01'::date) = coalesce(pk.expiry_date, '0001-01-01'::date)) desc, i.id
+  limit 1
+) i on true
+-- The relokasi this pick was paired with: adjacent (the pair rule of the wave page) first, then
+-- nearest. One ordered choice, so a pick can never list twice and the destination is
+-- deterministic (0073 / 0074 posted_pallet_move_seq makes the same single choice).
+join lateral (
+  select m.* from public.pick_tasks m
+  where m.task_type = 'REPLENISH' and m.status = 'COMPLETED'
+    and m.wave_id = pk.wave_id and m.item_id = pk.item_id
+    and m.from_bin_id = pk.from_bin_id
+    and coalesce(m.batch_lot, '') = coalesce(pk.batch_lot, '')
+  order by (abs(m.seq - pk.seq) = 1) desc, abs(m.seq - pk.seq), m.seq
+  limit 1
+) m on true
 join public.bins tb          on tb.id = m.to_bin_id
-join public.inventory i      on i.bin_id = pk.from_bin_id and i.item_id = pk.item_id
-                            and coalesce(i.batch_lot, '') = coalesce(pk.batch_lot, '')
-                            and i.expiry_date is not distinct from pk.expiry_date
 where pk.task_type = 'PICK' and pk.status = 'CANCELLED'
   and i.quantity > 0
-  -- the pair rule of the wave page (pair-moves.ts / posted_pallet_move_seq), or the relokasi
-  -- is the only one of this wave that left this bin identity after the pick was planned
-  and (abs(m.seq - pk.seq) = 1
-       or not exists (select 1 from public.pick_tasks m2
-                      where m2.task_type = 'REPLENISH' and m2.wave_id = pk.wave_id
-                        and m2.from_bin_id = pk.from_bin_id and m2.item_id = pk.item_id
-                        and m2.id <> m.id and m2.status = 'COMPLETED'))
   -- an open task still draws from this bin identity: those cartons are its stock
   and not exists (select 1 from public.open_pick_tasks t
                   where t.task_type in ('PICK', 'REPLENISH') and t.from_bin_id = pk.from_bin_id
