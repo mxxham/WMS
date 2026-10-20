@@ -32,6 +32,7 @@ import { ProblemsSummary, type ProblemCounts } from "./problems-summary";
 import { useIsPhone } from "./use-is-phone";
 import { NO_FILTER, filterActive, foldDone, lineCancelled, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
 import { WavePrimary } from "./wave-primary";
+import { DoButton } from "./do-dialog";
 
 export type { OutboundDetail, TaskWait } from "./wave-parts";
 export { rowMatches, lineIds, lineDone, lineCancelled, type RowFilter, type WaveModel } from "./wave-model";
@@ -50,7 +51,7 @@ const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSh
  * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
  * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [] }: {
+export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
   date: string; prevDate: string | null; nextDate: string | null;
   role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
@@ -67,6 +68,8 @@ export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outb
   corrections?: PicklistCorrection[];
   /** Minta supervisor (0067): picker lines the picking screen could not post */
   requests?: LineRequest[];
+  /** manual DO numbers per wave+shipment (0079), keyed `${wave_id}|${shipment_number}` */
+  dos?: Record<string, string[]>;
 }) {
   const router = useRouter();
   const phone = useIsPhone();
@@ -134,7 +137,7 @@ export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outb
 
   const model: WaveModel = {
     date, prevDate, nextDate, waves, tasks, outbound, supervisor, rpc, onDone: () => router.refresh(),
-    short, waits, audit, rest: restNotesFromTasks(waves, tasks),
+    short, waits, audit, rest: restNotesFromTasks(waves, tasks), dos,
     // 0073: picks whose pallet's relokasi is already posted (posted alone to unblock another
     // wave) may not be cancelled: the moved cartons stay moved and the pickface keeps the rest.
     postedMoveOf: new Map([...movesOfPicks([...tasks].sort((a, b) => a.seq - b.seq), { anyState: true })]
@@ -142,6 +145,8 @@ export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outb
     facts, ordered: waveOrder([...facts.values()]).map((f) => waves.find((w) => w.id === f.id)!),
     step, problems,
     posted: live.filter((t) => t.status === "COMPLETED").length, total: live.length,
+    // Day progress in waves: closing (Tutup) or cancelling one moves the numerator.
+    wavesDone: waves.filter((w) => w.status === "COMPLETED" || w.status === "CANCELLED").length, wavesTotal: waves.length,
     postedQty: live.filter((t) => t.status === "COMPLETED").reduce((s, t) => s + Number(t.actual_quantity ?? t.quantity), 0),
     totalQty: live.reduce((s, t) => s + Number(t.quantity), 0),
     panels: (layout) => (
@@ -208,7 +213,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
   const active = filterActive(filter);
   return (
     <>
-      <DayBar date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} posted={m.posted} total={m.total} postedQty={m.postedQty} totalQty={m.totalQty} step={m.step} onStep={goStep} dayMenu={m.dayMenu()} />
+      <DayBar date={m.date} prevDate={m.prevDate} nextDate={m.nextDate} posted={m.posted} total={m.total} waveDone={m.wavesDone} waveTotal={m.wavesTotal} postedQty={m.postedQty} totalQty={m.totalQty} step={m.step} onStep={goStep} dayMenu={m.dayMenu()} />
       <ProblemsSummary counts={m.problems} open={problemsOpen} onOpenChange={setProblemsOpen}>{m.panels("desktop")}</ProblemsSummary>
 
       {m.waves.length === 0 ? (
@@ -290,7 +295,19 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
               {w.status !== "PENDING" && <StatusTag status={w.status} />}
               {w.shipment_numbers.map((sh) => {
                 const st = m.audit[`${w.id}|${sh}`];
-                return <span key={sh} className="tabular">{sh}{st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}</span>;
+                const key = `${w.id}|${sh}`;
+                const shipmentDos = m.dos[key] ?? [];
+                return (
+                  <span key={sh} className="tabular">
+                    {sh}
+                    {st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}
+                    {shipmentDos.length > 0 && (
+                      <span className="ml-1.5 text-xs text-steel-400 tabular">
+                        DO: {shipmentDos.slice(0, 2).join(", ")}{shipmentDos.length > 2 ? ` +${shipmentDos.length - 2}` : ""}
+                      </span>
+                    )}
+                  </span>
+                );
               })}
               {(w.truck || w.destination) && <span className="text-steel-500">{[w.truck, w.destination].filter(Boolean).join(" · ")}</span>}
             </span>
@@ -310,6 +327,7 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
           <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop"
             onStartPicking={() => { setSheet(false); setPicking(true); if (!open) onToggle(); }}
             onPrint={() => m.printWave(w)} onOpenSheet={() => { setSheet(true); setSheetFromRequest(false); if (!open) onToggle(); }} />
+          <DoButton wave={w} shipments={w.shipment_numbers} dos={m.dos} supervisor={m.supervisor} rpc={m.rpc} />
         </div>
       </div>
 
@@ -381,9 +399,11 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
       </div>
       {showOrders && (
         <Table>
-          <thead><tr>{["Shipment", "SKU", "Deskripsi", "Diminta", "Teralokasi", "Terambil", "Kekurangan", "Status", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
+          <thead><tr>{["Shipment", "SKU", "Deskripsi", "Diminta", "Teralokasi", "Terambil", "Kekurangan", "Status", "DO", ""].map((h) => <Th key={h}>{h}</Th>)}</tr></thead>
           <tbody>{outbound.map((o, i) => {
             const gap = Number(o.quantity_requested) - Number(o.quantity_allocated);
+            const key = `${w.id}|${o.shipment_number}`;
+            const shipmentDos = m.dos[key] ?? [];
             return (
               <tr key={i}>
                 <Td>{o.shipment_number}</Td><Td>{o.sku}</Td><Td>{o.description}</Td>
@@ -392,6 +412,7 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
                 <Td className={cn("text-right", o.status === "COMPLETED" && Number(o.quantity_picked) < Number(o.quantity_allocated) && "font-semibold text-bad")}>{fmtNum(Number(o.quantity_picked))}</Td>
                 <Td className={cn(gap > 0 && "font-semibold text-bad")}>{gap > 0 ? `${fmtNum(gap)} · ${REASON[o.shortage_reason ?? ""] ?? o.shortage_reason ?? ""}` : "–"}</Td>
                 <Td><StatusTag status={o.status} /></Td>
+                <Td className="tabular">{shipmentDos.length > 0 ? shipmentDos.join(", ") : <span className="text-steel-500">—</span>}</Td>
                 <Td>{m.supervisor && w.status !== "CANCELLED" && (
                   <OrderQtyButton waveId={w.id} shipment={o.shipment_number} sku={o.sku} description={o.description}
                     requested={Number(o.quantity_requested)} picked={Number(o.quantity_picked)} />

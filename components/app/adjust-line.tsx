@@ -15,9 +15,10 @@ export type AdjustLine = { bin_code: string; sku: string; batch_lot: string; exp
 /**
  * Adjust one stock line from wherever it is listed (Inventory), without going
  * to Adjust stok and finding it again. Same rules as the bin page: type the
- * quantity physically there (or a +/- change), a reason code and a note; up to
- * the policy's approval limit it is posted as an adjustment movement, above it
- * it becomes a request someone else approves (Inventory → Persetujuan, 0018).
+ * quantity physically there (or a +/- change), a reason code (its label is stored
+ * as the note); up to the policy's approval limit it is posted as an adjustment
+ * movement, above it it becomes a request someone else approves
+ * (Inventory → Persetujuan, 0018).
  */
 export function AdjustLineButton({ line }: { line: AdjustLine }) {
   const router = useRouter();
@@ -26,7 +27,6 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
   const [mode, setMode] = useState<"count" | "delta">("count");
   const [value, setValue] = useState("");
   const [reason, setReason] = useState<ReasonCode | "">("");
-  const [note, setNote] = useState("");
   const [limit, setLimit] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,12 +40,12 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
     : !Number.isInteger(v) ? "Isi bilangan bulat."
     : delta === 0 ? "Tidak ada perubahan."
     : after! < 0 ? `Hasil akan negatif (stok ${fmtNum(cur)}).` : null;
-  const ready = delta !== null && !problem && !!reason && note.trim().length > 0 && person.trim().length >= 2;
+  const ready = delta !== null && !problem && !!reason && person.trim().length >= 2;
 
   async function onOpen(o: boolean) {
     setOpen(o); setError(null);
     if (!o) return;
-    setMode("count"); setValue(""); setReason(""); setNote("");
+    setMode("count"); setValue(""); setReason("");
     const { data } = await createClient().rpc("inventory_policy");
     setLimit(Number((data as { adjust_approval_qty?: number } | null)?.adjust_approval_qty ?? 20));
   }
@@ -55,10 +55,11 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
     setBusy(true); setError(null);
     const db = createClient();
     let err: { message: string } | null = null;
+    const adjNote = REASON_CODES[reason];
     if (needsApproval) {
       ({ error: err } = await db.rpc("request_adjustment", {
         p_bin_code: line.bin_code, p_sku: line.sku, p_batch: line.batch_lot, p_expiry: line.expiry_date, p_qty: delta,
-        p_reason_code: reason, p_note: note.trim(), p_by_name: person,
+        p_reason_code: reason, p_note: adjNote, p_by_name: person,
       }));
     } else {
       const [{ data: bin }, { data: item }, { data: auth }] = await Promise.all([
@@ -69,7 +70,7 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
       if (!bin || !item) err = { message: `Bin ${line.bin_code} atau SKU ${line.sku} tidak ditemukan.` };
       else ({ error: err } = await db.from("movements").insert({
         type: "adjustment", item_id: item.id, batch_lot: line.batch_lot, quantity: delta, to_bin_id: bin.id, expiry_date: line.expiry_date,
-        note: note.trim(), reason_code: reason, by_name: person.trim(), user_id: auth?.claims.sub,
+        note: adjNote, reason_code: reason, by_name: person.trim(), user_id: auth?.claims.sub,
       }));
     }
     setBusy(false);
@@ -94,18 +95,12 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
             <Label htmlFor="adj-v">{mode === "count" ? "Jumlah yang benar-benar ada di bin" : "Perubahan (+ tambah, − kurangi)"}</Label>
             <Input id="adj-v" type="number" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} className="w-40" autoFocus />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="adj-r">Kode alasan</Label>
-              <Select id="adj-r" value={reason} onChange={(e) => setReason(e.target.value as ReasonCode)}>
-                <option value="">Pilih…</option>
-                {MANUAL_REASONS.map((r) => <option key={r} value={r}>{REASON_CODES[r]}</option>)}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="adj-n">Keterangan (wajib)</Label>
-              <Input id="adj-n" value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. fisik kosong saat pick NO 6 #8" />
-            </div>
+          <div className="space-y-4">
+            <Label htmlFor="adj-r">Kode alasan</Label>
+            <Select id="adj-r" value={reason} onChange={(e) => setReason(e.target.value as ReasonCode)}>
+              <option value="">Pilih…</option>
+              {MANUAL_REASONS.map((r) => <option key={r} value={r}>{REASON_CODES[r]}</option>)}
+            </Select>
           </div>
           <PersonNameField id="adj-person" value={person} onChange={setPerson} label="Nama Anda" />
           {delta !== null && !problem && (

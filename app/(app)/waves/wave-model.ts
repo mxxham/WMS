@@ -35,10 +35,14 @@ export type WaveModel = {
   waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   supervisor: boolean; rpc: Rpc; onDone: () => void;
   short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
+  /** manual DO numbers per wave+shipment (0079), keyed `${wave_id}|${shipment_number}` */
+  dos: Record<string, string[]>;
   /** pick id → its pallet's relokasi when that relokasi is already posted (0073): cancelling finishes the pallet break */
   postedMoveOf: Map<string, TaskRow>;
   facts: Map<string, WaveFacts>; ordered: WaveRow[]; step: DayStep; problems: ProblemCounts;
   posted: number; total: number; postedQty?: number; totalQty?: number;
+  /** waves already finished (COMPLETED or CANCELLED — both final) out of all waves on the day */
+  wavesDone: number; wavesTotal: number;
   /** the existing Perlu ditangani panels, unchanged */
   panels: (layout: "desktop" | "phone") => ReactNode;
   /** the day's menu: Tambah order, the PDFs, Hitung ulang; an icon-only trigger on the phone */

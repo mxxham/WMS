@@ -41,6 +41,15 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   const prevDate = (recent?.[0]?.planned_date as string | undefined) ?? null;
   const nextDate = (after?.[0]?.planned_date as string | undefined) ?? null;
 
+  // Fetch manual DO numbers for this date's waves (0079).
+  const waveIds = (waves ?? []).map((w) => w.id);
+  const { data: dosRows } = waveIds.length > 0
+    ? await supabase.from("shipment_do_no").select("wave_id, shipment_number, do_nos").in("wave_id", waveIds)
+    : { data: null };
+  const dos: Record<string, string[]> = Object.fromEntries(
+    (dosRows ?? []).map((r) => [`${r.wave_id}|${r.shipment_number}`, (r.do_nos as string[]) ?? []])
+  );
+
   return (
     <main>
       <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads", "pick_line_requests"]} />
@@ -60,6 +69,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           lastImport={(lastImport?.[0]?.created_at as string | undefined) ?? null}
           corrections={(corrections ?? []) as PicklistCorrection[]}
           requests={(requests ?? []) as LineRequest[]}
+          dos={dos}
         />
       </div>
     </main>

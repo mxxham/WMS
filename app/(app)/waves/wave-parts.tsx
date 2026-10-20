@@ -41,8 +41,36 @@ export const AddItems = dynamic(() => import("./add-order").then((m) => m.AddIte
 export async function printPicklists(waves: WaveRow[], allWaves: WaveRow[], tasks: TaskRow[], outbound: OutboundRow[], filename: string) {
   const { downloadPicklistPdf } = await import("@/lib/allocator/browser/downloads");
   const bins = [...new Set(tasks.flatMap((t) => [t.from_bin, t.to_bin, t.actual_from_bin]).filter((b): b is string => !!b))];
-  const { data } = await createClient().from("inventory_detail").select("bin_code, sku, batch_lot, expiry_date, quantity").in("bin_code", bins);
-  downloadPicklistPdf(picklistsFromTasks(waves, tasks, outbound, (data ?? []) as StockNow[], allWaves), undefined, filename);
+  const invPromise = createClient().from("inventory_detail").select("bin_code, sku, batch_lot, expiry_date, quantity").in("bin_code", bins);
+  const dosPromise = createClient().from("shipment_do_no").select("wave_id, shipment_number, do_nos").in("wave_id", waves.map((w) => w.id));
+
+  const [{ data: inv }, dosResult] = await Promise.all([invPromise, dosPromise]);
+
+  // Build Map keyed `${waveNo}|${shipment}` for manual DOs.
+  const manualDos = new Map<string, string[]>();
+  if (dosResult.error) {
+    console.error("[printPicklists] Failed to fetch manual DOs:", dosResult.error.message);
+  } else {
+    const waveNoById = new Map(waves.map((w) => [w.id, w.wave_no]));
+    for (const r of dosResult.data ?? []) {
+      const waveNo = waveNoById.get(r.wave_id);
+      if (waveNo) manualDos.set(`${waveNo}|${r.shipment_number}`, (r.do_nos as string[]) ?? []);
+    }
+  }
+
+  // Generate picklists and merge manual DOs into each picklist's orderNos.
+  const picklists = picklistsFromTasks(waves, tasks, outbound, (inv ?? []) as StockNow[], allWaves);
+  for (const pl of picklists) {
+    const key = `${pl.waveNo}|${pl.shipmentNumbers[0] ?? ''}`;
+    const manual = manualDos.get(key);
+    if (manual?.length) {
+      const merged = [...pl.orderNos];
+      for (const d of manual) if (!merged.includes(d)) merged.push(d);
+      pl.orderNos = merged;
+    }
+  }
+
+  downloadPicklistPdf(picklists, undefined, filename);
 }
 
 export async function printBinToBin(waves: WaveRow[], tasks: TaskRow[], filename: string) {
@@ -55,14 +83,38 @@ export async function printExcel(waves: WaveRow[], allWaves: WaveRow[], tasks: T
   const bins = [...new Set(tasks.flatMap((t) => [t.from_bin, t.to_bin, t.actual_from_bin]).filter((b): b is string => !!b))];
   const invPromise = bins.length
     ? db.from("inventory_detail").select("bin_code, sku, batch_lot, expiry_date, quantity").in("bin_code", bins)
-    : Promise.resolve({ data: [] as any });
+    : Promise.resolve({ data: [] as any, error: null });
   const pfPromise = db.from("pickface_detail").select("sku, bin_code");
   const itemsPromise = db.from("items").select("sku, description, upp");
-  const [{ data: inv }, { data: pf }, { data: items }] = await Promise.all([invPromise, pfPromise, itemsPromise]);
+  const dosPromise = db.from("shipment_do_no").select("wave_id, shipment_number, do_nos").in("wave_id", waves.map((w) => w.id));
+  const [invResult, pfResult, itemsResult, dosResult] = await Promise.all([invPromise, pfPromise, itemsPromise, dosPromise]);
+
+  // Build Map keyed `${waveNo}|${shipment}` for manual DOs.
+  const manualDos = new Map<string, string[]>();
+  if (dosResult.error) {
+    console.error("[printExcel] Failed to fetch manual DOs:", dosResult.error.message);
+  } else {
+    const waveNoById = new Map(waves.map((w) => [w.id, w.wave_no]));
+    for (const r of dosResult.data ?? []) {
+      const waveNo = waveNoById.get(r.wave_id);
+      if (waveNo) manualDos.set(`${waveNo}|${r.shipment_number}`, (r.do_nos as string[]) ?? []);
+    }
+  }
 
   const { downloadAllocationWorkbook } = await import("@/lib/allocator/browser/downloads");
   const { buildMovementReport } = await import("@/lib/allocator/movement");
-  const picklists = picklistsFromTasks(waves, tasks, outbound, (inv ?? []) as StockNow[], allWaves);
+  const picklists = picklistsFromTasks(waves, tasks, outbound, (invResult.data ?? []) as StockNow[], allWaves);
+
+  // Merge manual DOs into each picklist's orderNos.
+  for (const pl of picklists) {
+    const key = `${pl.waveNo}|${pl.shipmentNumbers[0] ?? ''}`;
+    const manual = manualDos.get(key);
+    if (manual?.length) {
+      const merged = [...pl.orderNos];
+      for (const d of manual) if (!merged.includes(d)) merged.push(d);
+      pl.orderNos = merged;
+    }
+  }
 
   const descBySku = new Map(tasks.map((t) => [t.sku, t.description]));
   const shortages = (outbound ?? [])
@@ -95,10 +147,10 @@ export async function printExcel(waves: WaveRow[], allWaves: WaveRow[], tasks: T
   const movement = buildMovementReport(result);
 
   let pickfaces: Map<string, any> | undefined;
-  if (pf?.length) {
-    const itemMap = new Map((items ?? []).map((i: any) => [i.sku, i]));
+  if (pfResult.data?.length) {
+    const itemMap = new Map((itemsResult.data ?? []).map((i: any) => [i.sku, i]));
     const m = new Map();
-    for (const p of pf) {
+    for (const p of pfResult.data) {
       const it = itemMap.get(p.sku);
       m.set(p.sku, {
         sku: p.sku,

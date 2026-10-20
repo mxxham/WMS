@@ -11,6 +11,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { fmtDate, fmtNum } from "@/lib/utils";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { StatusIcon } from "@/components/ui/status-icon";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export function DataQualityClient({ issues, countBins }: { issues: Issue[]; countBins: string[] }) {
   const kinds = Object.keys(ISSUES) as IssueKind[];
@@ -38,6 +39,7 @@ export function DataQualityClient({ issues, countBins }: { issues: Issue[]; coun
           <Card key={k} id={k}>
             <CardHeader><CardTitle>{ISSUES[k].title} · {fmtNum(list.length)}</CardTitle><p className="text-xs text-steel-500">{ISSUES[k].why}</p></CardHeader>
             <CardContent>
+              <BulkFix kind={k} list={list} counting={counting} person={person} />
               <Table>
                 <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Batch</Th><Th>Expired</Th><Th className="text-right">Qty</Th><Th>Catatan</Th><Th>Perbaikan</Th></tr></thead>
                 <tbody>{list.map((i) => (
@@ -100,5 +102,214 @@ function Fix({ issue, counting, person }: { issue: Issue; counting: boolean; per
       })}>Koreksi</Button>
       {error && <p role="alert" className="w-full text-xs text-bad">{error}</p>}
     </div>
+  );
+}
+
+function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issue[]; counting: Set<string>; person: string }) {
+  const router = useRouter();
+  const fix = ISSUES[kind].fix;
+  const [open, setOpen] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0, running: false });
+  const [results, setResults] = useState<{ ok: number; fail: number; errors: string[] } | null>(null);
+
+  // For "count" kinds: collect distinct bins not already counting
+  const targetBins = fix === "count"
+    ? Array.from(new Set(list.map((i) => i.row.bin_code))).filter((b) => !counting.has(b))
+    : [];
+
+  // For "batch"/"expiry" kinds: rows with a suggestion
+  // For batch_multi_expiry, exclude rows where recorded expiry already equals the suggestion (no change needed)
+  const autoRows = fix !== "count"
+    ? list.filter((i) => {
+        const hasBatch = (i.suggestedBatch?.trim() ?? "") !== "";
+        const hasExpiry = (i.suggestedExpiry?.trim() ?? "") !== "";
+        if (!hasBatch && !hasExpiry) return false;
+        if (kind === "batch_multi_expiry" && i.suggestedExpiry && i.row.expiry_date === i.suggestedExpiry) return false;
+        return true;
+      })
+    : [];
+
+  const canRun = person.trim().length >= 2;
+
+  if (fix === "count") {
+    if (targetBins.length === 0) return null;
+    return (
+      <div className="mb-3">
+        <Button
+          size="sm" variant="outline"
+          disabled={!canRun}
+          title={!canRun ? "Isi nama petugas di atas" : undefined}
+          onClick={() => { setProgress({ done: 0, total: targetBins.length, running: true }); setResults(null); setOpen(true); }}
+        >
+          Buat tugas hitung ({targetBins.length} bin)
+        </Button>
+        <BulkDialog
+          open={open} onClose={setOpen}
+          title={ISSUES[kind].title} count={targetBins.length}
+          summary={`Bin yang akan dibuatkan tugas hitung: ${targetBins.slice(0, 10).join(", ")}${targetBins.length > 10 ? " …" : ""}`}
+          detail="Setiap bin mendapat satu tugas hitung (upsert aman — bin yang sudah terbuka hanya tambah alasan)."
+          warning="Koreksi tidak diposting untuk baris yang dipakai wave terbuka atau sudah berubah; daftar gagal ditampilkan setelahnya."
+          progress={progress} results={results}
+          canRun={canRun}
+          onConfirm={async () => {
+            const errors: string[] = [];
+            let ok = 0;
+            for (let idx = 0; idx < targetBins.length; idx++) {
+              const bin = targetBins[idx];
+              try {
+                const { error } = await createClient().rpc("create_count_task", {
+                  p_bin_code: bin,
+                  p_reason: `${ISSUES[kind].title}: bulk`,
+                  p_source: "DATA_QUALITY",
+                });
+                if (error) errors.push(`${bin}: ${error.message}`);
+                else ok++;
+              } catch (e) {
+                errors.push(`${bin}: ${(e as Error).message}`);
+              }
+              setProgress((p) => ({ ...p, done: idx + 1 }));
+            }
+            setResults({ ok, fail: errors.length, errors });
+            setProgress((p) => ({ ...p, running: false }));
+            router.refresh();
+          }}
+        />
+      </div>
+    );
+  }
+
+  // batch / expiry kinds
+  if (autoRows.length === 0) {
+    return (
+      <div className="mb-3">
+        <span className="text-xs text-steel-500">Tidak ada perbaikan otomatis — cek label fisik per baris</span>
+      </div>
+    );
+  }
+
+  const hasManual = list.length > autoRows.length;
+  const sourceText = fix === "batch"
+    ? "batch dikembalikan ke nomor asli dari angka seri Excel"
+    : fix === "expiry" && kind === "expiry_missing"
+    ? "expired diisi dari kode batch (cek label)"
+    : "expired disamakan dengan kode batch (produksi + umur simpan item)";
+
+  return (
+    <div className="mb-3">
+      <Button
+        size="sm"
+        disabled={!canRun}
+        title={!canRun ? "Isi nama petugas di atas" : undefined}
+        onClick={() => { setProgress({ done: 0, total: autoRows.length, running: true }); setResults(null); setOpen(true); }}
+      >
+        Perbaiki semua otomatis ({autoRows.length} baris)
+      </Button>
+      {hasManual && <p className="text-xs text-steel-500 mt-1">{list.length - autoRows.length} baris butuh cek label manual</p>}
+      <BulkDialog
+        open={open} onClose={setOpen}
+        title={ISSUES[kind].title} count={autoRows.length}
+        summary={`Baris yang akan dikoreksi: ${autoRows.length} dari ${list.length}`}
+        detail={sourceText}
+        warning="Koreksi tidak diposting untuk baris yang dipakai wave terbuka atau sudah berubah; daftar gagal ditampilkan setelahnya."
+        progress={progress} results={results}
+        canRun={canRun}
+        onConfirm={async () => {
+          const errors: string[] = [];
+          let ok = 0;
+          for (let idx = 0; idx < autoRows.length; idx++) {
+            const i = autoRows[idx];
+            const r = i.row;
+            const newBatch = i.suggestedBatch?.trim() ?? null;
+            const newExpiry = i.suggestedExpiry?.trim() ?? null;
+            let reason = "";
+            if (kind === "batch_is_date") reason = "Batch terbaca sebagai tanggal oleh Excel";
+            else if (kind === "expiry_vs_batch") reason = `Expired disamakan dengan kode batch ${r.batch_lot}`;
+            else if (kind === "batch_multi_expiry") reason = "Satu batch, dua expired; disamakan dengan kode batch";
+            else if (kind === "expiry_missing") reason = "Expired diisi dari kode batch (cek label)";
+            try {
+              const { error } = await createClient().rpc("correct_stock_identity", {
+                p_bin_code: r.bin_code, p_sku: r.sku, p_batch: r.batch_lot, p_expiry: r.expiry_date,
+                p_new_batch: newBatch, p_new_expiry: newExpiry, p_reason: reason, p_by_name: person,
+              });
+              if (error) errors.push(`${r.bin_code}/${r.sku}/${r.batch_lot}: ${error.message}`);
+              else ok++;
+            } catch (e) {
+              errors.push(`${r.bin_code}/${r.sku}/${r.batch_lot}: ${(e as Error).message}`);
+            }
+            setProgress((p) => ({ ...p, done: idx + 1 }));
+          }
+          setResults({ ok, fail: errors.length, errors });
+          setProgress((p) => ({ ...p, running: false }));
+          router.refresh();
+        }}
+      />
+    </div>
+  );
+}
+
+function BulkDialog({
+  open, onClose,
+  title, count, summary, detail, warning,
+  progress, results,
+  onConfirm,
+  canRun,
+}: {
+  open: boolean; onClose: (v: boolean) => void;
+  title: string; count: number;
+  summary: string; detail: string; warning: string;
+  progress: { done: number; total: number; running: boolean };
+  results: { ok: number; fail: number; errors: string[] } | null;
+  onConfirm: () => Promise<void>;
+  canRun: boolean;
+}) {
+  if (!open) return null;
+  const done = progress.done;
+  const total = progress.total;
+  const running = progress.running;
+  const finished = results !== null;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent title={`Perbaiki massal: ${title}`} description={`${count} item akan diproses.`} className="max-w-md sm:w-[36rem]">
+        <div className="space-y-3 text-sm">
+          <div><strong>Ringkasan:</strong> <span className="text-steel-700">{summary}</span></div>
+          <div><strong>Sumber nilai:</strong> <span className="text-steel-700">{detail}</span></div>
+          <div className="text-bad text-xs"><strong>Peringatan:</strong> {warning}</div>
+        </div>
+
+        {running && (
+          <div className="mt-4 text-center text-lg font-cond tabular">
+            Memproses… {done}/{total}
+          </div>
+        )}
+
+        {finished && (
+          <div className="mt-4 space-y-2">
+            <div className="text-center text-lg font-cond">
+              Selesai: <span className="text-good">{results.ok} berhasil</span>{results.fail > 0 ? `, <span className="text-bad">{results.fail} gagal</span>` : ""}
+            </div>
+            {results.fail > 0 && (
+              <div className="max-h-40 overflow-auto text-xs text-bad border-t pt-2">
+                {results.errors.slice(0, 8).map((e, idx) => <div key={idx} className="font-mono">{e}</div>)}
+                {results.errors.length > 8 && <div>… dan {results.errors.length - 8} lagi</div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          {running ? (
+            <Button disabled>Diproses…</Button>
+          ) : finished ? (
+            <Button onClick={() => onClose(false)}>Tutup</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onClose(false)}>Batal</Button>
+              <Button onClick={onConfirm} disabled={!canRun || count === 0}>Perbaiki {count}</Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

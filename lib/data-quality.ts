@@ -45,7 +45,10 @@ export function findIssues(rows: StockRow[], todayIso: string, shelfLifeBySku: M
       const y = Number(r.batch_lot.slice(0, 4));
       out.push({ kind: "batch_is_date", row: r, detail: `batch "${r.batch_lot}"`, suggestedBatch: y > 2100 ? String(isoToExcelSerial(r.batch_lot)) : undefined });
     }
-    if (!r.expiry_date && r.zone !== "QUARANTINE") out.push({ kind: "expiry_missing", row: r, detail: `${r.quantity} ctn` });
+    if (!r.expiry_date && r.zone !== "QUARANTINE") {
+      const expected = expectedExpiry(r.batch_lot, shelfLifeBySku.get(r.sku) ?? defaultShelfLife);
+      out.push({ kind: "expiry_missing", row: r, detail: `${r.quantity} ctn`, suggestedExpiry: expected ?? undefined });
+    }
     if (r.expiry_date) {
       const expected = expectedExpiry(r.batch_lot, shelfLifeBySku.get(r.sku) ?? defaultShelfLife);
       const recorded = r.expiry_date.slice(0, 10);

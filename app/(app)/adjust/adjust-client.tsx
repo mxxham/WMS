@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, Plus, Replace, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeftRight, Minus, Plus, Replace, Search, SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { AdjustDialog } from "@/components/bin/movement-actions";
+import { AdjustDialog, DirSign } from "@/components/bin/movement-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -138,7 +138,7 @@ function ReplaceItemDialog({ binCode, row, onClose, onDone }: { binCode: string;
   const [batch, setBatch] = useState(row.batch_lot);
   const [expiry, setExpiry] = useState(row.expiry_date ?? "");
   const [qty, setQty] = useState(String(Number(row.quantity)));
-  const [reason, setReason] = useState("");
+  const [dir, setDir] = useState<1 | -1>(1);
   const [code, setCode] = useState<ReasonCode>("DATA_ENTRY");
   const [person, setPerson] = usePersonName();
   const [approver, setApprover] = useState("");
@@ -148,26 +148,25 @@ function ReplaceItemDialog({ binCode, row, onClose, onDone }: { binCode: string;
   useEffect(() => {
     createClient().rpc("inventory_policy").then(({ data }) => setLimit(Number((data as { adjust_approval_qty?: number } | null)?.adjust_approval_qty ?? 20)));
   }, []);
-  const needsApprover = Math.max(Number(row.quantity), Number(qty) || 0) > limit;
+  const needsApprover = Math.max(Number(row.quantity), Math.abs(Number(qty)) || 0) > limit;
 
   async function review(e: React.FormEvent) {
     e.preventDefault(); setError(null);
-    const n = Number(qty);
+    const n = Number(qty) * dir;
     if (person.trim().length < 2) return setError("Isi nama petugas.");
     if (needsApprover && approver.trim().length < 2) return setError(`Di atas ${fmtNum(limit)} unit: isi nama penyetuju (orang lain).`);
     if (!sku.trim()) return setError("Isi SKU yang benar.");
     if (!expiry) return setError("Isi tanggal expired item yang benar.");
-    if (!Number.isFinite(n) || n <= 0) return setError("Jumlah harus lebih dari 0.");
-    if (!reason.trim()) return setError("Alasan wajib diisi (jejak audit).");
+    if (!Number.isFinite(n) || Math.abs(n) <= 0) return setError("Jumlah harus lebih dari 0.");
     const { data: item } = await createClient().from("items").select("sku, description, uom").eq("sku", sku.trim()).maybeSingle();
     if (!item) return setError(`SKU ${sku.trim()} tidak ada di master item.`);
     setPending({
-      summary: `${binCode}: ${oldSku} batch ${row.batch_lot || "–"} (${fmtNum(Number(row.quantity))}) diganti menjadi ${item.sku} ${item.description} batch ${batch.trim() || "–"} exp ${fmtDate(expiry)} (${fmtNum(n)} ${item.uom ?? ""}). Alasan: ${reason.trim()}.`,
+      summary: `${binCode}: ${oldSku} batch ${row.batch_lot || "–"} (${fmtNum(Number(row.quantity))}) diganti menjadi ${item.sku} ${item.description} batch ${batch.trim() || "–"} exp ${fmtDate(expiry)} (${fmtNum(n)} ${item.uom ?? ""}). Alasan: ${REASON_CODES[code]}.`,
       run: async () => {
         const { error } = await createClient().rpc("replace_stock_item", {
           p_bin_code: binCode, p_sku: oldSku, p_batch: row.batch_lot, p_expiry: row.expiry_date,
           p_new_sku: sku.trim(), p_new_batch: batch.trim(), p_new_expiry: expiry, p_new_qty: n,
-          p_reason_code: code, p_reason: reason.trim(), p_by_name: person, p_approver_name: needsApprover ? approver : null,
+          p_reason_code: code, p_reason: REASON_CODES[code], p_by_name: person, p_approver_name: needsApprover ? approver : null,
         });
         if (error) return error.message;
         onDone();
@@ -188,14 +187,36 @@ function ReplaceItemDialog({ binCode, row, onClose, onDone }: { binCode: string;
           <div><Label htmlFor="rbatch">Batch</Label><Input id="rbatch" value={batch} onChange={(e) => setBatch(e.target.value)} /></div>
           <div><Label htmlFor="rexp">Expired</Label><Input id="rexp" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} required /></div>
         </div>
-        <div><Label htmlFor="rqty">Jumlah</Label><Input id="rqty" type="number" inputMode="decimal" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} required /></div>
+        <div>
+          <Label htmlFor="dir">Arah</Label>
+          <DirSign value={dir} onChange={setDir} />
+        </div>
+        <div>
+          <Label htmlFor="rqty">Jumlah</Label>
+          <Input
+            id="rqty"
+            type="text"
+            inputMode="numeric"
+            step="any"
+            value={qty}
+            onChange={(e) => {
+              const v = e.target.value.trim().replace(/^[-+]/, "").replace(/[^\d.,]/g, "").replace(/,/g, ".");
+              const parts = v.split(".");
+              if (parts.length > 2) {
+                setQty(parts[0] + "." + parts.slice(1).join(""));
+              } else {
+                setQty(v);
+              }
+            }}
+            required
+          />
+        </div>
         <div>
           <Label htmlFor="rcode">Kode alasan</Label>
           <Select id="rcode" value={code} onChange={(e) => setCode(e.target.value as ReasonCode)}>
             {MANUAL_REASONS.map((c) => <option key={c} value={c}>{REASON_CODES[c]}</option>)}
           </Select>
         </div>
-        <div><Label htmlFor="rreason">Keterangan (wajib)</Label><Input id="rreason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="mis. salah input saat putaway" required /></div>
         <div className="grid grid-cols-2 gap-2">
           <PersonNameField id="rperson" value={person} onChange={setPerson} />
           {needsApprover && <OtherPersonField id="rapprover" label={`Penyetuju (di atas ${fmtNum(limit)} unit)`} value={approver} onChange={setApprover} notSameAs={person} />}
@@ -215,7 +236,7 @@ function SwapBinDialog({ detail, onClose, onDone }: { detail: BinDetail; onClose
   const here = detail.bin.bin_code;
   const mine: OtherLine[] = detail.inventory.map((r) => ({ sku: r.items?.sku ?? "", batch_lot: r.batch_lot, quantity: Number(r.quantity) }));
   const [other, setOther] = useState("");
-  const [reason, setReason] = useState("");
+  const [codeSel, setCodeSel] = useState<ReasonCode>("DATA_ENTRY");
   const [person, setPerson] = usePersonName();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -225,16 +246,16 @@ function SwapBinDialog({ detail, onClose, onDone }: { detail: BinDetail; onClose
     const code = other.trim().toUpperCase();
     if (!code) return setError("Isi bin yang ditukar.");
     if (code === here) return setError("Pilih bin lain.");
-    if (!reason.trim()) return setError("Alasan wajib diisi (jejak audit).");
+    if (!codeSel) return setError("Kode alasan wajib dipilih.");
     if (person.trim().length < 2) return setError("Isi nama petugas.");
     const { data, error } = await createClient().from("inventory_detail").select("sku, batch_lot, quantity").eq("bin_code", code).order("sku");
     if (error) return setError(error.message);
     const theirs = (data ?? []) as OtherLine[];
     if (mine.length === 0 && theirs.length === 0) return setError("Kedua bin kosong: tidak ada yang ditukar.");
     setPending({
-      summary: `Isi ${here} [${describe(mine)}] pindah ke ${code}, dan isi ${code} [${describe(theirs)}] pindah ke ${here}. Dicatat sebagai transfer. Alasan: ${reason.trim()}.`,
+      summary: `Isi ${here} [${describe(mine)}] pindah ke ${code}, dan isi ${code} [${describe(theirs)}] pindah ke ${here}. Dicatat sebagai transfer. Alasan: ${REASON_CODES[codeSel]}.`,
       run: async () => {
-        const { error } = await createClient().rpc("swap_bin_contents", { p_bin_a: here, p_bin_b: code, p_reason: reason.trim(), p_by_name: person });
+        const { error } = await createClient().rpc("swap_bin_contents", { p_bin_a: here, p_bin_b: code, p_reason: REASON_CODES[codeSel], p_by_name: person });
         if (error) return error.message;
         onDone();
         return null;
@@ -247,7 +268,13 @@ function SwapBinDialog({ detail, onClose, onDone }: { detail: BinDetail; onClose
       <form onSubmit={review} className="space-y-4">
         <p className="rounded-md bg-steel-100 p-3 text-sm">Tercatat di {here}: {describe(mine)}</p>
         <div><Label htmlFor="other">Bin yang isinya tertukar</Label><Input id="other" className="uppercase" autoFocus value={other} onChange={(e) => setOther(e.target.value)} placeholder="Ketik atau scan, mis. CA01C02" required /></div>
-        <div><Label htmlFor="sreason">Alasan (wajib)</Label><Input id="sreason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="mis. palet tertukar saat putaway" required /></div>
+        <div>
+          <Label htmlFor="scode">Kode alasan</Label>
+          <Select id="scode" value={codeSel} onChange={(e) => setCodeSel(e.target.value as ReasonCode)}>
+            <option value="">Pilih…</option>
+            {MANUAL_REASONS.map((c) => <option key={c} value={c}>{REASON_CODES[c]}</option>)}
+          </Select>
+        </div>
         <PersonNameField id="sperson" value={person} onChange={setPerson} />
         {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
         <Button type="submit" size="lg" className="w-full">Lihat & konfirmasi</Button>

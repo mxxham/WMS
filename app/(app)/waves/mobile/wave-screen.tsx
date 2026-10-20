@@ -13,6 +13,7 @@ import { WaveMenu } from "../wave-menu";
 import { WavePrimary } from "../wave-primary";
 import { Actual, BinChip, REASON, StatusTag, type OutboundDetail } from "../wave-parts";
 import { filterActive, foldDone, lineCancelled, lineDone, lineProps, rowMatches, type RowFilter, type WaveModel } from "../wave-model";
+import { DoButton } from "../do-dialog";
 
 const PickingPanel = dynamic(() => import("../picking-panel").then((m) => m.PickingPanel), {
   ssr: false, loading: () => <p className="p-4 text-sm text-steel-500">Membuka layar picking…</p>,
@@ -71,6 +72,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
           <p className="truncate text-xs text-steel-500 tabular">{w.shipment_numbers.join(", ")}</p>
         </div>
         <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" onStartPicking={onStartPicking} onPrint={() => m.printWave(w)} />
+        <DoButton wave={w} shipments={w.shipment_numbers} dos={m.dos} supervisor={m.supervisor} rpc={m.rpc} />
       </div>
 
       <div className={cn("space-y-3 px-4 pt-3", hasPrimary ? "pb-28" : "pb-4")}>
@@ -87,7 +89,19 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
             <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {w.shipment_numbers.map((sh) => {
                 const st = m.audit[`${w.id}|${sh}`];
-                return <span key={sh} className="tabular">{sh}{st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}</span>;
+                const key = `${w.id}|${sh}`;
+                const shipmentDos = m.dos[key] ?? [];
+                return (
+                  <span key={sh} className="tabular">
+                    {sh}
+                    {st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}
+                    {shipmentDos.length > 0 && (
+                      <span className="ml-1.5 text-xs text-steel-400 tabular">
+                        DO: {shipmentDos.slice(0, 2).join(", ")}{shipmentDos.length > 2 ? ` +${shipmentDos.length - 2}` : ""}
+                      </span>
+                    )}
+                  </span>
+                );
               })}
             </p>
           )}
@@ -181,6 +195,8 @@ function LineCard({ model: m, wave: w, item: it }: { model: WaveModel; wave: Wav
 function OrderCard({ model: m, wave: w, order: o }: { model: WaveModel; wave: WaveRow; order: OutboundRow & OutboundDetail }) {
   const gap = Number(o.quantity_requested) - Number(o.quantity_allocated);
   const pickedShort = o.status === "COMPLETED" && Number(o.quantity_picked) < Number(o.quantity_allocated);
+  const key = `${w.id}|${o.shipment_number}`;
+  const shipmentDos = m.dos[key] ?? [];
   return (
     <div className="space-y-1 rounded-lg bg-white p-3 text-sm">
       <p className="flex items-baseline justify-between gap-2"><b className="tabular">{o.sku}</b><span className="text-xs text-steel-500 tabular">{o.shipment_number}</span></p>
@@ -191,6 +207,7 @@ function OrderCard({ model: m, wave: w, order: o }: { model: WaveModel; wave: Wa
         <span className={cn(pickedShort && "font-semibold text-bad")}><span className="block text-xs text-steel-500">Terambil</span>{fmtNum(Number(o.quantity_picked))}</span>
       </p>
       {gap > 0 && <p className="font-semibold text-bad">Kurang {fmtNum(gap)} · {REASON[o.shortage_reason ?? ""] ?? o.shortage_reason ?? ""}</p>}
+      {shipmentDos.length > 0 && <p className="text-xs text-steel-400 tabular">DO: {shipmentDos.join(", ")}</p>}
       <div className="flex items-center justify-between gap-2">
         <StatusTag status={o.status} />
         {m.supervisor && w.status !== "CANCELLED" && (

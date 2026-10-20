@@ -53,7 +53,7 @@ export function DayScreen({ model: m, filter, onFilter, onOpenWave, onShowProble
           <Input autoFocus aria-label="Cari SKU, bin, shipment" placeholder="Cari SKU, bin, shipment di semua wave" value={filter.q}
             onChange={(e) => onFilter({ ...filter, q: e.target.value })} />
         )}
-        <p className="text-sm text-steel-500 tabular">{fmtNum(m.posted)}/{fmtNum(m.total)} baris diposting{m.totalQty ? ` · ${fmtNum(m.postedQty ?? 0)}/${fmtNum(m.totalQty)} karton` : ""}</p>
+        <p className="text-sm text-steel-500 tabular">{fmtNum(m.wavesDone)}/{fmtNum(m.wavesTotal)} wave · {fmtNum(m.posted)}/{fmtNum(m.total)} baris diposting{m.totalQty ? ` · ${fmtNum(m.postedQty ?? 0)}/${fmtNum(m.totalQty)} karton` : ""}</p>
         <StepLine step={m.step} onStep={onStep} />
         <ProblemsSummary counts={m.problems} open={false} onOpenChange={onShowProblems}>{null}</ProblemsSummary>
 
