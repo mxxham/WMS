@@ -6,6 +6,7 @@ import { runPipeline, type PipelineResult } from '../pipeline';
 import { buildPlan } from '../plan';
 import type { DbStockRow } from '../stock-check';
 import type { DemandLine } from '../types';
+import type { EarlierFacts } from '../earlier-waves';
 
 /**
  * Browser-side planning against the database (supabase/migrations/0007).
@@ -78,6 +79,31 @@ export async function loadDispatchRules(db: SupabaseClient): Promise<Pick<Alloca
   return {
     minRemainingShelfLifeDays: Number((policy as { min_dispatch_days?: number } | null)?.min_dispatch_days ?? 0),
     minRemainingShelfLifeDaysBySku: Object.fromEntries((items ?? []).map((i) => [i.sku as string, Number(i.min_dispatch_days)])),
+  };
+}
+
+/**
+ * Waves of EARLIER days holding any of these shipments, with their posted
+ * picks and loads per shipment: what earlier-waves.ts sortEarlier decides on.
+ */
+export async function loadEarlierWaves(db: SupabaseClient, date: string, shipments: string[]): Promise<EarlierFacts> {
+  if (shipments.length === 0) return { waves: [], posted: [], loaded: [] };
+  const waves = await fetchAll<EarlierFacts['waves'][number]>((from, to) =>
+    db.from('waves').select('id, wave_no, planned_date, status, shipment_numbers')
+      .lt('planned_date', date).overlaps('shipment_numbers', shipments).order('planned_date').order('id').range(from, to));
+  const ids = waves.map((w) => w.id);
+  if (ids.length === 0) return { waves: [], posted: [], loaded: [] };
+  const [tasks, loads] = await Promise.all([
+    fetchAll<{ wave_id: string; shipment_number: string; quantity: number; actual_quantity: number | null }>((from, to) =>
+      db.from('pick_tasks').select('wave_id, shipment_number, quantity, actual_quantity')
+        .in('wave_id', ids).in('shipment_number', shipments).eq('task_type', 'PICK').eq('status', 'COMPLETED').order('id').range(from, to)),
+    fetchAll<{ wave_id: string; shipment_number: string }>((from, to) =>
+      db.from('shipment_loads').select('wave_id, shipment_number').in('wave_id', ids).order('id').range(from, to)),
+  ]);
+  return {
+    waves,
+    posted: tasks.map((t) => ({ wave_id: t.wave_id, shipment_number: t.shipment_number, quantity: Number(t.actual_quantity ?? t.quantity) })),
+    loaded: loads,
   };
 }
 

@@ -47,7 +47,7 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
         <DownloadPickAudit date={date} />
         <div className="grid grid-cols-3 gap-3">
           {(["TODO", "MISMATCH", "DONE"] as RackState[]).map((s) => (
-            <div key={s} className="rounded-lg border-l-4 border-ckb bg-white p-3">
+            <div key={s} className="rounded-lg bg-white p-3">
               <div className="font-cond text-3xl font-semibold tabular">{fmtNum(count(s))}</div>
               <div className="text-xs text-steel-500">Rak {RACK_STATE_LABEL[s].toLowerCase()}</div>
             </div>
@@ -72,7 +72,7 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
         <DownloadPickAudit date={date} />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {(["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD", "LOADED", "PICKING"] as ShipmentState[]).map((s) => (
-            <div key={s} className="rounded-lg border-l-4 border-ckb bg-white p-3">
+            <div key={s} className="rounded-lg bg-white p-3">
               <div className="font-cond text-3xl font-semibold tabular">{fmtNum(count(s))}</div>
               <div className="text-xs text-steel-500">{SHIPMENT_STATE_LABEL[s]}</div>
             </div>

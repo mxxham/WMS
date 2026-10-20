@@ -41,5 +41,20 @@ test('more than one pallet in a rack bin is flagged once per bin, across SKUs', 
   ]), ['over_pallet:CA06A01']);
 });
 
+test('expiry_missing with date-coded batch suggests expected expiry from batch code', () => {
+  // 09F26JJ = 09 Jun 2026, +48 months = 2030-06-09
+  const issues = findIssues([row({ bin_code: 'CA07A01', batch_lot: '09F26JJ', expiry_date: null, sku: '550062460' })], '2026-09-24');
+  const miss = issues.find((i) => i.kind === 'expiry_missing');
+  assert.ok(miss, 'expiry_missing issue should exist');
+  assert.equal(miss.suggestedExpiry, '2030-06-09');
+});
+
+test('expiry_missing with non-date-coded batch has no suggested expiry', () => {
+  const issues = findIssues([row({ bin_code: 'CA08A01', batch_lot: '12658123', expiry_date: null })], '2026-09-24');
+  const miss = issues.find((i) => i.kind === 'expiry_missing');
+  assert.ok(miss, 'expiry_missing issue should exist');
+  assert.equal(miss.suggestedExpiry, undefined);
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

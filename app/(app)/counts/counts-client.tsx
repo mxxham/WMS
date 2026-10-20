@@ -14,6 +14,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { expectedExpiry, expiryCheck, MISMATCH_LABEL } from "@/lib/batch-code";
 import { COUNT_STATUS, MANUAL_REASONS, REASON_CODES, type ReasonCode } from "@/lib/inventory-control";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 type Line = { sku: string; batch_lot: string; expiry_date: string | null; quantity: number };
 type Round = { round: number; by_name: string; at: string; lines: Line[]; variance: number };
@@ -139,10 +140,10 @@ function TaskCard({ task: t, supervisor, person, shelfLife, defaultShelfLife }: 
   }
 
   return (
-    <Card className={cn("border-l-4", t.status === "COUNTED" ? "border-plate" : t.status === "RECOUNT" ? "border-bad" : "border-warn")}>
+    <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <CardTitle><Link className="underline" href={`/bin/${t.bin_code}`}>{t.bin_code}</Link> · {COUNT_STATUS[t.status]}</CardTitle>
+          <CardTitle className="flex items-center gap-2"><StatusIcon tone={t.status === "COUNTED" ? "wait" : t.status === "RECOUNT" ? "bad" : "warn"} word={COUNT_STATUS[t.status]} /><span><Link className="underline" href={`/bin/${t.bin_code}`}>{t.bin_code}</Link> · {COUNT_STATUS[t.status]}</span></CardTitle>
           <p className="text-xs text-steel-500">{SOURCE[t.source] ?? t.source} · {t.reason} · dibuat {fmtDateTime(t.created_at)}{t.created_by_name && ` oleh ${t.created_by_name}`}
             {t.rounds > 0 && ` · dihitung ${t.rounds}× (terakhir ${fmtDateTime(t.counted_at)})`}</p>
         </div>
@@ -322,8 +323,8 @@ function ScheduleCard({ schedule: s, openCount, supervisor }: { schedule: Schedu
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {tiles.map(([label, value, note, bad]) => (
-            <div key={label} className={cn("rounded-lg bg-paper p-3", bad && "border-l-4 border-warn")}>
-              <div className="text-xs text-steel-500">{label}</div>
+            <div key={label} className="rounded-lg bg-paper p-3">
+              <div className="flex items-start justify-between gap-2 text-xs text-steel-500">{label}{bad && <StatusIcon tone="warn" />}</div>
               <div className="font-cond text-3xl font-semibold tabular">{value}</div>
               <div className="text-xs text-steel-500">{note}</div>
             </div>

@@ -55,21 +55,22 @@ export function AuditList({ kind, rows }: { kind: AuditKind; rows: AuditRow[] })
     filter === "todo" ? !r.audit : filter === "mismatch" ? r.audit?.result === "MISMATCH" : filter === "deviation" ? !!r.deviation : true);
 
   const tiles: [Filter | null, string, number, string][] = [
-    ["all", kind === "PICK" ? "Pick selesai" : "Putaway", counts.all, "border-steel-300"],
-    ["todo", "Belum diaudit", counts.todo, "border-plate"],
-    [null, "Audit OK", counts.ok, "border-ok"],
-    ["mismatch", "Audit selisih", counts.mismatch, "border-bad"],
+    ["all", kind === "PICK" ? "Pick selesai" : "Putaway", counts.all, "bg-steel-300"],
+    ["todo", "Belum diaudit", counts.todo, "bg-plate-dark"],
+    [null, "Audit OK", counts.ok, "bg-ok"],
+    ["mismatch", "Audit selisih", counts.mismatch, "bg-bad"],
   ];
-  if (kind === "PICK") tiles.push(["deviation", "Picker lapor beda", counts.deviation, "border-warn"]);
+  if (kind === "PICK") tiles.push(["deviation", "Picker lapor beda", counts.deviation, "bg-warn"]);
 
   return (
     <div className="space-y-4">
       <div className={cn("grid grid-cols-2 gap-3", kind === "PICK" ? "sm:grid-cols-5" : "sm:grid-cols-4")}>
-        {tiles.map(([f, label, n, border]) => (
+        {tiles.map(([f, label, n, dot]) => (
           <button key={label} type="button" disabled={f === null} onClick={() => f && setFilter(filter === f ? "all" : f)}
-            className={cn("rounded-lg border-l-4 bg-white p-3 text-left", border, f !== null && filter === f && "ring-2 ring-ckb")}>
+            aria-pressed={f !== null ? filter === f : undefined}
+            className={cn("rounded-lg p-3 text-left", f !== null && filter === f ? "bg-ckb-tint/40 ring-2 ring-ckb" : "bg-white", f !== null && filter !== f && "hover:bg-steel-100")}>
             <div className="font-cond text-3xl font-semibold tabular">{fmtNum(n)}</div>
-            <div className="text-xs text-steel-500">{label}</div>
+            <div className="flex items-center gap-1.5 text-xs text-steel-500"><span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dot)} />{label}</div>
           </button>
         ))}
       </div>

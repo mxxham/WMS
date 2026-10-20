@@ -1,8 +1,10 @@
+import { BRAND } from "./brand";
+
 /**
  * Static configuration for WSM SUB 2. Values marked CONFIRM are assumptions
  * that must be checked against the physical warehouse before go-live.
  */
-export const WAREHOUSE_NAME = "PT Cipta Krida Bahari · WSM SUB 2 Surabaya";
+export const WAREHOUSE_NAME = `${BRAND.owner} · WSM SUB 2 Surabaya`;
 
 /** Stock expiring within this many days is shown yellow (FEFO warning). */
 export const NEAR_EXPIRY_DAYS = 90;
@@ -46,6 +48,14 @@ export const LABEL = {
   quietZoneMm: 3,
   minBinCodePt: 28,
   minInfoPt: 8,
+  /**
+   * "Strip tiang rak" on A4 portrait (210 x 297 mm): the Per sel cell layout made compact, 95 mm
+   * wide, two uprights side by side, all five levels on one sheet, no arrows.
+   * 5 + 95 + 10 + 95 + 5 = 210 across; 5 x 57 = 285 down, centred (6 mm top and bottom). QR 22 mm with Code 128 (31 mm
+   * without), still with the 3 mm quiet zone; the bin code stays >= minBinCodePt in an 11 mm band.
+   */
+  a4: { stripWidthMm: 95, gapMm: 10, marginMm: 5, cellHeightMm: 57, levelsPerSheet: 5, levels: 5,
+        qrMm: 31, qrWithCode128Mm: 22, code128Mm: 7, bandMm: 11 },
 };
 
 export type BinParts = { zone: string; rack: string | null; level: string | null; position: string | null };
@@ -79,3 +89,9 @@ export function expiryStatus(dateIso: string | null | undefined): ExpiryStatus {
   if (days <= NEAR_EXPIRY_DAYS) return "near";
   return "ok";
 }
+
+/**
+ * The one-time welcome screen with the credits (components/app/welcome-screen.tsx). false turns it
+ * off on every device, e.g. if it gets in the way on warehouse handhelds. The Kredit link still works.
+ */
+export const SHOW_WELCOME = true;

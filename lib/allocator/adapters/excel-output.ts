@@ -3,6 +3,7 @@ import { checkDigit, parseLocation } from '../pickpath';
 import { binToBin, sisaPrinted, uomLabel } from '../picklist';
 import { hasExpiry, withConfig, type AllocatorConfig } from '../config';
 import type { AllocationResult, MovementRow, PickfaceAssignment } from '../types';
+import { BRAND } from '../../../config/brand';
 
 const FONT = { name: 'Arial', size: 10 };
 const HEAD = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -23,7 +24,7 @@ export async function writePicklistWorkbook(
   config?: AllocatorConfig,
 ): Promise<void> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'K-one Allocator';
+  wb.creator = `${BRAND.appName} Allocator`;
   wb.created = result.generatedAt;
   const cfg = config ?? withConfig();
 

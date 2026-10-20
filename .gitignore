@@ -41,3 +41,6 @@ next-env.d.ts
 *.tsbuildinfo
 backups/
 /.next-prod/
+
+# Deepwork task state
+.slim/deepwork/

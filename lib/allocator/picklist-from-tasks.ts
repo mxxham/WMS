@@ -3,6 +3,8 @@ import type { AllocationLine, AllocationResult, Picklist, PickType } from './typ
 import { expiryText, withConfig } from './config';
 import { lookupUom } from './uom-master';
 import { restNoteAt, type RestStep } from './picklist';
+import { movesOfPicks } from './pair-moves';
+import { compareWaveNo } from './earlier-waves';
 
 /** One row of the `pick_task_detail` view. */
 export interface TaskRow {
@@ -32,6 +34,8 @@ export interface TaskRow {
   actual_batch_lot: string | null;
   actual_expiry_date: string | null;
   deviation_reason: string | null;
+  /** typed name of the posting (0024; on pick_task_detail since 0067) */
+  picked_by_name?: string | null;
 }
 
 export interface WaveRow {
@@ -72,9 +76,9 @@ const idKey = (bin: string, sku: string, batch: string | null, exp: string | nul
 /** The day's live tasks in execution order: waves by slot then NO, tasks by seq (the Sisa replay order). */
 function executionOrder(waves: WaveRow[], tasks: TaskRow[]): TaskRow[] {
   const slot = new Map(waves.map((w) => [w.id, w.planned_slot ?? '99:99']));
-  const waveNo = new Map(waves.map((w) => [w.id, Number(w.wave_no) || Number.MAX_SAFE_INTEGER]));
+  const waveNo = new Map(waves.map((w) => [w.id, w.wave_no]));
   return tasks.filter((t) => t.status !== 'CANCELLED' && slot.has(t.wave_id)).sort((a, b) =>
-    slot.get(a.wave_id)!.localeCompare(slot.get(b.wave_id)!) || waveNo.get(a.wave_id)! - waveNo.get(b.wave_id)! || a.seq - b.seq);
+    slot.get(a.wave_id)!.localeCompare(slot.get(b.wave_id)!) || compareWaveNo(waveNo.get(a.wave_id)!, waveNo.get(b.wave_id)!) || a.seq - b.seq);
 }
 
 /**
@@ -94,11 +98,12 @@ export function restNotesFromTasks(waves: WaveRow[], tasks: TaskRow[]): Map<stri
   const steps: RestStep[] = live.map((t) => ({ key: key(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
     moveTo: t.task_type === 'REPLENISH' && carried(t) ? t.to_bin : null }));
   const out = new Map<string, string>();
+  // Its own move (right after, or right before in older plans; one pick per move, as pairMoves) means it is not "tetap".
+  const moveOf = movesOfPicks(live, { anyState: true });
   live.forEach((t, i) => {
     if (t.task_type !== 'PICK' || !t.breaks_pallet) return;
-    // Its own move (right after, or right before in older plans) means it is not "tetap".
-    const own = [live[i + 1], live[i - 1]].some((x) => x && x.task_type === 'REPLENISH' && x.wave_id === t.wave_id
-      && x.from_bin === t.from_bin && x.sku === t.sku && x.batch_lot === t.batch_lot && x.expiry_date === t.expiry_date && carried(x));
+    const mv = moveOf.get(t.id);
+    const own = !!mv && carried(mv);
     const note = own ? null : restNoteAt(steps, i, t.from_bin);
     if (note) out.set(t.id, note);
   });
@@ -133,11 +138,13 @@ export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: Stoc
   const restSteps: RestStep[] = live.map((t, k) => ({ key: src(t), waveNo: no.get(t.wave_id) ?? '', picks: t.task_type === 'PICK',
     moveTo: t.task_type === 'REPLENISH' && r.moved[k] > 0 ? t.to_bin : null }));
   const out = new Map<string, { sisa: number; moveQty: number; moveTo: string | null; restNote: string | null }>();
+  // Its move: the REPLENISH right after (new plans) or right before (older plans) from the same pallet, and
+  // one pick per move, the same pairing as the wave page (pairMoves): a split piece next to the line's move
+  // never lists it a second time (residual N1).
+  const moveOf = movesOfPicks(live, { anyState: true });
   live.forEach((t, i) => {
     if (t.task_type !== 'PICK') return;
-    // Its move: the REPLENISH right after (new plans) or right before (older plans) from the same bin/batch.
-    const pair = [live[i + 1], live[i - 1]].find((x) => x && x.task_type === 'REPLENISH' && x.wave_id === t.wave_id
-      && x.from_bin === t.from_bin && x.sku === t.sku && x.batch_lot === t.batch_lot && x.expiry_date === t.expiry_date);
+    const pair = moveOf.get(t.id);
     const p = pair ? live.indexOf(pair) : -1;
     const j = Math.max(i, p);
     // What the replay really carried (less than planned when the shelf holds less now), so Sisa and Bin To Bin agree.
@@ -310,7 +317,7 @@ export function binToBinRowsFromResult(result: AllocationResult, asOf: string): 
       if (l.moveTo && l.moveQty > 0) lines.push(l);
     }
   }
-  lines.sort((a, b) => String(a.waveNo).localeCompare(String(b.waveNo), undefined, { numeric: true }) || a.seq - b.seq);
+  lines.sort((a, b) => compareWaveNo(String(a.waveNo), String(b.waveNo)) || a.seq - b.seq);
 
   const cfg = withConfig();
   const rank = (aisle: string) => {

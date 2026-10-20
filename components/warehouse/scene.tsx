@@ -178,12 +178,12 @@ export default function WarehouseScene({ bins, layout, mode, highlighted, focusK
 
   return (
     <Canvas frameloop="demand" camera={{ position: [extent.cx - 30, 45, extent.cz + 55], fov: 45, near: 0.1, far: 2000 }} dpr={[1, 2]}>
-      <color attach="background" args={["#F5F8F6"]} />
-      <hemisphereLight args={["#ffffff", "#A8B6B0", 1.1]} />
+      <color attach="background" args={["#F3F6F9"]} />
+      <hemisphereLight args={["#ffffff", "#A3B2BE", 1.1]} />
       <directionalLight position={[40, 60, 30]} intensity={1.2} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[extent.cx, 0, extent.cz]} receiveShadow>
         <planeGeometry args={[extent.w, extent.d]} />
-        <meshStandardMaterial color="#D9DDD6" />
+        <meshStandardMaterial color="#DDE3E8" />
       </mesh>
       <Uprights bins={placed} layout={layout} />
       <Bins bins={placed} layout={layout} mode={mode} onSelect={onSelect} />

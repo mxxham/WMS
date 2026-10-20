@@ -127,6 +127,15 @@ The replay (`relocateByWaveOrder`, then `settleSisa` in `ledger.ts`) also decide
   `qtyRemainingInBin` is what stays once the move is done too (0). The plan's REPLENISH task, the
   movement report (a REPLEN row) and stock-after-run all read this same
   `moveQty`/`moveTo`; nothing re-derives it.
+- **A reserve bin never keeps a partial.** Loose cartons belong on Level A, so a
+  sub-UPP remainder resting in a Level B–E bin is a location error, not a stock
+  level: the bin must end at 0 or a whole pallet. The engine still plans against
+  an already-open pallet in the reserve (rule 3 above); settling what that pick
+  leaves behind when it dies is the database's job — `0074` when the pick is
+  cancelled through `set_task_status` / `set_wave_status`, `0075` for what the
+  event path cannot reach (cancelled before 0074, by another path, or the pick
+  and its Bin To Bin separated by a split). `apply_movement` must not enforce it:
+  every legitimate pallet break passes through the reserve holding a partial.
 
 The Wave-page reprint replays the saved tasks from **current** stock:
 completed tasks are undone at what the picker actually did, then replayed

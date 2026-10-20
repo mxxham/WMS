@@ -9,23 +9,29 @@ this file.
 
 | Token | Value | Use |
 |---|---|---|
-| `ckb` | #135F45 | Primary action/brand green |
-| `ckb-dark` | #0E4A35 | Pressed/darker green |
-| `ckb-light` | #129B6C | Secondary green |
-| `ckb-tint` | #E7F2ED | Selected row/card wash |
-| `steel` | #1B2B25 | Primary ink |
-| `steel-700` | #2E403A | Strong secondary ink |
-| `steel-500` | #586A63 | Muted ink (notes, captions) |
-| `steel-300` | #A8B6B0 | Borders, disabled text |
-| `steel-100` | #E2E9E5 | Hover washes, table zebra |
-| `paper` | #F5F8F6 | Page background (green-tinted white) |
+| `ckb` | #0B8384 | Primary action teal: default buttons, selected toggles (white text 4.6:1) |
+| `ckb-dark` | #097172 | Pressed/hover, active nav item |
+| `ckb-light` | #0E8E8C | Secondary teal (bars, fills) |
+| `ckb-tint` | #E2F2F3 | Selected row/card wash |
+| `steel` | #102331 | Primary ink |
+| `steel-700` | #283D4C | Strong secondary ink |
+| `steel-500` | #546675 | Muted ink (notes, captions) |
+| `steel-300` | #A3B2BE | Borders, disabled text |
+| `steel-100` | #E0E7ED | Hover washes, table zebra |
+| `paper` | #F3F6F9 | Page background (navy-tinted white) |
 | `white` | #FFFFFF | Cards, forms |
 | `plate` | #F9CF54 | Shell yellow (plates, highlights) |
+| `jeir-navy` | #032741 | JE-IR WMS mark: logo tile, Home banner band |
+| `bg-jeir-side` / `bg-jeir-bar` | gradient | The banner's navy-to-teal ground: desktop sidebar / phone bottom bar |
+| `jeir-teal-dark` | #12A9A7 | Hover of the `accent` button |
+| `jeir-teal` | #18C3C1 | JE-IR WMS accent: `accent` button (navy ink), active nav item, Home welcome line. As text, only on navy (too light on white) |
 | `ok` | #2E7D4F | Success |
 | `warn` | #D9941A | Warning |
 | `bad` | #C0392B | Error/destructive |
 
-Neutrals are deliberately green-tinted to sit with the brand green. The three
+The palette follows the JE-IR WMS banner (navy + teal); the token names stay
+`ckb`/`steel` so no page had to change. Neutrals are navy-tinted to sit with the
+brand navy. `plate` stays Shell yellow because it mirrors the physical rack plates. The three
 signal colours (`ok`/`warn`/`bad`) are the only semantic colours.
 
 ## 2. Typography

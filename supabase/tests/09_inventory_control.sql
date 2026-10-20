@@ -322,13 +322,14 @@ select save_plan('2026-12-03', '{
   "outbound":[{"wave_no":"1","shipment_number":"SC1","sku":"550044709","quantity_requested":4,"quantity_allocated":4}]}'::jsonb);
 select pg_temp.as_user('op');
 select pg_temp.check('the picker''s name is required',
-  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_scanned => '8994123456789')$q$, 'Nama picker wajib%'));
-select pg_temp.check('with scan-on-pick a SKU with a barcode needs the scan',
-  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar')$q$, 'Scan barcode karton SKU 550044709%'));
-select pg_temp.check('scanning another item is refused',
-  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar', p_scanned => '550058593')$q$, 'Barang salah: yang di-scan SKU 550058593, tugas ini SKU 550044709%'));
-select pg_temp.check('the right carton posts; the movement carries the picker''s name',
-  post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar', p_scanned => '8994123456789')->>'result' = 'POSTED'
+  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_scanned => 'CG12C01')$q$, 'Nama picker wajib%'));
+-- 0068: the confirmation is the bin's rack label, always required; a carton barcode is not a bin.
+select pg_temp.check('a pick needs its bin''s label scanned (or typed)',
+  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar')$q$, 'Scan label bin dulu%'));
+select pg_temp.check('scanning the carton instead of the bin is refused',
+  pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar', p_scanned => '8994123456789')$q$, 'Bin salah: kamu scan 8994123456789, baris ini CG12C01%'));
+select pg_temp.check('the right bin posts; the movement carries the picker''s name',
+  post_task_by((select id from pick_tasks where shipment_number='SC1'), p_by_name => 'Fajar', p_scanned => 'CG12C01')->>'result' = 'POSTED'
 );
 select pg_temp.check('... recorded on the ledger',
   exists (select 1 from movements where task_id = (select id from pick_tasks where shipment_number='SC1') and by_name = 'Fajar'));

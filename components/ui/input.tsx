@@ -8,7 +8,7 @@ Input.displayName = "Input";
 
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(({ className, ...props }, ref) => (
   // Always light, also on a phone in dark mode: the native list follows color-scheme (see globals.css).
-  <select ref={ref} style={{ colorScheme: "light", ...props.style }}
+  <select ref={ref} style={{ colorScheme: "only light", ...props.style }}
     className={cn("h-10 w-full rounded-md border border-steel-300 bg-white px-2 text-sm text-steel", className)} {...props} />
 ));
 Select.displayName = "Select";

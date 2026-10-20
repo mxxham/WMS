@@ -40,9 +40,9 @@ select save_plan('2026-10-07', '{
     {"wave_no":"1","shipment_number":"RA3","sku":"550024919","quantity_requested":5,"quantity_allocated":5}]}'::jsonb);
 
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
-select post_task_by(pg_temp.task('RA1'), p_by_name => 'Budi Santoso');
-select post_task_by(pg_temp.task('RA2'), p_by_name => 'Budi Santoso');
-select post_task_by(pg_temp.task('RA3'), p_by_name => 'Rina');
+select post_task_by(pg_temp.task('RA1'), p_by_name => 'Budi Santoso', p_scanned => 'CF38C01');
+select post_task_by(pg_temp.task('RA2'), p_by_name => 'Budi Santoso', p_scanned => 'CF38C01');
+select post_task_by(pg_temp.task('RA3'), p_by_name => 'Rina', p_scanned => 'CF37C01');
 
 -- ---- The rack list -------------------------------------------------------
 select pg_temp.check('rack list: one row per bin + SKU, no quantities',

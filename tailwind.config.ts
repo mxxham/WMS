@@ -1,16 +1,19 @@
 import type { Config } from "tailwindcss";
 
-// CKB Logistics brand: deep green (#135F45) and yellow (#F9CF54), taken from
-// ckb.co.id. Neutrals are green-tinted greys so text and borders sit with the
-// brand green; the three expiry signal colours stay as they were.
+// JE-IR WMS palette, taken from the Home banner: deep navy (#032741) with a teal
+// accent, plus the Shell yellow (#F9CF54) of the rack location plates. Token names
+// stay `ckb` / `steel` so every page follows from here. Neutrals are navy-tinted
+// greys; the three expiry signal colours stay as they were.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        ckb: { DEFAULT: "#135F45", dark: "#0E4A35", light: "#129B6C", tint: "#E7F2ED" },
-        steel: { DEFAULT: "#1B2B25", 700: "#2E403A", 500: "#586A63", 300: "#A8B6B0", 100: "#E2E9E5" },
-        paper: "#F5F8F6",
+        ckb: { DEFAULT: "#0B8384", dark: "#097172", light: "#0E8E8C", tint: "#E2F2F3" },
+        steel: { DEFAULT: "#102331", 700: "#283D4C", 500: "#546675", 300: "#A3B2BE", 100: "#E0E7ED" },
+        paper: "#F3F6F9",
+        // The mark itself (logo, Home banner, active nav item). Teal only on navy: too light on white.
+        jeir: { navy: "#032741", teal: { DEFAULT: "#18C3C1", dark: "#12A9A7" } },
         plate: { DEFAULT: "#F9CF54", dark: "#E5B532" },
         ok: "#2E7D4F",
         warn: "#D9941A",
@@ -21,6 +24,12 @@ const config: Config = {
         cond: ['"IBM Plex Sans Condensed"', '"IBM Plex Sans"', "sans-serif"],
       },
       borderRadius: { plate: "6px" },
+      // The Home banner's ground: navy deepening to teal-navy (sampled from public/home-banner.jpg).
+      // White text stays above 7:1 on every stop.
+      backgroundImage: {
+        "jeir-side": "linear-gradient(180deg, #032741 0%, #022239 45%, #04394B 78%, #075A67 100%)",
+        "jeir-bar": "linear-gradient(90deg, #022239 0%, #04394B 60%, #075A67 100%)",
+      },
     },
   },
   plugins: [],

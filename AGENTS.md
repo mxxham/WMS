@@ -230,18 +230,36 @@ Regression guards worth knowing: `one-bin-per-line.test.ts` (FEFO at every pick)
 
 ## Environment
 
-`.env.example` → `.env.local`. Five variables:
+`.env.example` → `.env.local`. Six variables:
 
 | Variable | Notes |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | safe for the browser |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only.** Bypasses RLS. Never prefix with `NEXT_PUBLIC_`, never send to the browser. |
-| `SITE_ACCOUNT_EMAIL` | shared site account (an admin in Supabase Auth) |
+| `LOGIN_REQUIRED` | `true` = everyone signs in with their own account; empty = shared account (today) |
+| `SITE_ACCOUNT_EMAIL` | shared site account (an admin in Supabase Auth), used while login is not required |
 | `SITE_ACCOUNT_PASSWORD` | |
 
-Every visitor shares this one session, so the app opens without a login screen. Public sign-up is
-disabled. Do not add per-user auth to a feature.
+**Accounts (0071, spec `docs/superpowers/specs/2026-10-12-login-and-accounts-design.md`).** Login is
+built but **not required yet**: with `LOGIN_REQUIRED` unset every visitor without a session is signed
+in as the shared site account (as before), and `/login` is optional — anyone can sign in as their own
+account; `Keluar` returns to the shared one. Until the switch is on, personal accounts protect
+nothing: anyone can be the shared admin. With `LOGIN_REQUIRED=true` every page needs a sign-in.
+
+- People sign in with a **username** and password; admins manage accounts on `Pengguna`
+  (`/admin/users`). Public sign-up stays disabled. Sign-in resolves the username to the account's
+  auth email on the server (`account_email`, service role); new accounts get
+  `<username>@pengguna.internal`, the shared account keeps its own email and is `gudang`.
+- Roles change only through `set_user_role` / `set_user_active` (never on yourself, always one active
+  admin; no write policy on `profiles`). A deactivated account is refused before every API request
+  (`check_request`, PostgREST pre-request) and by every read/insert policy (`is_active()`), even with
+  a live token. Accounts are never deleted. **A new table's policies must include
+  `(select public.is_active())`.**
+- Sign-in is limited per username + client IP (5 wrong = 15 min) and per username across IPs (30),
+  in `login_failures`; a failed limit check refuses the sign-in.
+- "Nama Anda" fields start as the account's name on a personal account; on the shared account they
+  keep the typed, device-remembered name.
 
 `.env.local`, `.env.ckb-wms-v2.local`, `.env.local.bak-allocator`, and `backups/` exist in the working
 tree — **never read, print, or commit them.**

@@ -54,7 +54,7 @@ select pg_temp.check('changed to CF38A01, same place in the wave',
 select pg_temp.check('the change is in the history',
   exists (select 1 from execution_events where entity_id = (pg_temp.move()).id and reason like '%Budi: CF38A02 → CF38A01 (38): CF38A02 penuh'));
 select pg_temp.check('pick + move post together: 6 out, 38 to CF38A01, nothing to CF38A02',
-  (post_pick_with_move(pg_temp.pick(), (pg_temp.move()).id, null, null, null, 'Budi')->'move'->>'result') = 'POSTED'
+  (post_pick_with_move(pg_temp.pick(), (pg_temp.move()).id, null, null, null, 'Budi', 'CF38E01')->'move'->>'result') = 'POSTED'
   and pg_temp.qty('CF38E01') = 0 and pg_temp.qty('CF38A01') = 38 and pg_temp.qty('CF38A02') = 0);
 select pg_temp.check('a posted move cannot be changed',
   pg_temp.fails(format($q$select change_relocation(%L, 'CF38A02', 38, 'Budi')$q$, (pg_temp.move()).id), '%tidak terbuka%'));

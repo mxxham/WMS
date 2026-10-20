@@ -18,7 +18,7 @@ export async function getBinDetail(supabase: SupabaseClient, rawCode: string): P
       .order("expiry_date", { ascending: true, nullsFirst: false }),
     supabase
       .from("movements")
-      .select("id, type, quantity, batch_lot, created_at, note, reason_code, by_name, approved_by_name, items(sku, description), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name)")
+      .select("id, type, quantity, batch_lot, created_at, note, reason_code, by_name, approved_by_name, task_id, items(sku, description), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name), pick_tasks!movements_task_id_fkey(id, wave_id, shipment_number, seq, waves(planned_date, wave_no))")
       .or(`from_bin_id.eq.${bin.id},to_bin_id.eq.${bin.id}`)
       .order("created_at", { ascending: false })
       .limit(10),

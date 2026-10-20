@@ -24,7 +24,7 @@ select save_plan(pg_temp.today(), '{
   "outbound":[{"wave_no":"1","shipment_number":"SH1","sku":"550044709","quantity_requested":10,"quantity_allocated":10}]}'::jsonb) \g /dev/null
 create or replace function pg_temp.t(p_seq int) returns uuid language sql as $$
   select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = pg_temp.today() and t.seq = p_seq $$;
-select post_pick_with_move(pg_temp.t(1), pg_temp.t(2), null, null, null, 'Budi') \g /dev/null
+select post_pick_with_move(pg_temp.t(1), pg_temp.t(2), null, null, null, 'Budi', 'CF39A01') \g /dev/null
 
 select pg_temp.check('pallet bin: on hand 44, picked 10, moved out 34, remain 0 (import counted in on hand, shown as adjust 44)',
   pg_temp.r('CF39A01')::text = '(44,10,34,0,0,44,0)');

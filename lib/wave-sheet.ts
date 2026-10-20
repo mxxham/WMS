@@ -1,4 +1,5 @@
 import { pairMoves } from "./allocator/pair-moves";
+import { parseLocation } from "./allocator/pickpath";
 import type { TaskRow } from "./allocator/picklist-from-tasks";
 
 /**
@@ -101,19 +102,68 @@ export function buildSheet(tasks: TaskRow[]): { lines: SheetLine[]; cancelled: T
 
 export const lineChanged = (l: SheetLine, initial: SheetLine) => shape(l) !== shape(initial);
 
+/** One line as post_wave_sheet / post_pick_line take it. */
+export type SheetRow = {
+  pick_id: string | null; move_id: string | null;
+  sources: { bin: string; batch: string; expiry: string | null; qty: number }[];
+  move_to: string | null; move_qty: number | null;
+};
+
+export function sheetRow(l: SheetLine): SheetRow {
+  const to = up(l.moveTo);
+  const sources = l.sources.filter((s, i) => i === 0 || up(s.bin) !== "" || Number(s.qty) > 0);
+  return {
+    pick_id: l.pick?.id ?? null,
+    move_id: l.move?.id ?? null,
+    sources: sources.map((s) => ({ bin: up(s.bin), batch: s.batch.trim(), expiry: day(s.expiry) || null, qty: l.pick ? Number(s.qty) || 0 : 0 })),
+    move_to: to || null,
+    move_qty: to ? Number(l.moveQty) || 0 : null,
+  };
+}
+
+/**
+ * The sisa after the pick of a "pick + pindah sisa palet" line is typed: an
+ * opened pallet goes either to the truck or down to the pickface, so cartons
+ * not picked move with the sisa (12 Oct NO 6: 32 of a planned 35 left the
+ * Bin To Bin at 13, and 3 phantom cartons stayed at CB11C01). Follows only
+ * while pick + sisa still add up to the planned pallet — a sisa typed from
+ * the paper is never overwritten — and never makes the sisa 0 or less.
+ */
+export function followPick(l: SheetLine, init: SheetLine, qty: string): string {
+  if (!l.pick || !up(l.moveTo) || !up(init.moveTo)) return l.moveQty;
+  const q = Number(qty);
+  if (qty.trim() === "" || !Number.isInteger(q) || q < 0) return l.moveQty;
+  const pallet = (Number(init.sources[0].qty) || 0) + (Number(init.moveQty) || 0);
+  if ((Number(l.sources[0].qty) || 0) + (Number(l.moveQty) || 0) !== pallet) return l.moveQty;
+  return pallet - q > 0 ? String(pallet - q) : l.moveQty;
+}
+
+/**
+ * Pecah in Isi dari picklist: the bin held less than the line's pick, so the
+ * cartons short of the plan come from another bin — a second source with
+ * that quantity, its bin still to type. post_wave_sheet splits the task; the
+ * order is not raised (12 Oct NO 6: Tambah item +3 made the order 795 for
+ * 792 picked). The line's pick is the plan's again, so a sisa that followed
+ * the lower pick goes back to the plan; a sisa typed apart is kept. Null when
+ * nothing is short. Returns a copy.
+ */
+export function pecahLine(l: SheetLine, init: SheetLine): SheetLine | null {
+  if (!l.pick) return null;
+  const short = Number(l.pick.quantity) - l.sources.reduce((n, s) => n + (Number(s.qty) || 0), 0);
+  if (!(short > 0)) return null;
+  const x = structuredClone(l);
+  const first = x.sources[0];
+  x.sources.push({ bin: "", batch: first.batch, expiry: first.expiry, qty: String(short) });
+  const pallet = (Number(init.sources[0].qty) || 0) + (Number(init.moveQty) || 0);
+  if (up(init.moveTo) && up(x.moveTo) === up(init.moveTo) && (Number(first.qty) || 0) + (Number(x.moveQty) || 0) === pallet) {
+    x.moveQty = init.moveQty;
+  }
+  return x;
+}
+
 /** The post_wave_sheet payload: open lines marked done, and posted lines whose paper differs. */
 export function sheetPayload(lines: SheetLine[], initial: Map<string, SheetLine>) {
-  return lines.filter((l) => (l.posted ? lineChanged(l, initial.get(l.key)!) : l.done)).map((l) => {
-    const to = up(l.moveTo);
-    const sources = l.sources.filter((s, i) => i === 0 || up(s.bin) !== "" || Number(s.qty) > 0);
-    return {
-      pick_id: l.pick?.id ?? null,
-      move_id: l.move?.id ?? null,
-      sources: sources.map((s) => ({ bin: up(s.bin), batch: s.batch.trim(), expiry: day(s.expiry) || null, qty: l.pick ? Number(s.qty) || 0 : 0 })),
-      move_to: to || null,
-      move_qty: to ? Number(l.moveQty) || 0 : null,
-    };
-  });
+  return lines.filter((l) => (l.posted ? lineChanged(l, initial.get(l.key)!) : l.done)).map(sheetRow);
 }
 
 /**
@@ -193,6 +243,7 @@ export function sheetNotes(lines: SheetLine[], initial: Map<string, SheetLine>, 
       const went = early.get(l.key);
       if (went) { have.set(went.to, get(went.to) - went.qty); have.set(went.from, get(went.from) + went.qty); }
       let moveKey = stockKey(l.moveTo, l.sku, first.batch, first.expiry);
+      let palletKey = stockKey(first.bin, l.sku, first.batch, first.expiry);
       l.sources.forEach((s, i) => {
         if (!up(s.bin)) return;
         let k = stockKey(s.bin, l.sku, s.batch, s.expiry);
@@ -206,7 +257,7 @@ export function sheetNotes(lines: SheetLine[], initial: Map<string, SheetLine>, 
           const real = realBatch(have, s.bin, l.sku, s.batch, s.expiry, incoming);
           if (real) {
             k = real.key;
-            if (i === 0) moveKey = stockKey(l.moveTo, l.sku, real.batch, real.expiry);
+            if (i === 0) { moveKey = stockKey(l.moveTo, l.sku, real.batch, real.expiry); palletKey = k; }
             notes.push({ tone: "warn", text: `Batch ${s.batch.trim() || "–"}${day(s.expiry) ? ` exp ${day(s.expiry)}` : ""} tidak ada di ${up(s.bin)}: diambil dari batch ${real.batch || "–"} exp ${real.expiry || "–"} yang ada di bin (tidak ada stok baru).` });
           }
         }
@@ -264,6 +315,14 @@ export function sheetNotes(lines: SheetLine[], initial: Map<string, SheetLine>, 
         if (h < take) notes.push({ tone: "warn", text: `Sistem: ${up(s.bin)} batch ${k.split("|")[2] || "–"} hanya ${Math.max(h, 0)}, kertas ${take}: +${take - Math.max(h, 0)} koreksi picklist (relokasi masuk yang terbuka diposting dulu), ${up(s.bin)} dihitung ulang.` });
         have.set(k, Math.max(h, take) - take);
       });
+      // An opened pallet in reserve (level B-E) goes to the truck or down with the sisa: cartons still
+      // there after both, with no later line of this paper taking them, are phantom stock (12 Oct CB11C01).
+      const level = parseLocation(first.bin)?.level;
+      const left = get(palletKey);
+      if (l.pick && up(l.moveTo) && Number(l.moveQty) > 0 && level && level !== "A" && left > 0
+          && !lines.slice(idx + 1).some((later) => later.sku === l.sku && later.sources.some((s) => up(s.bin) === up(first.bin)))) {
+        notes.push({ tone: "warn", text: `${up(first.bin)} masih ${left} karton setelah pick dan Bin To Bin: palet yang dibuka di level ${level} biasanya kosong. Sisa ${Number(l.moveQty) + left}?` });
+      }
       if (up(l.moveTo) && Number(l.moveQty) > 0) have.set(moveKey, get(moveKey) + Number(l.moveQty));
     }
     // A posted line the paper agrees with needs no story, only errors.

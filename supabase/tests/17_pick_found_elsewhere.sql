@@ -29,11 +29,11 @@ create or replace function pg_temp.t() returns pick_tasks language sql as $$
   select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-23' $$;
 
 select pg_temp.check('found elsewhere: reason required',
-  pg_temp.fails(format($q$select post_task_found_elsewhere(%L, 'CF38C02', 3, ' ', 'Budi')$q$, (pg_temp.t()).id), '%Alasan%'));
+  pg_temp.fails(format($q$select post_task_found_elsewhere(%L, 'CF38C02', 3, ' ', 'Budi', 'CF38C02')$q$, (pg_temp.t()).id), '%Alasan%'));
 select pg_temp.check('found elsewhere: unknown bin refused',
-  pg_temp.fails(format($q$select post_task_found_elsewhere(%L, 'ZZ99Z99', 3, 'x', 'Budi')$q$, (pg_temp.t()).id), '%tidak ada%'));
+  pg_temp.fails(format($q$select post_task_found_elsewhere(%L, 'ZZ99Z99', 3, 'x', 'Budi', 'ZZ99Z99')$q$, (pg_temp.t()).id), '%tidak ada%'));
 select pg_temp.check('found elsewhere: posted, 3 recorded as moved first',
-  post_task_found_elsewhere((pg_temp.t()).id, 'cf38c02', 3, 'barang ada di CF38C02', 'Budi') @> '{"result":"POSTED","moved_on_books":3}');
+  post_task_found_elsewhere((pg_temp.t()).id, 'cf38c02', 3, 'barang ada di CF38C02', 'Budi', 'CF38C02') @> '{"result":"POSTED","moved_on_books":3}');
 select pg_temp.check('both bins end at 0; the pick is from the typed bin',
   pg_temp.qty('CF38C01') = 0 and pg_temp.qty('CF38C02') = 0
   and (select b.bin_code from bins b where b.id = (pg_temp.t()).actual_from_bin_id) = 'CF38C02');

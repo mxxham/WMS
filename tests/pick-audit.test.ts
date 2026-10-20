@@ -1,7 +1,7 @@
 /** Picking audit rules (lib/pick-audit.ts, same rule as 0024 pick_audit_errors). */
 import { strict as assert } from 'node:assert';
 import {
-  allowedResolutions, auditCoverage, median, normBatch, pickAuditErrors, scanCompliance, shipmentFirstPass, summarizeAccuracy,
+  allowedResolutions, auditCoverage, binConfirm, median, normBatch, pickAuditErrors, scanCompliance, shipmentFirstPass, summarizeAccuracy,
   type FirstAttempt,
 } from '../lib/pick-audit';
 
@@ -89,6 +89,16 @@ test('shipment first pass, coverage, scan compliance, median', () => {
   assert.equal(median([3, 1, 2]), 2);
   assert.equal(median([4, 1, 2, 3]), 2.5);
   assert.equal(median([]), null);
+});
+
+test('bin confirmation (0068): scanned, typed, or none; old rows with a code and no method count as scanned', () => {
+  assert.equal(binConfirm({ scanned_code: 'CB34D02', scan_method: 'scan' }), 'scan');
+  assert.equal(binConfirm({ scanned_code: 'CB34D02', scan_method: 'ketik' }), 'ketik');
+  assert.equal(binConfirm({ scanned_code: '8994123456789', scan_method: null }), 'scan');
+  assert.equal(binConfirm({ scanned_code: null, scan_method: null }), null);
+  assert.equal(binConfirm({ scanned_code: '', scan_method: undefined }), null);
+  const lines = [{ scanned_code: 'A', scan_method: 'scan' }, { scanned_code: 'B', scan_method: 'ketik' }, { scanned_code: 'C', scan_method: null }, { scanned_code: null, scan_method: null }];
+  assert.equal(scanCompliance(lines.map((l) => binConfirm(l) === 'scan')), 50, 'typed is not scan compliance');
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

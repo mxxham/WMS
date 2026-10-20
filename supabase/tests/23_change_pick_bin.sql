@@ -84,7 +84,7 @@ select pg_temp.check('a pick with no paired move is re-pointed on its own',
                           'move_id', null, 'move_from_bin', null)
   and (pg_temp.pk2()).from_bin_id = (select id from bins where bin_code = 'CF38B01'));
 select pg_temp.check('the re-pointed pick and move still post as one line: 6 out, 38 to CF38A02',
-  (post_pick_with_move((pg_temp.pk()).id, (pg_temp.mv()).id, null, null, null, 'Budi')->'move'->>'result') = 'POSTED'
+  (post_pick_with_move((pg_temp.pk()).id, (pg_temp.mv()).id, null, null, null, 'Budi', 'CF38A01')->'move'->>'result') = 'POSTED'
   and pg_temp.qty('CF38A01') = 0 and pg_temp.qty('CF38A02') = 38 and pg_temp.qty('CF38E01') = 0);
 select pg_temp.check('a posted pick cannot be re-pointed',
   pg_temp.fails(format($q$select change_pick_bin(%L, 'CF38E01', 'Budi')$q$, (pg_temp.pk()).id), '%belum diposting%'));

@@ -10,7 +10,8 @@ type Alert = { id: number; text: string; href: string; tone: "ok" | "warn" | "ba
 const TEXT: Record<string, [string, Alert["tone"]]> = {
   COMPLETED: ["selesai", "ok"], CANCELLED: ["dibatalkan", "bad"], RESCHEDULED: ["dijadwal ulang", "warn"], PENDING: ["dilanjutkan", "warn"],
 };
-const TONE: Record<Alert["tone"], string> = { ok: "border-ok", warn: "border-warn", bad: "border-bad" };
+/** The tone is the icon colour; the text says what happened (no accent border, DESIGN.md §5). */
+const TONE: Record<Alert["tone"], string> = { ok: "text-ok", warn: "text-warn", bad: "text-bad" };
 
 /**
  * Toast on every page when a wave changes status on any device (execution_events
@@ -44,8 +45,8 @@ export function WaveAlerts() {
   return (
     <div className="fixed bottom-20 right-3 z-40 flex w-[calc(100%-1.5rem)] max-w-sm flex-col gap-2 lg:bottom-4" role="status" aria-live="polite">
       {alerts.map((a) => (
-        <div key={a.id} className={cn("flex items-start gap-3 rounded-md border-l-4 bg-white p-3 text-sm shadow-lg", TONE[a.tone])}>
-          {a.tone === "ok" ? <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" /> : <Truck className="mt-0.5 h-4 w-4 shrink-0 text-steel-500" />}
+        <div key={a.id} className="flex items-start gap-3 rounded-md bg-white p-3 text-sm shadow-lg ring-1 ring-steel-100">
+          {a.tone === "ok" ? <CheckCheck aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0", TONE.ok)} /> : <Truck aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0", TONE[a.tone])} />}
           <Link href={a.href} className="flex-1 hover:underline">{a.text}</Link>
           <button onClick={() => setAlerts((x) => x.filter((y) => y.id !== a.id))} aria-label="Tutup"><X className="h-4 w-4 text-steel-500" /></button>
         </div>

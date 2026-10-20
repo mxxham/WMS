@@ -38,18 +38,18 @@ select pg_temp.check('waits: NO 10 #1 listed as waiting for NO 5 #2',
   exists (select 1 from task_waits where task_id = pg_temp.t('10', 1) and wait_wave_no = '5' and wait_seq = 2 and wait_to = 'CF38C02' and wait_qty = 25));
 select pg_temp.check('waits: the relocation itself does not wait', not exists (select 1 from task_waits where task_id = pg_temp.t('5', 2)));
 select pg_temp.check('guard: NO 10 picked before the relocation is refused, naming it',
-  pg_temp.fails(format($q$select post_task_by(%L, p_by_name => 'Budi')$q$, pg_temp.t('10', 1)), '%kerjakan dulu relokasi NO 5 #2 dari CF38C01 ke CF38C02%'));
+  pg_temp.fails(format($q$select post_task_by(%L, p_by_name => 'Budi', p_scanned => 'CF38C02')$q$, pg_temp.t('10', 1)), '%kerjakan dulu relokasi NO 5 #2 dari CF38C01 ke CF38C02%'));
 select pg_temp.check('guard: Selesaikan wave NO 10 refused too',
   pg_temp.fails(format($q$select complete_wave_by(%L, 'Budi')$q$, (select id from waves where planned_date = '2026-10-19' and wave_no = '10')), '%kerjakan dulu relokasi%'));
 select pg_temp.check('another bin that really holds it can still be used (Berbeda)',
-  (post_task_by(pg_temp.t('10', 1), 20, 'CF37C01', '17I', '2030-09-17', 'pickface kosong', 'Budi')->>'result') = 'POSTED');
+  (post_task_by(pg_temp.t('10', 1), 20, 'CF37C01', '17I', '2030-09-17', 'pickface kosong', 'Budi', 'CF37C01')->>'result') = 'POSTED');
 select pg_temp.check('count: the planned bin gets a count task (source PICK)',
   exists (select 1 from count_tasks c join bins b on b.id = c.bin_id where b.bin_code = 'CF38C02' and c.source = 'PICK'
           and c.status = 'OPEN' and c.reason like 'Pick NO 10 #1 berbeda%pickface kosong%'));
 select unpost_task(pg_temp.t('10', 1), 'Budi', 'ulang sesuai urutan');
-select post_pick_with_move(pg_temp.t('5', 1), pg_temp.t('5', 2), null, null, null, 'Budi');
+select post_pick_with_move(pg_temp.t('5', 1), pg_temp.t('5', 2), null, null, null, 'Budi', 'CF38C01');
 select pg_temp.check('after the relocation NO 10 posts as planned',
-  (post_task_by(pg_temp.t('10', 1), p_by_name => 'Budi')->>'result') = 'POSTED'
+  (post_task_by(pg_temp.t('10', 1), p_by_name => 'Budi', p_scanned => 'CF38C02')->>'result') = 'POSTED'
   );
 select pg_temp.check('nothing waits any more', not exists (select 1 from task_waits where planned_date = '2026-10-19'));
 select pg_temp.check('a pick done as planned opens no extra count',

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownToLine, ArrowRightLeft, PackageMinus, SlidersHorizontal } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, Minus, PackageMinus, Plus, SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,36 @@ import { fmtDate, fmtNum } from "@/lib/utils";
 
 type Action = "putaway" | "pick" | "transfer" | "adjust";
 type StockLine = { item_id: string; sku: string; description: string; uom: string | null; batch_lot: string; quantity: number; expiry_date: string | null; held: number };
+
+/** Two-option segmented toggle for adjustment direction. */
+export function DirSign({ value, onChange, disabled }: { value: 1 | -1; onChange: (v: 1 | -1) => void; disabled?: boolean }) {
+  return (
+    <div className="flex items-center gap-1 rounded-md bg-plate/30 p-1" role="group" aria-label="Arah adjustment">
+      <Button
+        type="button"
+        variant={value === 1 ? "default" : "outline"}
+        size="sm"
+        className="px-3 py-1.5 min-w-[84px]"
+        onClick={() => !disabled && onChange(1)}
+        disabled={disabled}
+        aria-pressed={value === 1}
+      >
+        <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />Tambah
+      </Button>
+      <Button
+        type="button"
+        variant={value === -1 ? "default" : "outline"}
+        size="sm"
+        className="px-3 py-1.5 min-w-[84px]"
+        onClick={() => !disabled && onChange(-1)}
+        disabled={disabled}
+        aria-pressed={value === -1}
+      >
+        <Minus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />Kurang
+      </Button>
+    </div>
+  );
+}
 
 const toLine = (r: InventoryRow): StockLine => ({
   item_id: r.item_id, sku: r.items?.sku ?? "", description: r.items?.description ?? "", uom: r.items?.uom ?? null,
@@ -36,7 +66,7 @@ export function MovementActions({ bin, inventory, role, onDone }: { bin: Bin; in
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Button size="lg" variant="plate" disabled={blocked} onClick={() => setOpen("putaway")}><ArrowDownToLine className="h-5 w-5" />Putaway</Button>
+        <Button size="lg" variant="accent" disabled={blocked} onClick={() => setOpen("putaway")}><ArrowDownToLine className="h-5 w-5" />Putaway</Button>
         <Button size="lg" disabled={lines.length === 0} onClick={() => setOpen("pick")}><PackageMinus className="h-5 w-5" />Pick</Button>
         <Button size="lg" variant="outline" disabled={lines.length === 0} onClick={() => setOpen("transfer")}><ArrowRightLeft className="h-5 w-5" />Transfer</Button>
         {canAdjust && <Button size="lg" variant="outline" onClick={() => setOpen("adjust")}><SlidersHorizontal className="h-5 w-5" />Adjust</Button>}
@@ -96,6 +126,7 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
   const [dstCode, setDstCode] = useState("");
   // adjust
   const [adjNewLine, setAdjNewLine] = useState(initialNewLine ?? lines.length === 0);
+  const [dir, setDir] = useState<1 | -1>(1);
 
   // Load the source bin's stock for putaway (e.g. STAGING -> this bin).
   useEffect(() => {
@@ -134,7 +165,8 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
 
   const pool = action === "putaway" ? srcLines : lines;
   const line: StockLine | undefined = pool[lineIdx];
-  const n = Number(qty);
+  const rawQty = Number(qty);
+  const n = action === "adjust" && !adjNewLine ? rawQty * dir : rawQty;
   const fefoWarning = action === "pick" && lineIdx > 0 && line?.expiry_date && pool[0]?.expiry_date && line.expiry_date > pool[0].expiry_date;
   const newStock = (action === "putaway" && receiveNew) || (action === "adjust" && adjNewLine);
   const mismatch = newStock ? expiryCheck(batch, expiry, shelfLife) : null;
@@ -180,20 +212,20 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
     }
     // adjust (signed)
     if (!reason) return "Pilih kode alasan adjustment.";
-    if (!note.trim()) return "Keterangan adjustment wajib diisi (jejak audit).";
-    const why = `${REASON_CODES[reason]} — ${note}`;
+    const why = REASON_CODES[reason];
     const ask = needsApproval ? ` Di atas batas ${fmtNum(limit ?? 0)} unit: diajukan, lalu disetujui orang lain di Inventory → Persetujuan.` : "";
+    const adjNote = why; // note = reason label for DB constraint
     if (adjNewLine) {
       const { data: item } = await supabase.from("items").select("id, sku, uom").eq("sku", sku.trim()).maybeSingle();
       if (!item) return `SKU ${sku} tidak ditemukan.`;
       if (n < 0) return "Stok baru tidak bisa negatif.";
       if (!expiry) return "Tanggal expired wajib untuk stok baru (FEFO).";
-      return { row: { type: "adjustment", item_id: item.id, sku: item.sku, batch_lot: batch.trim().toUpperCase(), quantity: n, to_bin_id: bin.id, expiry_date: expiry, note, reason_code: reason },
+      return { row: { type: "adjustment", item_id: item.id, sku: item.sku, batch_lot: batch.trim().toUpperCase(), quantity: n, to_bin_id: bin.id, expiry_date: expiry, note: adjNote, reason_code: reason },
         summary: `Adjustment +${fmtNum(n)} SKU ${item.sku} batch ${batch || "–"} di ${bin.bin_code}. ${why}.${ask}` };
     }
     if (!line) return "Pilih baris stok.";
     if (line.quantity + n < 0) return `Hasil akan negatif (stok ${fmtNum(line.quantity)}).`;
-    return { row: { type: "adjustment", item_id: line.item_id, sku: line.sku, batch_lot: line.batch_lot, quantity: n, to_bin_id: bin.id, expiry_date: line.expiry_date, note, reason_code: reason },
+    return { row: { type: "adjustment", item_id: line.item_id, sku: line.sku, batch_lot: line.batch_lot, quantity: n, to_bin_id: bin.id, expiry_date: line.expiry_date, note: adjNote, reason_code: reason },
       summary: `Adjustment ${n > 0 ? "+" : ""}${fmtNum(n)} SKU ${line.sku} di ${bin.bin_code} (${fmtNum(line.quantity)} → ${fmtNum(line.quantity + n)}). ${why}.${ask}` };
   }
 
@@ -285,9 +317,32 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
             <div><Label htmlFor="dst">Bin tujuan</Label><Input id="dst" value={dstCode} onChange={(e) => setDstCode(e.target.value)} placeholder="Scan atau ketik, mis. CB12A01" required /></div>
           )}
 
+          {action === "adjust" && !adjNewLine && (
+            <div>
+              <Label htmlFor="dir">Arah</Label>
+              <DirSign value={dir} onChange={setDir} />
+            </div>
+          )}
+
           <div>
-            <Label htmlFor="qty">{action === "adjust" && !adjNewLine ? "Selisih (+ tambah / − kurang)" : "Jumlah"}</Label>
-            <Input id="qty" type="number" inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} required />
+            <Label htmlFor="qty">Jumlah</Label>
+            <Input
+              id="qty"
+              type="text"
+              inputMode="numeric"
+              step="any"
+              value={qty}
+              onChange={(e) => {
+                const v = e.target.value.trim().replace(/^[-+]/, "").replace(/[^\d.,]/g, "").replace(/,/g, ".");
+                const parts = v.split(".");
+                if (parts.length > 2) {
+                  setQty(parts[0] + "." + parts.slice(1).join(""));
+                } else {
+                  setQty(v);
+                }
+              }}
+              required
+            />
           </div>
           {action === "adjust" && (
             <div>
@@ -298,10 +353,12 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
               </Select>
             </div>
           )}
-          <div>
-            <Label htmlFor="note">{action === "adjust" ? "Keterangan (wajib)" : "Catatan"}</Label>
-            <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} required={action === "adjust"} placeholder={action === "adjust" ? "mis. hasil stock opname" : "opsional"} />
-          </div>
+          {action !== "adjust" && (
+            <div>
+              <Label htmlFor="note">Catatan</Label>
+              <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="opsional" />
+            </div>
+          )}
           <PersonNameField value={person} onChange={setPerson} />
           {needsApproval && <p className="rounded-md bg-plate/30 p-2 text-sm">Di atas batas {fmtNum(limit ?? 0)} unit: adjustment ini diajukan dan baru berlaku setelah disetujui orang lain.</p>}
           {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}

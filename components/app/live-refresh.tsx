@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 /** Tables in the supabase_realtime publication (migration 0015). */
 export type LiveTable = "waves" | "pick_tasks" | "outbound" | "movements" | "count_tasks" | "execution_events" | "audits" | "pickfaces"
   | "stock_holds" | "adjustment_requests" | "receipts" | "receipt_actuals" | "stock_recons" | "stock_recon_lines" | "settings" | "items"
-  | "pick_audits" | "shipment_loads" | "sheet_pick_lines" | "sheet_pick_audits";
+  | "pick_audits" | "shipment_loads" | "sheet_pick_lines" | "sheet_pick_audits"
+  | "pick_line_requests";
 export type LiveStatus = "connecting" | "live" | "offline";
 
 /**

@@ -9,7 +9,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-ckb text-white hover:bg-ckb-dark",
-        plate: "bg-plate text-steel hover:bg-plate-dark font-semibold",
+        // The banner teal with navy ink (about 7:1): the main call to action, e.g. Simpan rencana, Putaway.
+        accent: "bg-jeir-teal text-jeir-navy hover:bg-jeir-teal-dark font-semibold",
         outline: "border border-steel-300 bg-white hover:bg-steel-100",
         ghost: "hover:bg-steel-100",
         danger: "bg-bad text-white hover:bg-bad/90",

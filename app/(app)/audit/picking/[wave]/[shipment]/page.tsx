@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
-import type { LineState, PickError } from "@/lib/pick-audit";
+import { binConfirm, type LineState, type PickError } from "@/lib/pick-audit";
 import type { ShipmentRow } from "../../shipment-list";
 import { ShipmentAuditClient, type AttemptView, type LineView } from "./shipment-audit-client";
 
@@ -13,7 +13,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type LineRow = {
   task_id: string; seq: number; sku: string; description: string; uom: string | null; from_bin: string; batch_lot: string;
   expiry_date: string | null; planned_qty: number; picked_qty: number; deviation_reason: string | null;
-  picked_by_name: string | null; bulk_posted: boolean; line_state: LineState; attempts: number;
+  picked_by_name: string | null; bulk_posted: boolean; scanned_code: string | null; scan_method: string | null; line_state: LineState; attempts: number;
 };
 
 /** One shipment's lines. A line's picked qty / batch / expiry is not sent to the browser until it has been audited. */
@@ -26,7 +26,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   const [{ data: s }, { data: lines }, { data: attempts }] = await Promise.all([
     supabase.from("pick_audit_shipment").select("*").eq("wave_id", wave).eq("shipment_number", ship).maybeSingle(),
     supabase.from("pick_audit_line")
-      .select("task_id, seq, sku, description, uom, from_bin, batch_lot, expiry_date, planned_qty, picked_qty, deviation_reason, picked_by_name, bulk_posted, line_state, attempts")
+      .select("task_id, seq, sku, description, uom, from_bin, batch_lot, expiry_date, planned_qty, picked_qty, deviation_reason, picked_by_name, bulk_posted, scanned_code, scan_method, line_state, attempts")
       .eq("wave_id", wave).eq("shipment_number", ship).order("seq"),
     supabase.from("pick_audits").select("*, pick_tasks!inner(wave_id, shipment_number)")
       .eq("pick_tasks.wave_id", wave).eq("pick_tasks.shipment_number", ship).order("attempt_no"),
@@ -46,7 +46,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   const view: LineView[] = rows.map((l) => ({
     task_id: l.task_id, seq: l.seq, sku: l.sku, description: l.description, uom: l.uom, from_bin: l.from_bin,
     bin_qty: inBin.get(`${l.from_bin}|${l.sku}`) ?? 0,
-    picked_by_name: l.picked_by_name, bulk_posted: l.bulk_posted, state: l.line_state, attempts: l.attempts,
+    picked_by_name: l.picked_by_name, bulk_posted: l.bulk_posted, confirm: binConfirm(l), state: l.line_state, attempts: l.attempts,
     picked: l.line_state === "TODO" ? undefined : {
       qty: Number(l.picked_qty), planned_qty: Number(l.planned_qty), batch: l.batch_lot, expiry: l.expiry_date, deviation: l.deviation_reason,
     },

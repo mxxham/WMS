@@ -41,8 +41,8 @@ select pg_temp.check('the move remembers its planned destination CC34A02',
   and (select bin_code from bins where id = (pg_temp.t('8',2)).to_bin_id) = 'CC33A02');
 select pg_temp.check('nothing follows before the move is posted (the cartons are not there yet)',
   pg_temp.bin(pg_temp.t('12',2)) = 'CC34A02');
-select post_task_by((pg_temp.t('8',1)).id, null, null, null, null, null, 'Ilham') \g /dev/null
-select post_task_by((pg_temp.t('8',2)).id, null, null, null, null, null, 'Ilham') \g /dev/null
+select post_task_by((pg_temp.t('8',1)).id, null, null, null, null, null, 'Ilham', 'CD39E02') \g /dev/null
+select post_task_by((pg_temp.t('8',2)).id, null, null, null, null, null, 'Ilham', 'CD39E02') \g /dev/null
 
 select pg_temp.check('NO 12 #1 (3) stays in CC34A02: the 4 already there cover it',
   pg_temp.bin(pg_temp.t('12',1)) = 'CC34A02');
@@ -58,7 +58,7 @@ select pg_temp.check('each followed pick logs the move that moved it (Riwayat)',
 select pg_temp.check('no stock changed by following: CC33A02 38, CC34A02 4',
   (select sum(quantity) from inventory v join bins b on b.id = v.bin_id where b.bin_code = 'CC33A02') = 38
   and (select sum(quantity) from inventory v join bins b on b.id = v.bin_id where b.bin_code = 'CC34A02') = 4);
-create temp table posted as select post_task_by((pg_temp.t('12',2)).id, null, null, null, null, null, 'Ilham') r;
+create temp table posted as select post_task_by((pg_temp.t('12',2)).id, null, null, null, null, null, 'Ilham', 'CC33A02') r;
 select pg_temp.check('the followed pick posts from CC33A02 without a deviation: 38 - 20 = 18 left',
   ((select r from posted)->>'deviated')::boolean = false
   and (select sum(quantity) from inventory v join bins b on b.id = v.bin_id where b.bin_code = 'CC33A02') = 18);
@@ -77,8 +77,8 @@ create or replace function pg_temp.b(p_no text, p_seq int) returns pick_tasks la
   select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-31' and w.wave_no = p_no and t.seq = p_seq $$;
 select edit_pick_row((pg_temp.b('1',1)).id, (pg_temp.b('1',2)).id, 'CD40E02', 'TESTF', '2030-09-15', 'CC33A02', 5, 'Ilham', 'coba') \g /dev/null
 select edit_pick_row((pg_temp.b('1',1)).id, (pg_temp.b('1',2)).id, 'CD40E02', 'TESTF', '2030-09-15', 'CC34A02', 5, 'Ilham', 'kembali') \g /dev/null
-select post_task_by((pg_temp.b('1',1)).id, null, null, null, null, null, 'Ilham') \g /dev/null
-select post_task_by((pg_temp.b('1',2)).id, null, null, null, null, null, 'Ilham') \g /dev/null
+select post_task_by((pg_temp.b('1',1)).id, null, null, null, null, null, 'Ilham', 'CD40E02') \g /dev/null
+select post_task_by((pg_temp.b('1',2)).id, null, null, null, null, null, 'Ilham', 'CD40E02') \g /dev/null
 select pg_temp.check('a move changed back to its planned bin forgets the change; the later pick stays in CC34A02',
   (pg_temp.b('1',2)).planned_to_bin_id is null and pg_temp.bin(pg_temp.b('2',1)) = 'CC34A02');
 rollback;

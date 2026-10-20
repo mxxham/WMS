@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { BRAND } from "../config/brand";
 
 /** One row of wms_day_report (0055). */
 export type WmsDayRow = {
@@ -173,7 +174,7 @@ function binSheet(wb: ExcelJS.Workbook, sheet: string, tableName: string, tab: s
  */
 export function buildWmsDayWorkbook(rows: WmsDayRow[], date: string, generatedAt = new Date()): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CKB Warehouse WMS";
+  wb.creator = BRAND.appName;
   wb.created = generatedAt;
   const made = generatedAt.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" });
   const n = (v: number) => Number(v);

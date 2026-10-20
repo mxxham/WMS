@@ -24,6 +24,8 @@ export type LineView = {
   /** current stock of this SKU in from_bin, all batches */
   bin_qty: number;
   picked_by_name: string | null; bulk_posted: boolean; state: LineState; attempts: number;
+  /** how the bin was confirmed at posting (0068): rack label scanned, typed, or none */
+  confirm: "scan" | "ketik" | null;
   /** only once the line has been audited (or was picked as 0): what the picker reported */
   picked?: { qty: number; planned_qty: number; batch: string; expiry: string | null; deviation: string | null };
 };
@@ -109,7 +111,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
                   <Td className="font-semibold">{l.from_bin}</Td>
                   <Td className="tabular">{fmtNum(l.bin_qty)} {l.uom ?? ""}</Td>
                   <Td className="text-xs">{l.picked_by_name ?? "(tidak tercatat)"}
-                    {l.bulk_posted && <span className="block text-warn">diposting massal, tanpa scan</span>}</Td>
+                    {l.bulk_posted && <span className="block text-warn">diposting massal, tanpa scan</span>}
+                    {l.confirm && <span className={cn("block", l.confirm === "ketik" ? "text-warn" : "text-steel-500")}>bin dikonfirmasi: {l.confirm === "scan" ? "scan" : "diketik"}</span>}</Td>
                   <Td className={cn("text-xs font-semibold", LINE_TONE[l.state])}>{LINE_STATE_LABEL[l.state]}</Td>
                   <Td className="space-y-1 text-xs">
                     {l.picked

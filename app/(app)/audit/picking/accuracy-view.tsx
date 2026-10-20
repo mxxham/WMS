@@ -3,12 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { parsePolicy } from "@/lib/inventory-control";
 import {
-  auditCoverage, PICK_ERROR_LABEL, scanCompliance, shipmentFirstPass, summarizeAccuracy, type FirstAttempt,
+  auditCoverage, binConfirm, PICK_ERROR_LABEL, scanCompliance, shipmentFirstPass, summarizeAccuracy, type FirstAttempt,
 } from "@/lib/pick-audit";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDateTime, fmtNum } from "@/lib/utils";
 import { shipmentHref } from "./shipment-list";
+import { StatusIcon } from "@/components/ui/status-icon";
 
 const pct = (x: number | null) => (x === null ? "–" : `${fmtNum(x, 1)}%`);
 
@@ -23,7 +24,7 @@ export async function AccuracyView({ days }: { days: number }) {
     fetchAll<FirstAttempt & { audited_at: string }>((a, b) => supabase.from("pick_audit_first")
       .select("task_id, audited_at, result, errors, expected_qty, counted_qty, picked_by_name, sku, description, zone, bulk_posted, minutes_to_audit, wave_id, shipment_number")
       .gte("audited_at", since).order("audited_at").order("task_id").range(a, b)),
-    fetchAll<{ scanned_code: string | null }>((a, b) => supabase.from("pick_audit_line").select("scanned_code")
+    fetchAll<{ scanned_code: string | null; scan_method: string | null }>((a, b) => supabase.from("pick_audit_line").select("scanned_code, scan_method")
       .gte("completed_at", since).gt("picked_qty", 0).order("task_id").range(a, b)),
     fetchAll<{ wave_id: string; shipment_number: string; todo: number; mismatch: number }>((a, b) => supabase.from("pick_audit_shipment")
       .select("wave_id, shipment_number, todo, mismatch").eq("state", "LOADED").eq("load_legacy", false).gte("loaded_at", since)
@@ -32,13 +33,16 @@ export async function AccuracyView({ days }: { days: number }) {
   ]);
   const target = parsePolicy(policyRaw).pick_accuracy_target_pct;
   const s = summarizeAccuracy(firsts);
+  // Kepatuhan scan counts the rack label scanned; a typed bin code is shown apart (0068).
+  const confirms = lines.map(binConfirm);
+  const typed = confirms.filter((c) => c === "ketik").length;
   const tiles: { label: string; value: string; note: string; bad?: boolean }[] = [
     { label: "Akurasi baris", value: pct(s.lineAccuracy), note: `${fmtNum(s.ok)} OK dari ${fmtNum(s.lines)} · target ${fmtNum(target, 1)}%`, bad: s.lineAccuracy !== null && s.lineAccuracy < target },
     { label: "Akurasi karton", value: pct(s.unitAccuracy), note: "karton benar dari yang diaudit" },
     { label: "Salah pick / 1.000 baris", value: s.mispicksPer1000 === null ? "–" : fmtNum(s.mispicksPer1000, 1), note: "di atas 5 = masalah proses" },
     { label: "Shipment lolos sekali audit", value: pct(shipmentFirstPass(loads, firsts)), note: `${fmtNum(loads.length)} shipment dimuat` },
     { label: "Cakupan audit", value: pct(auditCoverage(loads)), note: "harus 100%: semua baris dimuat sudah lolos", bad: loads.length > 0 && auditCoverage(loads) !== 100 },
-    { label: "Kepatuhan scan", value: pct(scanCompliance(lines.map((l) => !!l.scanned_code))), note: `${fmtNum(lines.length)} baris dipick` },
+    { label: "Kepatuhan scan", value: pct(scanCompliance(confirms.map((c) => c === "scan"))), note: `${fmtNum(lines.length)} baris dipick · ${fmtNum(typed)} bin diketik` },
     { label: "Pick → audit", value: s.medianMinutes === null ? "–" : `${fmtNum(s.medianMinutes)} mnt`, note: "median" },
   ];
   const recent = firsts.filter((f) => f.result === "MISMATCH").slice(-20).reverse();
@@ -53,8 +57,8 @@ export async function AccuracyView({ days }: { days: number }) {
       </nav>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         {tiles.map((t) => (
-          <div key={t.label} className={cn("rounded-lg border-l-4 bg-white p-3", t.bad ? "border-bad" : "border-ckb")}>
-            <div className="font-cond text-3xl font-semibold tabular">{t.value}</div>
+          <div key={t.label} className="rounded-lg bg-white p-3">
+            <div className="flex items-start justify-between gap-2"><div className="font-cond text-3xl font-semibold tabular">{t.value}</div>{t.bad && <StatusIcon tone="bad" />}</div>
             <div className="text-sm font-medium">{t.label}</div>
             <div className="text-xs text-steel-500">{t.note}</div>
           </div>

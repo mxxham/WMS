@@ -9,7 +9,7 @@ const WHITE = rgb(1, 1, 1);
 
 export type LabelBin = { bin_code: string; zone: string; rack: string | null; level: string | null; position: string | null; abc_class: string | null };
 export type LabelOptions = {
-  layout: "cell" | "strip";     // cell = one 80x85 mm page per bin; strip = one long page per rack upright
+  layout: "cell" | "strip";     // cell = one 80x85 mm page per bin; strip = rack uprights, two per A4 sheet
   colorMode: "color" | "mono";  // mono for direct-thermal printers (black only)
   includeCode128: boolean;      // add a Code 128 above the colour band
 };
@@ -70,39 +70,47 @@ function centered(page: PDFPage, text: string, font: PDFFont, size: number, cx: 
  * warehouse name -> QR (with 3 mm quiet zone) -> [Code 128] -> colour band with
  * bin code (>= 28 pt bold) and bay arrow -> aisle / rack / level / position / ABC (>= 8 pt).
  */
-function drawCell(page: PDFPage, bin: LabelBin, originY: number, opt: LabelOptions, fonts: { bold: PDFFont; reg: PDFFont }, showArrowInBand: boolean) {
-  const W = LABEL.cellWidthMm * MM;
-  const H = LABEL.cellHeightMm * MM;
+/** Sizes inside a cell (mm, pt). Per sel uses CELL; the A4 strips use the compact A4_CELL. */
+type CellDims = { heightMm: number; nameTopMm: number; nameSize: number; qrTopMm: number; qrMm: number; qrWithCode128Mm: number; code128Mm: number; code128GapMm: number; bandMm: number; codePt: number; infoGapMm: number };
+const CELL: CellDims = { heightMm: LABEL.cellHeightMm, nameTopMm: 3, nameSize: 8, qrTopMm: 8, qrMm: 48, qrWithCode128Mm: 34, code128Mm: 11, code128GapMm: LABEL.quietZoneMm, bandMm: 15, codePt: 32, infoGapMm: 2 };
+const A4_CELL: CellDims = {
+  heightMm: LABEL.a4.cellHeightMm, nameTopMm: 1.5, nameSize: 6.5, qrTopMm: 4, qrMm: LABEL.a4.qrMm, qrWithCode128Mm: LABEL.a4.qrWithCode128Mm,
+  code128Mm: LABEL.a4.code128Mm, code128GapMm: 2, bandMm: LABEL.a4.bandMm, codePt: LABEL.minBinCodePt, infoGapMm: 1.2,
+};
+
+function drawCell(page: PDFPage, bin: LabelBin, originY: number, opt: LabelOptions, fonts: { bold: PDFFont; reg: PDFFont }, showArrowInBand: boolean, x = 0, widthMm: number = LABEL.cellWidthMm, d: CellDims = CELL) {
+  const W = widthMm * MM;
+  const H = d.heightMm * MM;
   const q = LABEL.quietZoneMm * MM;
   const top = originY + H;
-  const cx = W / 2;
+  const cx = x + W / 2;
 
   // Warehouse name
-  const nameSize = 8;
-  centered(page, WAREHOUSE_NAME, fonts.reg, nameSize, cx, top - 3 * MM - nameSize * 0.8, BLACK);
+  const nameSize = d.nameSize;
+  centered(page, WAREHOUSE_NAME, fonts.reg, nameSize, cx, top - d.nameTopMm * MM - nameSize * 0.8, BLACK);
 
   // QR block
-  const qrSize = (opt.includeCode128 ? 34 : 48) * MM;
-  const qrTop = top - 8 * MM - q;
+  const qrSize = (opt.includeCode128 ? d.qrWithCode128Mm : d.qrMm) * MM;
+  const qrTop = top - d.qrTopMm * MM - q;
   drawQr(page, bin.bin_code, cx - qrSize / 2, qrTop, qrSize);
   let cursor = qrTop - qrSize - q;
 
   if (opt.includeCode128) {
     const bw = W - 2 * (3 * MM + q); // label margin + quiet zone each side
-    const bh = 11 * MM;
-    drawCode128(page, bin.bin_code, 3 * MM + q, cursor, bw, bh);
-    cursor -= bh + q;
+    const bh = d.code128Mm * MM;
+    drawCode128(page, bin.bin_code, x + 3 * MM + q, cursor, bw, bh);
+    cursor -= bh + d.code128GapMm * MM;
   }
 
   // Colour band (level colour) or solid black in mono mode.
-  const bandH = 15 * MM;
+  const bandH = d.bandMm * MM;
   const bandY = cursor - bandH;
   const levelHex = bin.level ? LEVEL_COLORS[bin.level]?.hex : undefined;
   const bandColor = opt.colorMode === "color" && levelHex ? hexToRgb(levelHex) : BLACK;
   const textColor = opt.colorMode === "color" && levelHex ? BLACK : WHITE;
-  page.drawRectangle({ x: 0, y: bandY, width: W, height: bandH, color: bandColor });
+  page.drawRectangle({ x, y: bandY, width: W, height: bandH, color: bandColor });
 
-  const codeSize = Math.max(LABEL.minBinCodePt, 32);
+  const codeSize = Math.max(LABEL.minBinCodePt, d.codePt);
   const codeW = fonts.bold.widthOfTextAtSize(bin.bin_code, codeSize);
   const arrowDir = bin.position ? POSITION_ARROW[bin.position] : undefined;
   const arrowLen = 11 * MM;
@@ -122,16 +130,20 @@ function drawCell(page: PDFPage, bin: LabelBin, originY: number, opt: LabelOptio
     ? `Aisle ${bin.zone}  Rak ${bin.rack}  Level ${bin.level}  Pos ${bin.position}  ABC ${bin.abc_class ?? "-"}`
     : `Area ${bin.zone}${bin.position ? `  Lajur ${bin.position}` : ""}  ABC ${bin.abc_class ?? "-"}`;
   const infoSize = Math.max(LABEL.minInfoPt, 9);
-  centered(page, info, fonts.reg, infoSize, cx, bandY - 2 * MM - infoSize * 0.8, BLACK);
+  centered(page, info, fonts.reg, infoSize, cx, bandY - d.infoGapMm * MM - infoSize * 0.8, BLACK);
 }
 
 /** Groups rack bins into upright strips: same aisle + rack + position, levels A..E. */
 function toStrips(bins: LabelBin[]): LabelBin[][] {
   const groups = new Map<string, LabelBin[]>();
   for (const b of bins) {
-    const key = b.rack ? `${b.zone}-${b.rack}-${b.position}` : `floor-${b.bin_code}`;
+    if (!b.rack) continue;
+    const key = `${b.zone}-${b.rack}-${b.position}`;
     groups.set(key, [...(groups.get(key) ?? []), b]);
   }
+  // Floor bins have no upright: five to a strip, in order, so they fill the sheet like racks do.
+  const floor = bins.filter((b) => !b.rack);
+  for (let i = 0; i < floor.length; i += LABEL.a4.levels) groups.set(`floor-${i}`, floor.slice(i, i + LABEL.a4.levels));
   const order = (l: string | null) => (l ? STRIP_LEVEL_ORDER.indexOf(l as (typeof STRIP_LEVEL_ORDER)[number]) : 0);
   return [...groups.values()].map((g) => g.sort((a, b) => order(a.level) - order(b.level)));
 }
@@ -149,22 +161,31 @@ export async function buildLabelPdf(bins: LabelBin[], opt: LabelOptions): Promis
       drawCell(page, b, 0, opt, fonts, true);
     }
   } else {
-    const A = LABEL.arrowBlockMm * MM;
-    for (const strip of toStrips(bins)) {
-      const dir = strip[0].position ? POSITION_ARROW[strip[0].position] : undefined;
-      const hasArrows = Boolean(strip[0].rack && dir);
-      const pageH = strip.length * H + (hasArrows ? 2 * A : 0);
-      const page = pdf.addPage([W, pageH]);
-      if (hasArrows) {
-        drawArrow(page, dir!, W / 2, pageH - A / 2, 34 * MM, BLACK);
-        drawArrow(page, dir!, W / 2, A / 2, 34 * MM, BLACK);
+    // A4 portrait (LABEL.a4): two uprights side by side, the Per sel layout made compact, all five
+    // levels on one sheet, no arrows. Print at 100%.
+    const g = LABEL.a4;
+    const SW = g.stripWidthMm * MM, CH = g.cellHeightMm * MM, M = g.marginMm * MM;
+    const xs = [M, M + SW + g.gapMm * MM];
+    const top = 297 * MM - (297 * MM - g.levelsPerSheet * CH) / 2; // centred vertically
+    const strips = toStrips(bins);
+    for (let s = 0; s < strips.length; s += 2) {
+      const pair = strips.slice(s, s + 2);
+      const rows = Math.max(...pair.map((st) => st.length));
+      for (let r0 = 0; r0 < rows; r0 += g.levelsPerSheet) {
+        const page = pdf.addPage([210 * MM, 297 * MM]);
+        pair.forEach((strip, col) => {
+          const x = xs[col];
+          const cells = strip.slice(r0, r0 + g.levelsPerSheet);
+          cells.forEach((b, i) => {
+            const originY = top - (i + 1) * CH;
+            drawCell(page, b, originY, opt, fonts, false, x, g.stripWidthMm, A4_CELL);
+            // Hairline between cells so a strip can also be cut into single cells.
+            if (i > 0) page.drawLine({ start: { x, y: originY + CH }, end: { x: x + SW, y: originY + CH }, thickness: 0.3, color: rgb(0.6, 0.6, 0.6) });
+          });
+          // Cutting outline around this sheet's part of the strip.
+          if (cells.length) page.drawRectangle({ x, y: top - cells.length * CH, width: SW, height: cells.length * CH, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.3 });
+        });
       }
-      strip.forEach((b, i) => {
-        const originY = pageH - (hasArrows ? A : 0) - (i + 1) * H;
-        drawCell(page, b, originY, opt, fonts, false);
-        // Hairline between cells so a continuous strip can also be cut into cells.
-        if (i > 0) page.drawLine({ start: { x: 0, y: originY + H }, end: { x: W, y: originY + H }, thickness: 0.3, color: rgb(0.6, 0.6, 0.6) });
-      });
     }
   }
   return pdf.save();

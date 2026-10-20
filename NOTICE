@@ -1,0 +1,11 @@
+CKB Warehouse WMS
+Copyright (c) 2026 PT Cipta Krida Bahari. All rights reserved. See LICENSE.
+
+This software uses open-source packages under their own licences (MIT, Apache-2.0,
+ISC, BSD, SIL Open Font License 1.1 and others). The full list, with each package's
+licence and copyright text, is in lib/third-party-notices.json and is shown in the
+app under Lisensi (/lisensi). Regenerate it with `npm run notices` after changing
+dependencies.
+
+Fonts: IBM Plex Sans and IBM Plex Sans Condensed, Copyright IBM Corp., licensed
+under the SIL Open Font License 1.1.

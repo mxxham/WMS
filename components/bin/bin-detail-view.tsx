@@ -11,10 +11,11 @@ import { HOLD_REASONS, REASON_CODES, type HoldReason, type ReasonCode } from "@/
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 
 const rowTone: Record<ExpiryStatus, string> = {
-  expired: "border-l-4 border-l-bad bg-bad/5",
-  near: "border-l-4 border-l-warn bg-warn/10",
-  ok: "border-l-4 border-l-ok",
-  unknown: "border-l-4 border-l-steel-300",
+  // A wash only: the ExpiryBadge in each row carries the state in words (DESIGN.md §5).
+  expired: "bg-bad/5",
+  near: "bg-warn/10",
+  ok: "",
+  unknown: "",
 };
 const moveLabel: Record<string, string> = { inbound: "Terima", putaway: "Putaway", picking: "Pick", transfer: "Transfer", adjustment: "Adjust" };
 
@@ -96,19 +97,29 @@ export function BinDetailView({ detail, role, onChanged, compact = false }: { de
           <ol className="divide-y divide-steel-100 rounded-md bg-white text-sm">
             {movements.map((m) => {
               const out = m.from_bin?.bin_code === bin.bin_code && m.type !== "adjustment";
-              return (
-                <li key={m.id} className="flex items-start justify-between gap-3 px-3 py-2">
+              const pt = (m as any).pick_tasks ?? (m as any).pick_task ?? null;
+              const w = pt?.waves ? (Array.isArray(pt.waves) ? pt.waves[0] : pt.waves) : null;
+              const href = pt?.wave_id && w?.planned_date ? `/waves?date=${w.planned_date}&wave=${pt.wave_id}` : null;
+              const row = (
+                <div className="flex items-start justify-between gap-3 px-3 py-2">
                   <div>
                     <span className="font-semibold">{moveLabel[m.type]}</span>{" "}
                     <span className="tabular">{m.items?.sku}</span>{m.batch_lot ? <span className="text-steel-500"> · {m.batch_lot}</span> : null}
                     <div className="text-xs text-steel-500">
                       {m.from_bin?.bin_code ?? "—"} → {m.to_bin?.bin_code ?? "—"} · {m.by_name ?? m.profiles?.name ?? "Sistem"}{m.approved_by_name && m.approved_by_name !== m.by_name ? ` (disetujui ${m.approved_by_name})` : ""} · {fmtDateTime(m.created_at)}
                       {m.reason_code ? ` · ${REASON_CODES[m.reason_code as ReasonCode] ?? m.reason_code}` : ""}{m.note ? ` · ${m.note}` : ""}
+                      {pt?.shipment_number ? <span className="text-ckb"> · shipment {pt.shipment_number}</span> : null}
+                      {href && <span className="text-ckb"> · lihat wave →</span>}
                     </div>
                   </div>
                   <div className={cn("font-semibold tabular", out || m.quantity < 0 ? "text-bad" : "text-ok")}>
                     {out ? "−" : m.quantity < 0 ? "" : "+"}{fmtNum(m.quantity)}
                   </div>
+                </div>
+              );
+              return (
+                <li key={m.id} className="hover:bg-steel-50">
+                  {href ? <Link href={href} className="block">{row}</Link> : row}
                 </li>
               );
             })}

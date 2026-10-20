@@ -38,7 +38,7 @@ select pg_temp.check('NO 3 waits for NO 1 #2, and the notice knows that move and
   exists (select 1 from task_waits where task_id = (pg_temp.t('3',1)).id
           and wait_task_id = (pg_temp.t('1',2)).id and wait_wave_status = 'RESCHEDULED' and wait_qty = 28));
 select pg_temp.check('a Tunda wave cannot be worked on the normal way',
-  pg_temp.fails(format($q$select post_task_by(%L, null, null, null, null, null, 'Budi')$q$, (pg_temp.t('1',2)).id), '%RESCHEDULED%'));
+  pg_temp.fails(format($q$select post_task_by(%L, null, null, null, null, null, 'Budi', 'CF01C01')$q$, (pg_temp.t('1',2)).id), '%RESCHEDULED%'));
 reset role;
 update profiles set role = 'operator' where id = '11111111-1111-1111-1111-111111111111';
 set role authenticated;
@@ -58,7 +58,7 @@ select pg_temp.check('logged as posted without its pick',
   exists (select 1 from execution_events where entity_id = (pg_temp.t('1',2)).id and reason like 'Bin To Bin diposting tanpa pick-nya oleh Budi (wave NO 1 ditunda)'));
 select pg_temp.check('NO 3 no longer waits, and posts',
   not exists (select 1 from task_waits where task_id = (pg_temp.t('3',1)).id)
-  and (post_task_by((pg_temp.t('3',1)).id, null, null, null, null, null, 'Budi')->>'result') = 'POSTED' and pg_temp.qty('CF38A01') = 24);
+  and (post_task_by((pg_temp.t('3',1)).id, null, null, null, null, null, 'Budi', 'CF38A01')->>'result') = 'POSTED' and pg_temp.qty('CF38A01') = 24);
 select pg_temp.check('posting the same move again refused',
   pg_temp.fails(format($q$select post_move_early(%L, 'Budi')$q$, (pg_temp.t('1',2)).id), '%sudah COMPLETED%'));
 rollback;

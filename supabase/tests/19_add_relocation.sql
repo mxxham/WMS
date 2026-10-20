@@ -40,7 +40,7 @@ select pg_temp.check('the later task moved one place down',
 select pg_temp.check('a second open move from that bin refused',
   pg_temp.fails(format($q$select add_relocation(%L, 'CF38A02', 1, 'Budi')$q$, pg_temp.pick4()), '%Sudah ada Bin To Bin%'));
 select pg_temp.check('pick + added move post together: 67 out, 12 down, 1 left for #6',
-  (post_pick_with_move(pg_temp.pick4(), (pg_temp.t(5)).id, null, null, null, 'Budi')->'move'->>'result') = 'POSTED'
+  (post_pick_with_move(pg_temp.pick4(), (pg_temp.t(5)).id, null, null, null, 'Budi', 'CF38E01')->'move'->>'result') = 'POSTED'
   );
 select pg_temp.check('bins after: CF38E01 1, CF38A02 12', pg_temp.qty('CF38E01') = 1 and pg_temp.qty('CF38A02') = 12);
 rollback;
