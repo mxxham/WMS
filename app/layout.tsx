@@ -6,6 +6,7 @@ import "@fontsource/ibm-plex-sans-condensed/500.css";
 import "@fontsource/ibm-plex-sans-condensed/700.css";
 import "./globals.css";
 import { BRAND } from "@/config/brand";
+import { Analytics } from "@vercel/analytics/next";
 
 // "only light": browser and OS auto-dark features (Android "darken web pages", Chrome auto dark mode,
 // Firefox/Zen website dark mode) leave the app alone; darkreader-lock does the same for Dark Reader engines.
@@ -19,7 +20,10 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
