@@ -1,8 +1,8 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { TabsNav } from "@/components/app/tabs-nav";
-import { SHIPMENT_STATE_LABEL, type ShipmentState } from "@/lib/pick-audit";
-import { fmtNum } from "@/lib/utils";
+import { SHIPMENT_STATE_LABEL, type ShipmentState, MOVE_STATE_LABEL, type MoveState } from "@/lib/pick-audit";
+import { fmtNum, cn } from "@/lib/utils";
 import { AuditHeader, auditDate } from "../audit-header";
 import { AccuracyView } from "./accuracy-view";
 import { sheetRackBins, sheetShipments, type SheetLineRow } from "./file/data";
@@ -11,6 +11,8 @@ import { DownloadPickAudit } from "./download-pick-audit";
 import { rackBins, rackSummary, RACK_STATE_LABEL, type RackState } from "./rack-data";
 import { RackList } from "./rack-list";
 import { ShipmentList, type ShipmentRow } from "./shipment-list";
+import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -60,13 +62,17 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
       </div>
     );
   } else {
-    const [{ data: today }, { data: carried }] = await Promise.all([
+    const [{ data: today }, { data: carried }, { data: moves }] = await Promise.all([
       supabase.from("pick_audit_shipment").select("*").eq("planned_date", date).order("wave_no").order("shipment_number"),
       supabase.from("pick_audit_shipment").select("*").lt("planned_date", date).in("state", OPEN).order("planned_date").order("shipment_number"),
+      supabase.from("pick_audit_move").select("wave_id, wave_no, planned_date, line_state").eq("planned_date", date).order("wave_no").order("seq"),
     ]);
     const rows = (today ?? []) as ShipmentRow[];
     const earlier = (carried ?? []) as ShipmentRow[];
+    const moveRows = (moves ?? []) as { wave_id: string; wave_no: string; planned_date: string; line_state: MoveState }[];
     const count = (s: ShipmentState) => rows.filter((r) => r.state === s).length;
+    const moveCount = (s: MoveState) => moveRows.filter((r) => r.line_state === s).length;
+    const moveWaves = [...new Set(moveRows.map((m) => m.wave_no))].sort();
     body = (
       <div className="space-y-4">
         <DownloadPickAudit date={date} />
@@ -83,6 +89,35 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
           <section className="space-y-2">
             <h2 className="font-cond text-lg font-semibold text-bad">Belum dimuat dari tanggal sebelumnya</h2>
             <ShipmentList rows={earlier} empty="" showDate />
+          </section>
+        )}
+        {moveRows.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="font-cond text-lg font-semibold text-ckb">Pindahan bin (replenish)</h2>
+            <Card>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  {(["TODO", "MISMATCH", "OK", "AUTO_PASS", "RESOLVED"] as MoveState[]).map((s) => (
+                    <div key={s} className="rounded-lg bg-white p-3">
+                      <div className="font-cond text-3xl font-semibold tabular">{fmtNum(moveCount(s))}</div>
+                      <div className="text-xs text-steel-500">{MOVE_STATE_LABEL[s].toLowerCase()}</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm text-steel-500">
+                  Wave dengan pindahan:{" "}
+                  {moveWaves.map((w, i) => (
+                    <Link
+                      key={w}
+                      href={`/audit/picking/${moveRows.find((m) => m.wave_no === w)?.wave_id}/${w}`}
+                      className={cn("underline hover:text-ckb", i > 0 && "ml-1")}
+                    >
+                      NO {w}
+                    </Link>
+                  ))}
+                </p>
+              </CardContent>
+            </Card>
           </section>
         )}
       </div>

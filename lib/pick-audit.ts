@@ -42,6 +42,16 @@ export const SHIPMENT_STATE_TONE: Record<ShipmentState, string> = {
   CANCELLED: "bg-steel-100 text-steel-500 line-through",
 };
 
+/** Move (REPLENISH) audit line states — same machine as pick audit. */
+export type MoveState = "AUTO_PASS" | "TODO" | "OK" | "MISMATCH" | "RESOLVED";
+export const MOVE_STATE_LABEL: Record<MoveState, string> = {
+  AUTO_PASS: "Tidak dipindah (0)",
+  TODO: "Belum diaudit",
+  OK: "OK",
+  MISMATCH: "Selisih",
+  RESOLVED: "Diterima supervisor",
+};
+
 export type Resolution = "ACCEPT_SHORT" | "ACCEPT_BATCH";
 export const RESOLUTION_LABEL: Record<Resolution, string> = {
   ACCEPT_SHORT: "Terima kurang",
@@ -171,4 +181,22 @@ export function binConfirm(l: { scanned_code: string | null | undefined; scan_me
 
 export function scanCompliance(scanned: boolean[]): number | null {
   return pct(scanned.filter(Boolean).length, scanned.length);
+}
+
+/**
+ * Summarize a wave's move audit lines for display — mirrors the pick audit style.
+ * Returns counts by line_state plus overall progress.
+ */
+export function summarizeMoveAudit(lines: { line_state: MoveState }[]): {
+  total: number; todo: number; ok: number; mismatch: number; resolved: number; autoPass: number; progress: number;
+} {
+  const total = lines.length;
+  const todo = lines.filter((l) => l.line_state === "TODO").length;
+  const ok = lines.filter((l) => l.line_state === "OK").length;
+  const mismatch = lines.filter((l) => l.line_state === "MISMATCH").length;
+  const resolved = lines.filter((l) => l.line_state === "RESOLVED").length;
+  const autoPass = lines.filter((l) => l.line_state === "AUTO_PASS").length;
+  const passed = ok + resolved + autoPass;
+  const progress = total ? (passed * 100) / total : 100;
+  return { total, todo, ok, mismatch, resolved, autoPass, progress };
 }

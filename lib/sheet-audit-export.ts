@@ -1,4 +1,4 @@
-import { PICK_ERROR_LABEL, type PickError } from "@/lib/pick-audit";
+import { PICK_ERROR_LABEL, type PickError, type MoveState } from "@/lib/pick-audit";
 
 /**
  * A picking audit as spreadsheet rows, from the WMS file (0029-0032) or from
@@ -12,7 +12,7 @@ export type ExportLine = {
   qty: number; bin_remaining: number | null; line_state: "TODO" | "OK" | "MISMATCH" | "RESOLVED" | "AUTO_PASS";
 };
 export type ExportAttempt = {
-  line_id: string; attempt_no: number; checker_name: string; method: "STAGING" | "RACK"; result: "OK" | "MISMATCH";
+  line_id: string; attempt_no: number; checker_name: string; method: "STAGING" | "RACK" | "MOVE" | null; result: "OK" | "MISMATCH";
   errors: PickError[]; counted_qty: number; found_sku: string; found_batch: string; rack_system: number | null;
   rack_counted: number | null; note: string | null; correction: boolean; created_at: string;
 };
@@ -20,6 +20,10 @@ type Row = Record<string, string | number | null>;
 
 const STATE: Record<ExportLine["line_state"], string> = {
   TODO: "Belum diaudit", OK: "OK", MISMATCH: "Selisih", RESOLVED: "Diterima supervisor", AUTO_PASS: "Tidak dipick (0)",
+};
+
+const MOVE_STATE_LABEL: Record<MoveState, string> = {
+  TODO: "Belum diaudit", OK: "OK", MISMATCH: "Selisih", RESOLVED: "Diterima supervisor", AUTO_PASS: "Tidak dipindah (0)",
 };
 
 /** 'YYYY-MM-DD HH:mm' in Jakarta time. */
@@ -72,10 +76,66 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     const l = lineById.get(a.line_id);
     return {
       Waktu: jakartaTime(a.created_at), Bin: l?.bin_code ?? null, SKU: l?.sku ?? null, Shipment: l?.shipment_number ?? null,
-      "Audit ke": a.attempt_no, Checker: a.checker_name, Cara: a.method === "RACK" ? "Per rak" : "Per shipment",
+      "Audit ke": a.attempt_no, Checker: a.checker_name, Cara: a.method === "RACK" ? "Per rak" : a.method === "MOVE" ? "Pindahan bin" : "Per shipment",
       Hasil: a.result === "OK" ? "OK" : "Selisih", Error: errorText(a.errors), [sisaLabel]: a.rack_system, "Sisa dihitung": a.rack_counted,
       "Dihitung (baris)": Number(a.counted_qty), Ditemukan: a.found_sku, Catatan: a.note, Ubah: a.correction ? "Ya" : null,
     };
   });
   return { bins, lines: lineRows, history };
+}
+
+/**
+ * Build move-audit export rows: one row per move line.
+ * Mirrors auditWorkbookRows style but for REPLENISH (no shipment, has to_bin).
+ */
+export function moveRows(
+  lines: Array<{
+    task_id: string; wave_no: string; seq: number;
+    from_bin: string; from_zone: string | null; to_bin: string; to_zone: string | null;
+    sku: string; description: string; uom: string | null;
+    batch: string; expiry: string | null;
+    planned_qty: number; moved_qty: number;
+    line_state: MoveState;
+  }>,
+  attempts: ExportAttempt[]
+): { lines: Row[]; history: Row[] } {
+  const byLine = new Map<string, ExportAttempt[]>();
+  for (const a of [...attempts].sort((x, y) => x.attempt_no - y.attempt_no)) byLine.set(a.line_id, [...(byLine.get(a.line_id) ?? []), a]);
+  const lastOf = (id: string) => byLine.get(id)?.at(-1);
+  const lineById = new Map(lines.map((l) => [l.task_id, l]));
+
+  const lineRows: Row[] = [...lines].sort((a, b) => a.seq - b.seq).map((l) => {
+    const last = lastOf(l.task_id);
+    return {
+      NO: l.wave_no, Seq: l.seq,
+      "Dari bin": l.from_bin, "Zona asal": l.from_zone,
+      "Ke bin": l.to_bin, "Zona tujuan": l.to_zone,
+      SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
+      Batch: l.batch, Expired: l.expiry,
+      Rencana: Number(l.planned_qty), Dipindah: Number(l.moved_qty),
+      Status: MOVE_STATE_LABEL[l.line_state],
+      Error: last ? errorText(last.errors) : null,
+      "Dihitung (baris)": last ? Number(last.counted_qty) : null,
+      Selisih: last ? Number(last.counted_qty) - Number(l.moved_qty) : null,
+      "Barang ditemukan": last && last.found_sku !== l.sku ? last.found_sku : null,
+      Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
+      Catatan: last?.note ?? null,
+      Diubah: byLine.get(l.task_id)?.some((a) => a.correction) ? "Ya" : null,
+    };
+  });
+
+  const history: Row[] = [...attempts].filter((a) => lineById.has(a.line_id)).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((a) => {
+    const l = lineById.get(a.line_id);
+    return {
+      Waktu: jakartaTime(a.created_at),
+      "Dari bin": l?.from_bin ?? null, "Zona asal": l?.from_zone ?? null,
+      "Ke bin": l?.to_bin ?? null, "Zona tujuan": l?.to_zone ?? null,
+      SKU: l?.sku ?? null,
+      "Audit ke": a.attempt_no, Checker: a.checker_name, Cara: "Pindahan bin",
+      Hasil: a.result === "OK" ? "OK" : "Selisih", Error: errorText(a.errors),
+      "Sisa sistem (dipindah)": a.rack_system, "Sisa dihitung": a.rack_counted,
+      "Dihitung (baris)": Number(a.counted_qty), Ditemukan: a.found_sku, Catatan: a.note, Ubah: a.correction ? "Ya" : null,
+    };
+  });
+  return { lines: lineRows, history };
 }

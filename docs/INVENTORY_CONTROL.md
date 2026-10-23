@@ -95,6 +95,7 @@ mutasi). Aturannya tetap dijalankan database: nama yang sama ditolak.
 
     - Selisih diperbaiki di lantai lalu diaudit ulang. Supervisor (bukan picker, bukan checker) boleh **terima kurang** atau **terima batch lain**; stok dikoreksi dengan kode `PICK_AUDIT` dan bin asal dijadwalkan hitung ulang.
     - Shipment hanya bisa **dimuat** bila semua barisnya lolos. Setelah dimuat tidak bisa diubah.
+    - **Pindahan bin (replenish)** di wave yang sama juga diaudit: yang dihitung adalah apa yang tiba di bin pickface, tanpa melihat laporan petugas pindah. Selisih diperbaiki di lantai lalu diaudit ulang, atau diubah oleh supervisor (**Ubah**). Pindahan tidak bisa **diterima** kurang/batch lain seperti pick — tidak ada pengiriman yang terlibat. Hasil audit ikut di unduhan Excel (sheet `Pindahan bin`).
     - Akurasi picking dihitung dari percobaan pertama (Audit picking → Akurasi picking): per picker, SKU, aisle dan jenis kesalahan, plus kepatuhan scan.
     
 
