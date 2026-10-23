@@ -58,6 +58,26 @@ export const LABEL = {
         qrMm: 31, qrWithCode128Mm: 22, code128Mm: 7, bandMm: 11 },
 };
 
+/**
+ * "Kartu palet" from a Form Checker upload (/labels/pallet): one A4 LANDSCAPE page per pallet
+ * row, big enough to read from the floor with the item stacked up high. Sizes in mm and pt.
+ * A4 landscape (297 x 210) puts the item code wider across the page; font sizes below keep
+ * every card field on one page.
+ */
+export const PALLET_CARD = {
+  pageWidthMm: 297,
+  pageHeightMm: 210,
+  marginMm: 12,
+  contextPt: 12,   // Month · user · shipment no
+  labelPt: 10,     // small gray field labels
+  skuPt: 108,      // item code — 1.5× the start (72); 9 digits fill ~75% of the landscape width
+  qtyPt: 64,       // ACT. QTY value — same size as the batch no
+  uomPt: 28,       // UoM beside the qty
+  locationPt: 96,  // LOCATION value — big for reading from the floor
+  batchPt: 64,     // Batch No. value — the thing a checker scans for from afar
+  detailPt: 12,    // optional detail strip (exp/mfg/GR/putaway in one gray line)
+};
+
 export type BinParts = { zone: string; rack: string | null; level: string | null; position: string | null };
 
 /** Split a bin code into its parts. Returns null when the code is not recognised. */

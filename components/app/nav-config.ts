@@ -37,6 +37,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   ] },
   { title: "Admin", links: [
     { href: "/labels", label: "Label", icon: Printer, roles: SUP },
+    { href: "/labels/pallet", label: "Kartu palet", icon: Printer, roles: SUP },
     { href: "/admin/items", label: "Master item", icon: Tags, roles: SUP },
     { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, roles: SUP },
     { href: "/admin/import", label: "Import", icon: Upload, roles: ["admin"] },
