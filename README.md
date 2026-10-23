@@ -536,3 +536,4 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0060_post_wave_sheet_final.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).
 # visualization_simulation
 # visualization_simulation
+# visualization_simulation
