@@ -46,7 +46,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 
 | Bins | SKUs | Stock rows | Cartons | Migrations | SQL tests | TS test files |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **2,970** | **106** | **1,790** | **52,078** | **60** | **35** | **38** |
+| **2,970** | **106** | **1,790** | **52,078** | **61** | **36** | **38** |
 
 <sub>Stock figures are the seed (24 Sep 2026 WMS file). Aisles CA–CF for Shell; aisles CG–CH are the physically confirmed CKB 3PL area (0086) — the WMS sheet reads 0 there because it does not track 3PL stock.</sub>
 
@@ -57,6 +57,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <table>
 <tr><th align="left">Area</th><th align="left">What it does</th></tr>
 <tr><td><b>Labels</b></td><td>Rack column strips A–E on A4 (two 95 × 85 mm columns per sheet) or single 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
+<tr><td><b>Pallet cards</b></td><td>Upload a Form Checker workbook on <code>Kartu palet</code> — one A4 landscape card per pallet row, huge fonts (SKU 108 pt, ACT. QTY and Batch 64 pt, Location 96 pt) to read from the floor with the item stacked up high, UoM from the item master, hand-fill lines when the file leaves Location/Batch empty; parser spec in <code>docs/FORM_CHECKER_FORMAT.md</code></td></tr>
 <tr><td><b>Scan</b></td><td>Phone camera or USB/Bluetooth scanner, always focused, submits on Enter</td></tr>
 <tr><td><b>3D warehouse</b></td><td>2,970 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
 <tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>
@@ -65,10 +66,10 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <tr><td><b>Finding things</b></td><td>Tap a bin for its stock, open rows and movements; <code>Riwayat</code> per row; filter by SKU or bin, only open, only problems; finished waves fold away</td></tr>
 <tr><td><b>Putaway & pickfaces</b></td><td>Sheet import with per-row conflict decisions; one fixed pick bin per SKU</td></tr>
 <tr><td><b>Inventory control</b></td><td>Holds, reason codes, four-eyes approval, blind cycle counts, receiving, SAP reconciliation, FEFO compliance, <code>Laporan WMS harian</code> (on hand and remain per day)</td></tr>
-<tr><td><b>Audits</b></td><td>Blind picking audit in staging and at the rack, putaway audit, WMS-file audit; a shipment loads only when every line passes</td></tr>
+<tr><td><b>Audits</b></td><td>Blind picking audit in staging and at the rack, putaway audit, WMS-file audit, <b>Pindahan bin (replenish) audit</b>; a shipment loads only when every line passes</td></tr>
 </table>
 
-Full allocation rules: **`docs/ALLOCATOR.md`** · Inventory control: **`docs/INVENTORY_CONTROL.md`** · Data issues: **`docs/DATA_ISSUES.md`** · Column mapping: **`docs/DATA_MAPPING.md`**
+Full allocation rules: **`docs/ALLOCATOR.md`** · Inventory control: **`docs/INVENTORY_CONTROL.md`** · Data issues: **`docs/DATA_ISSUES.md`** · Column mapping: **`docs/DATA_MAPPING.md`** · Form Checker format: **`docs/FORM_CHECKER_FORMAT.md`**
 
 <details>
 <summary><b>Label sample — 203 dpi print output</b></summary>
@@ -201,6 +202,7 @@ psql -f supabase/tests/39_pick_line.sql                  # paperless picking, Mi
 psql -f supabase/tests/40_rack_scan.sql                  # pick confirmed by the rack label (0068), same
 psql -f supabase/tests/41_wave_reopen.sql                # Buka lagi and Pulihkan wave (0069), same
 psql -f supabase/tests/42_accounts.sql                   # personal accounts, deactivation, sign-in limit (0071), same
+psql -f supabase/tests/55_move_audit.sql                 # Pindahan bin audit (0088), same
 ```
 Or all of them at once against a temporary local database: `scripts/sql-test.sh`.
 
@@ -481,6 +483,7 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - **A shipment cannot be loaded until every line passes.** The gate is part of the wave, not a report somebody remembers to run.
 - **The same audit runs against the WMS workbook** when the day's picks come from the K_ONE sheet rather than from `pick_tasks`, so accuracy is measured the same way on both paths.
 - **A count saved by mistake can be re-recorded** by a supervisor, and the correction is itself recorded.
+- **Move audits (Pindahan bin) are not supervisor-resolvable** — a mismatch is fixed on the floor and re-audited, or corrected via supervisor Ubah; the `resolve_pick_mismatch` function refuses REPLENISH tasks. The Excel download gains a "Pindahan bin" sheet with from/to bin, planned vs moved, and history.
 
 </details>
 

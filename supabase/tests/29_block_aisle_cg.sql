@@ -1,4 +1,9 @@
--- Aisle CG does not exist: its bins are blocked, out of Bin kosong, and an import does not bring them back (0054).
+-- 0054 mechanics, isolated: CG bins (the WMS sheet's 400 zero-qty rows) end up
+-- blocked, out of Bin kosong, the block is refused while a bin holds stock, and
+-- a later import does not revive the blocked status. Historical truth note: on
+-- 21 Oct 2026 the floor check reversed the "aisle does not exist" conclusion —
+-- CG (and CH) physically exist as the CKB 3PL area and 0086 reactivates them;
+-- this file still pins 0054's own behaviour by re-applying 0054 here.
 -- Runs in a transaction and rolls back. The seed loads after the migrations, so 0054's block is run here.
 \set ON_ERROR_STOP on
 \pset tuples_only on

@@ -1,8 +1,8 @@
 # Laporan kualitas data WMS (snapshot 24 September 2026)
 
-Sumber: `Warehouse_Management_System_24_September_2026___3_.xlsx`, sheet `WMS` (+ MASTER DATA, Master SKU, K_ONE).
+Sumber: `Warehouse_Management_System_24_September_2026_.xlsx`, sheet `WMS` (+ MASTER DATA, Master SKU, K_ONE).
 
-- Bin diimpor: **2570** (2560 bin rak, 10 lokasi lantai)
+- Bin diimpor: **2970** (2960 bin rak, 10 lokasi lantai)
 - SKU: **106**
 - Baris stok (bin+SKU+batch, qty > 0): **1790**
 - Total qty: **52,078**
@@ -87,9 +87,6 @@ Tidak ada baris yang dibuang diam-diam. Semua kasus di bawah perlu dicek dengan 
 - CD24D01 SKU 550044709
 - CD24D02 SKU 550044709
 - … dan 69 lainnya
-
-## Expired date kosong/tidak valid (diimpor tanpa tanggal) (1)
-- baris 537: CB35B01 SKU 550048593 nilai=''
 
 ## Qty error formula Excel (bin diimpor, stok tidak) (1)
 - baris 599: CC01C01 Remain Qty = #VALUE!

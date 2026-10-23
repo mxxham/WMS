@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { normalizeUsername, usernameError } from "@/lib/username";
 import { safeNext } from "@/lib/auth-route";
+import { normalizeApps, resolveAppsHome } from "@/lib/apps";
 
 const FAILED = "Nama pengguna atau kata sandi salah.";
 const LOCKED = "Terlalu banyak percobaan untuk nama pengguna ini. Coba lagi 15 menit lagi.";
@@ -36,5 +37,24 @@ export async function loginAction(_: { error?: string }, fd: FormData): Promise<
     && !(await (await createClient()).auth.signInWithPassword({ email, password })).error;
   await svc.rpc("login_result", { p_username: username, p_ip: ip, p_ok: ok });
   if (!ok) return { error: FAILED };
-  redirect(safeNext(String(fd.get("next") ?? "")));
+
+  const next = String(fd.get("next") ?? "");
+  if (next) {
+    // Explicit deep-link wins — existing behaviour.
+    redirect(safeNext(next));
+  }
+
+  // No explicit next: decide the home from the profile's app access. default-app data comes from the server, never from the client.
+  let home: "/" | "/ckb" | "/akses" = "/akses";
+  try {
+    const claims = await (await createClient()).auth.getClaims();
+    const id = claims.data?.claims?.sub;
+    const { data: profile, error } = await svc.from("profiles").select("apps, default_app").eq("id", id).single();
+    if (error) throw error;
+    home = resolveAppsHome(normalizeApps(profile?.apps), profile?.default_app ?? null);
+  } catch {
+    // Fail-closed: if the profile read fails for any reason (migration not applied, column missing,
+    // network error), send to /akses. normalizeApps returns [] when the column is missing → "/akses".
+  }
+  redirect(home);
 }

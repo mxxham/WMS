@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, requireAppAccess } from "@/lib/auth";
 import { Nav } from "@/components/app/nav";
 import { WaveAlerts } from "@/components/app/wave-alerts";
 import { WelcomeScreen } from "@/components/app/welcome-screen";
@@ -13,6 +13,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // The middleware already sent requests without a session to /login: no user here means a valid
   // token for a deactivated (or missing) profile. Sign it out.
   if (!user) redirect("/keluar?nonaktif=1");
+  // app-level gate: the (app) group is the Shell WMS; a CKB-only account is routed to /ckb,
+  // an account with no app to /akses.
+  await requireAppAccess("shell_wms");
   return (
     <SessionProvider user={{
       name: user.name, username: user.username, role: user.role, loginRequired: loginRequired(),

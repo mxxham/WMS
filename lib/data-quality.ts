@@ -61,7 +61,10 @@ export function findIssues(rows: StockRow[], todayIso: string, shelfLifeBySku: M
         (expiriesByBatch.get(k) ?? expiriesByBatch.set(k, new Set()).get(k)!).add(recorded);
       }
     }
-    if (rack && r.expiry_date && r.expiry_date < todayIso) out.push({ kind: "expired", row: r, detail: `expired ${r.expiry_date}` });
+    if (rack && r.expiry_date && r.expiry_date < todayIso) {
+      const expected = expectedExpiry(r.batch_lot, shelfLifeBySku.get(r.sku) ?? defaultShelfLife);
+      out.push({ kind: "expired", row: r, detail: `expired ${r.expiry_date}`, suggestedExpiry: expected ?? undefined });
+    }
     if (rack && r.upp) pallets.set(r.bin_code, (pallets.get(r.bin_code) ?? 0) + Number(r.quantity) / Number(r.upp));
   }
   // One batch, several expiries: every row of it is listed so the wrong one can be fixed.

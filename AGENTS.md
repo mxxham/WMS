@@ -72,7 +72,7 @@ components/<area>/       bin, scan, warehouse, app/nav.tsx (role-gated nav)
 lib/allocator/           FEFO engine — pure functions, zero I/O
 lib/*.ts                 feature logic: labels, import, audit, SAP, batch codes
 supabase/migrations/     48 files; the real index of what exists
-supabase/seed.sql        2,570 bins / 106 SKUs / 1,790 stock rows
+supabase/seed.sql        2,970 bins / 106 SKUs / 1,790 stock rows
 tests/*.test.ts          31 standalone tsx files
 ```
 
@@ -166,7 +166,7 @@ equipment mid-run. `splitPalletAndCaseTasks: false` combines them.
 - **A plan is not an execution.** Saving writes `waves`, `pick_tasks`, `outbound`. Stock moves when a
   task is posted.
 - **Use `Remain Qty`, not `Qty`** — it already accounts for the day's picks, putaways and transfers.
-- **List queries paginate at 1,000 rows.** Supabase's default limit silently truncates 2,570 bins.
+- **List queries paginate at 1,000 rows.** Supabase's default limit silently truncates 2,970 bins.
 - **The Excel reader stops at the last non-empty cell.** The WMS sheet declares a range to row
   1,048,563; reading only what exists cut import from ~21s to ~2s.
 
@@ -191,7 +191,7 @@ Lacak batch, Label, Master item) · `admin` (adds Import, Pengaturan).
   README §1 lists all 12 and where each one lives. Never scatter a value.
 - Print labels at **100% scale**. Labels are vectors, not PNGs, so 203 dpi stays sharp. Keep the
   3 mm QR/Code 128 quiet zone — scanners need it to find the start and end.
-- 3D uses one instanced mesh (one draw call for 2,570 bins) and `frameloop="demand"`. Bin
+- 3D uses one instanced mesh (one draw call for 2,970 bins) and `frameloop="demand"`. Bin
   coordinates are computed in the database from layout config — change a dimension once.
 
 ## Tests
@@ -288,9 +288,7 @@ the real floor incident that motivated them, and that context is the point.
   CE08A01 expired in 1930, batches CD39C01/C02 that Excel read as dates, 129 bins with qty 0, 57
   duplicate `Lokasi` rows. Column mapping is `docs/DATA_MAPPING.md`. Import
   reports these; it does not reject them, and neither should you — the goods are physically there.
-- **12 go-live assumptions in README §1 are still assumptions.** Rack 3D dimensions, ABC classes,
-  missing aisle CG, racks CC19/CC20/CE33, and the 90-day near-expiry threshold all need field
-  confirmation. Do not treat them as settled.
+- **11 go-live assumptions in README §1 are still assumptions.** Rack 3D dimensions, ABC classes, racks CC19/CC20/CE33, and the 90-day near-expiry threshold all need field confirmation. Do not treat them as settled. (Aisle CG/CH left this list on 21 Oct 2026 — physically confirmed as the CKB 3PL area, `0086_reopen_aisle_cg_ch.sql`.)
 - **Docs:** `README.md` (features, setup, phase-by-phase, design decisions) · `docs/ALLOCATOR.md`
   (FEFO spec) · `docs/INVENTORY_CONTROL.md` · `docs/DATA_ISSUES.md` · `docs/DATA_MAPPING.md` ·
   `docs/archive/allocator/` is **obsolete** — it describes code that has been replaced.

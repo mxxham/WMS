@@ -7,9 +7,10 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { ROLES } from "@/lib/username";
-import { createUser, resetPassword, setActive, setRole } from "./actions";
+import { createUser, resetPassword, setActive, setRole, setUserApps } from "./actions";
+import { APP_LABEL, type AppId } from "@/lib/apps";
 
-export type UserRow = { id: string; name: string; username: string; role: string; active: boolean };
+export type UserRow = { id: string; name: string; username: string; role: string; active: boolean; apps: AppId[]; default_app: AppId | null };
 const ROLE: Record<string, string> = { operator: "Operator", supervisor: "Supervisor", admin: "Admin" };
 
 export function UsersClient({ rows, me, shared, locked }: { rows: UserRow[]; me: string; shared: string[]; locked: boolean }) {
@@ -74,6 +75,29 @@ function AddUser() {
 function UserMenu({ u, self, lockedShared }: { u: UserRow; self: boolean; lockedShared: boolean }) {
   const [role, setR] = useState(u.role);
   const [pw, setPw] = useState("");
+  const [apps, setApps] = useState<AppId[]>(u.apps ?? []);
+  const [defaultApp, setDefaultApp] = useState<AppId | null>(u.default_app);
+  const [appsError, setAppsError] = useState<string | null>(null);
+  const bothApps = apps.length === 2;
+  const singleApp = apps.length === 1 ? apps[0] : null;
+  const effectiveDefault = bothApps ? defaultApp : singleApp;
+  const hasAnyApp = apps.length > 0;
+
+  const handleAppToggle = (app: AppId) => {
+    setApps((prev) => prev.includes(app) ? prev.filter((a) => a !== app) : [...prev, app]);
+    setAppsError(null);
+  };
+
+  const handleDefaultAppChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setDefaultApp(e.target.value as AppId);
+  };
+
+  const handleSaveApps = async () => {
+    const err = await setUserApps(u.id, apps, effectiveDefault);
+    if (err) setAppsError(err);
+    return err;
+  };
+
   if (lockedShared) {
     return (
       <ActionMenu title={u.name}>
@@ -95,6 +119,64 @@ function UserMenu({ u, self, lockedShared }: { u: UserRow; self: boolean; locked
           summary={`Kata sandi ${u.username} diganti. Sesi yang sedang masuk tetap berjalan sampai Keluar.`}
           extra={<div><Label htmlFor={`pw-${u.id}`}>Kata sandi baru (min. 8)</Label><Input id={`pw-${u.id}`} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></div>}
           onConfirm={() => resetPassword(u.id, pw)}>Reset kata sandi</ConfirmButton></div>
+      </MenuSection>
+      <MenuSection>
+        <div className="space-y-2">
+          <Label className="block text-sm font-medium">Akses aplikasi</Label>
+          <div className="flex flex-wrap gap-3">
+            {(["shell_wms", "ckb_3pl"] as AppId[]).map((app) => (
+              <Label key={app} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={apps.includes(app)}
+                  onChange={() => handleAppToggle(app)}
+                  className="h-4 w-4 rounded-md border-steel-300 text-ckb focus:ring-ckb"
+                />
+                {APP_LABEL[app]}
+              </Label>
+            ))}
+          </div>
+          {bothApps && (
+            <div>
+              <Label htmlFor={`default-app-${u.id}`} className="block text-sm font-medium mb-1">Aplikasi utama</Label>
+              <Select
+                id={`default-app-${u.id}`}
+                value={effectiveDefault ?? ""}
+                onChange={handleDefaultAppChange}
+                className="w-full max-w-xs"
+              >
+                {apps.map((app) => (
+                  <option key={app} value={app}>{APP_LABEL[app]}</option>
+                ))}
+              </Select>
+            </div>
+          )}
+          {singleApp && (
+            <div className="text-sm text-steel-500">
+              Aplikasi utama: <span className="font-medium">{APP_LABEL[singleApp]}</span> (otomatis)
+            </div>
+          )}
+          {!hasAnyApp && (
+            <p className="text-sm text-steel-500 italic">Tidak ada akses aplikasi — centang untuk memberi akses.</p>
+          )}
+          <div className="flex items-center gap-2">
+            <ConfirmButton
+              size="sm"
+              variant="outline"
+              title={`Simpan akses aplikasi ${u.name}`}
+              confirmLabel="Simpan"
+              summary={apps.length === 0
+                ? `Hapus semua akses aplikasi untuk ${u.name}.`
+                : bothApps
+                ? `Akses aplikasi ${u.name}: ${apps.map((a) => APP_LABEL[a]).join(", ")}. Aplikasi utama: ${APP_LABEL[effectiveDefault!]}.`
+                : `Akses aplikasi ${u.name}: ${APP_LABEL[singleApp!]}.`}
+              extra={appsError ? <p className="text-sm text-bad">{appsError}</p> : undefined}
+              onConfirm={handleSaveApps}
+            >
+              Simpan
+            </ConfirmButton>
+          </div>
+        </div>
       </MenuSection>
       {!self && (
         <MenuDanger>

@@ -111,8 +111,9 @@ export const DEFAULT_CONFIG: AllocatorConfig = {
   preferOpenPalletForRemainder: true,
   bestFitOpenPallets: true,
 
-  // CA01A01 → aisle CA, bay 01, level A, position 01. Racks stop at CF: aisle CG
-  // is only template rows in the WMS sheet (400, all empty), confirmed 5 Oct 2026.
+  // CA01A01 → aisle CA, bay 01, level A, position 01. CA–CF are the Shell
+  // aisles; CG/CH physically exist as the CKB 3PL area (0086) and are
+  // deliberately excluded from Shell picking: the FEFO route never goes there.
   rackLocationPattern: /^C[A-F]\d{2}[A-E]\d{2}$/,
   excludedLocations: ['STAGING', 'STAGING_INB', 'STAGING_OUT', 'Quarantine', 'QUARANTINE'],
   stagingLocations: ['STAGING', 'STAGING_OUT'],

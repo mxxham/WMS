@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 /** Pengguna (admin): every account, its role and status; create, change role, reset, deactivate. */
 export default async function UsersPage() {
   const me = await requireRole(["admin"]);
-  const { data } = await (await createClient()).from("profiles").select("id, name, username, role, active").order("active", { ascending: false }).order("name");
+  const { data } = await (await createClient()).from("profiles").select("id, name, username, role, active, apps, default_app").order("active", { ascending: false }).order("name");
   // The shared site account (app_metadata.shared): every floor device runs on it while login is off.
   const { data: auth } = await createServiceClient().auth.admin.listUsers({ perPage: 1000 });
   const siteEmail = process.env.SITE_ACCOUNT_EMAIL?.toLowerCase();

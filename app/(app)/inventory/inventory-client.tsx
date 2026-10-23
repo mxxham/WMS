@@ -1,17 +1,22 @@
 "use client";
 import { unpackLines, type PackedLines } from "@/lib/inventory-pack";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Download } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Edit2 } from "lucide-react";
 import { AdjustLineButton } from "@/components/app/adjust-line";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { OtherPersonField, PersonNameField, usePersonName } from "@/components/app/person-name";
+import { MANUAL_REASONS, REASON_CODES, type ReasonCode } from "@/lib/inventory-control";
 import { expiryStatus } from "@/config/warehouse";
 import { LOC_LABEL, SHELF_BUCKETS, locType, shelfBucket, stockKey, type LocType, type ShelfBucket } from "@/lib/inventory-view";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export type InvLine = {
   bin_code: string; zone: string; rack: string | null; level: string | null; bin_status: "active" | "blocked";
@@ -291,12 +296,179 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
   );
 }
 
+/** Per-row stock identity correction (batch / expiry / SKU). Mirrors AdjustLineButton pattern. */
+function CorrectIdentityButton({ line }: { line: Line }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"form" | "confirm">("form");
+  const [person, setPerson] = usePersonName();
+  const [sku, setSku] = useState(line.sku);
+  const [batch, setBatch] = useState(line.batch_lot);
+  const [expiry, setExpiry] = useState(line.expiry_date ?? "");
+  const [reason, setReason] = useState<ReasonCode | "">("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState("");
+  const [approver, setApprover] = useState("");
+  const [limit, setLimit] = useState(20);
+
+  // Approval limit from inventory_policy, fetched once per dialog open.
+  useEffect(() => {
+    if (!open) return;
+    createClient().rpc("inventory_policy").then(({ data }) =>
+      setLimit(Number((data as { adjust_approval_qty?: number } | null)?.adjust_approval_qty ?? 20)));
+  }, [open]);
+
+  const skuChanged = sku.trim().toUpperCase() !== line.sku.toUpperCase();
+  const batchChanged = batch.trim().toUpperCase() !== line.batch_lot.toUpperCase();
+  const expiryChanged = expiry !== (line.expiry_date ?? "");
+  const hasChanges = skuChanged || batchChanged || expiryChanged;
+  // SKU replacement enforces the same approval rule as the Adjust page:
+  // above the threshold a second person signs.
+  const needsApprover = skuChanged && Number(line.quantity) > limit;
+  const ready = hasChanges && !!reason && person.trim().length >= 2
+    && (!needsApprover || approver.trim().length >= 2);
+
+  function buildSummary() {
+    const newSku = sku.trim().toUpperCase() || line.sku;
+    const newBatch = batch.trim().toUpperCase() || "–";
+    const newExpiry = expiry || "–";
+    const op = skuChanged ? "SKU diganti" : "identitas dikoreksi";
+    setSummary(`${line.bin_code} / ${line.sku} ${line.batch_lot || "–"} → ${newSku} batch ${newBatch} exp ${fmtDate(newExpiry)} · ${fmtNum(Number(line.quantity))} karton · ${op}`);
+  }
+
+  async function review(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!ready) return;
+    buildSummary();
+    setStep("confirm");
+  }
+
+  async function commit() {
+    setBusy(true); setError(null);
+    const supabase = createClient();
+    try {
+      let err: { message: string } | null = null;
+      const pBin = line.bin_code;
+      const pSku = line.sku;
+      const pBatch = line.batch_lot;
+      const pExpiry = line.expiry_date;
+      if (!reason) return setError("Kode alasan wajib dipilih");
+      const pReason = REASON_CODES[reason];
+      const pByName = person.trim();
+
+      if (skuChanged) {
+        // SKU change → replace_stock_item
+        const { error } = await supabase.rpc("replace_stock_item", {
+          p_bin_code: pBin,
+          p_sku: pSku,
+          p_batch: pBatch,
+          p_expiry: pExpiry,
+          p_new_sku: sku.trim().toUpperCase(),
+          p_new_batch: batch.trim().toUpperCase(),
+          p_new_expiry: expiry,
+          p_new_qty: Number(line.quantity),
+          p_reason_code: reason,
+          p_reason: pReason,
+          p_by_name: pByName,
+          p_approver_name: needsApprover ? approver.trim() : null,
+        });
+        err = error;
+      } else {
+        // Only batch/expiry change → correct_stock_identity
+        const { error } = await supabase.rpc("correct_stock_identity", {
+          p_bin_code: pBin,
+          p_sku: pSku,
+          p_batch: pBatch,
+          p_expiry: pExpiry,
+          p_new_batch: batch.trim().toUpperCase(),
+          p_new_expiry: expiry,
+          p_reason: pReason,
+          p_by_name: pByName,
+        });
+        err = error;
+      }
+
+      if (err) {
+        // Surface Postgres error (e.g., open pick tasks)
+        setError(err.message);
+        setStep("form");
+      } else {
+        router.refresh();
+        setOpen(false);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Terjadi kesalahan");
+      setStep("form");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setStep("form"); setError(null); setSku(line.sku); setBatch(line.batch_lot); setExpiry(line.expiry_date ?? ""); setReason(""); setApprover(""); } }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-7 px-2" title={`Koreksi identitas ${line.bin_code} · ${line.sku}`} onClick={(e) => e.stopPropagation()}>
+          <Edit2 className="h-4 w-4" /><span className="sr-only">Koreksi</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent title={`Koreksi identitas ${line.bin_code}`} description={`${line.sku} · batch ${line.batch_lot || "–"} · exp ${line.expiry_date ? fmtDate(line.expiry_date) : "–"} · ${fmtNum(Number(line.quantity))} ${line.uom ?? ""}`}>
+        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+          {step === "confirm" ? (
+            <div className="space-y-4">
+              <p className="rounded-md bg-plate/30 p-3 text-base">{summary}</p>
+              {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" size="lg" onClick={() => { setError(null); setStep("form"); }}>Ubah</Button>
+                <Button size="lg" onClick={commit} disabled={busy}>{busy ? "Menyimpan…" : "Konfirmasi"}</Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={review} className="space-y-4">
+              <div className="rounded-md bg-steel-100 p-3 text-sm">
+                <p>Tercatat: <b>{line.sku}</b> {line.description}</p>
+                <p>Bin <b>{line.bin_code}</b> (tidak bisa diubah — pindah bin lewat <b>Mutasi</b> / <b>Tukar dengan bin lain</b> di halaman Adjust)</p>
+                <p>Batch {line.batch_lot || "–"} · exp {fmtDate(line.expiry_date)} · {fmtNum(Number(line.quantity))} {line.uom ?? ""}</p>
+              </div>
+              <div>
+                <Label htmlFor="ci-sku">SKU</Label>
+                <Input id="ci-sku" inputMode="numeric" value={sku} onChange={(e) => setSku(e.target.value)} required />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="ci-batch">Batch</Label>
+                  <Input id="ci-batch" value={batch} onChange={(e) => setBatch(e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="ci-exp">Expired</Label>
+                  <Input id="ci-exp" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} required />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="ci-reason">Kode alasan</Label>
+                <Select id="ci-reason" value={reason} onChange={(e) => setReason(e.target.value as ReasonCode)} required>
+                  <option value="">Pilih…</option>
+                  {MANUAL_REASONS.map((c) => <option key={c} value={c}>{REASON_CODES[c]}</option>)}
+                </Select>
+              </div>
+              <PersonNameField id="ci-person" value={person} onChange={setPerson} label="Nama Anda" />
+              {needsApprover && <OtherPersonField id="ci-approver" label={`Penyetuju (di atas ${fmtNum(limit)} unit)`} value={approver} onChange={setApprover} notSameAs={person} />}
+              {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
+              <Button type="submit" size="lg" className="w-full" disabled={!ready}>{busy ? "Memeriksa…" : "Lanjut ke konfirmasi"}</Button>
+            </form>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boolean; canAdjust?: boolean }) {
   return (
     <Table>
       <thead><tr>
         <Th>Bin</Th><Th>Lokasi</Th>{!compact && <><Th>SKU</Th><Th>Deskripsi</Th></>}<Th>Batch</Th><Th>Expired</Th><Th className="text-right">Qty</Th>
-        <Th className="text-right">Dipesan</Th><Th className="text-right">Ditahan</Th><Th className="text-right">Tersedia</Th><Th>Wave</Th><Th>Terima</Th>{canAdjust && <Th><span className="sr-only">Adjust</span></Th>}
+        <Th className="text-right">Dipesan</Th><Th className="text-right">Ditahan</Th><Th className="text-right">Tersedia</Th><Th>Wave</Th><Th>Terima</Th>{canAdjust && <Th className="w-20"><span className="sr-only">Actions</span></Th>}
       </tr></thead>
       <tbody>{lines.map((l, i) => (
         <tr key={i}>
@@ -312,7 +484,7 @@ function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boo
           <Td className="text-right font-semibold tabular">{fmtNum(l.available)}</Td>
           <Td className="text-xs">{l.waves.join(", ") || "–"}</Td>
           <Td className="whitespace-nowrap text-xs">{fmtDate(l.received_date)}</Td>
-          {canAdjust && <Td><AdjustLineButton line={l} /></Td>}
+          {canAdjust && <Td className="flex items-center gap-1"><AdjustLineButton line={l} /><CorrectIdentityButton line={l} /></Td>}
         </tr>
       ))}</tbody>
     </Table>

@@ -9,6 +9,7 @@ import { loginRequired } from "@/lib/auth-route";
 // use the Auth admin API (service role) after an admin check; role and status go through the
 // 0071 RPCs as the admin, which enforce "not yourself" and "one active admin".
 const BAN = "876000h"; // ~100 years: Supabase's way to block sign-in
+const VALID_APPS = ["shell_wms", "ckb_3pl"] as const;
 
 async function admin() {
   const u = await checkRole(["admin"]);
@@ -84,6 +85,27 @@ export async function resetPassword(id: string, password: string): Promise<strin
     if (shared) return shared;
     if (password.length < PASSWORD_MIN) return `Kata sandi minimal ${PASSWORD_MIN} karakter.`;
     const { error } = await createServiceClient().auth.admin.updateUserById(id, { password });
+    return error ? error.message : done();
+  } catch (e) { return (e as Error).message; }
+}
+
+export async function setUserApps(id: string, apps: string[], defaultApp: string | null): Promise<string | null> {
+  try {
+    await admin();
+    const shared = await sharedGuard(id);
+    if (shared) return shared;
+
+    for (const app of apps) {
+      if (!VALID_APPS.includes(app as typeof VALID_APPS[number])) {
+        return `Aplikasi tidak valid: ${app}.`;
+      }
+    }
+
+    const { error } = await (await createClient()).rpc("set_user_apps", {
+      p_user: id,
+      p_apps: apps,
+      p_default_app: defaultApp,
+    });
     return error ? error.message : done();
   } catch (e) { return (e as Error).message; }
 }

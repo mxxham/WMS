@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 export type LiveTable = "waves" | "pick_tasks" | "outbound" | "movements" | "count_tasks" | "execution_events" | "audits" | "pickfaces"
   | "stock_holds" | "adjustment_requests" | "receipts" | "receipt_actuals" | "stock_recons" | "stock_recon_lines" | "settings" | "items"
   | "pick_audits" | "shipment_loads" | "sheet_pick_lines" | "sheet_pick_audits"
-  | "pick_line_requests";
+  | "pick_line_requests"
+  | "ckb_rebagging_jobs" | "ckb_rebagging_sources" | "ckb_rebagging_outputs" | "ckb_rebagging_evidence" | "ckb_rebagging_events";
 export type LiveStatus = "connecting" | "live" | "offline";
 
 /**

@@ -85,5 +85,77 @@ test('while login is not required, Pengguna refuses to deactivate, re-role or re
     assert.ok(body.includes('sharedGuard('), `${fn} does not guard the shared account`);
   }
 });
+
+// --- New assertions for CKB 3PL app routing (Lane B) ---
+
+test('login action falls back to resolveAppsHome/akses and only uses safeNext when next is present', () => {
+  const a = src('app/login/actions.ts');
+  // Explicit next uses safeNext
+  assert.ok(a.includes('if (next)') && a.includes('redirect(safeNext(next))'), 'explicit next does not use safeNext');
+  // No next: reads profile via service client, selects apps/default_app
+  assert.ok(a.includes('from("profiles")') && a.includes('select("apps, default_app")'), 'profile apps/default_app not read via service client');
+  // Calls normalizeApps and resolveAppsHome
+  assert.ok(a.includes('normalizeApps(') && a.includes('resolveAppsHome('), 'does not call normalizeApps/resolveAppsHome');
+  // Fail-closed: home defaults to /akses, and the redirect happens AFTER the catch — redirect()
+  // throws, so it must never sit inside the try (a swallowed redirect would send everyone to /akses).
+  const homeDefault = a.indexOf('let home');
+  assert.ok(homeDefault > -1 && a.slice(homeDefault, homeDefault + 60).includes('= "/akses"'), 'home must default fail-closed to /akses');
+  const catchEnd = a.indexOf('  } catch {');
+  const redirectHome = a.indexOf('redirect(home);');
+  assert.ok(catchEnd > -1 && redirectHome > catchEnd, 'redirect(home) must run after the catch (a redirect inside the try is swallowed)');
+  // Comment: default-app data comes from server, never client
+  assert.ok(a.includes('default-app data comes from the server, never from the client'), 'missing server-data comment');
+});
+
+test('app/(app)/layout.tsx calls requireAppAccess("shell_wms") with app-level gate comment', () => {
+  const l = src('app/(app)/layout.tsx');
+  assert.ok(l.includes('requireAppAccess("shell_wms")'), 'layout does not call requireAppAccess for shell_wms');
+  assert.ok(l.includes('app-level gate') && l.includes('Shell WMS') && l.includes('/ckb') && l.includes('/akses'), 'missing app-level gate comment');
+});
+
+test('app/ckb/layout.tsx exists, checks ckb_3pl, and does NOT contain WaveAlerts/WelcomeScreen', () => {
+  const l = src('app/ckb/layout.tsx');
+  assert.ok(l.includes('requireAppAccess("ckb_3pl")'), 'ckb layout does not call requireAppAccess for ckb_3pl');
+  assert.ok(!l.includes('WaveAlerts'), 'ckb layout must not include WaveAlerts');
+  assert.ok(!l.includes('WelcomeScreen'), 'ckb layout must not include WelcomeScreen');
+  assert.ok(!l.includes('SessionProvider'), 'ckb layout must not include SessionProvider');
+  assert.ok(!l.includes('from "@/components/app/nav"'), 'ckb layout must not import Shell nav');
+  assert.ok(l.includes('CKB 3PL'), 'ckb layout missing CKB 3PL header text');
+  assert.ok(l.includes('action="/keluar"') && l.includes('method="post"'), 'ckb layout Keluar form not a plain POST');
+});
+
+test('app/ckb/page.tsx is a holding screen with the six streams and no Shell links', () => {
+  const p = src('app/ckb/page.tsx');
+  assert.ok(p.includes('CKB 3PL'), 'page missing CKB 3PL title');
+  assert.ok(p.includes('Aplikasi ini sedang disiapkan untuk CKB Warehouse 5'), 'page missing Indonesian holding paragraph');
+  for (const s of ['Freeport', 'CGP', 'SIP', 'MNE', 'Boiler', 'SSB']) {
+    assert.ok(p.includes(s), `page missing stream: ${s}`);
+  }
+  assert.ok(!p.includes('/scan') && !p.includes('/dashboard') && !p.includes('/waves'), 'page must not link to Shell routes');
+});
+
+test('app/akses/page.tsx redirects authorized user to app home and has Keluar form', () => {
+  const p = src('app/akses/page.tsx');
+  assert.ok(p.includes('getSessionUser'), 'akses page does not get session user');
+  assert.ok(p.includes('redirect("/login")'), 'akses page does not redirect missing user to login');
+  // getSessionUser normalizes apps (dedupe, drop unknown ids); the page trusts it directly.
+  assert.ok(p.includes('user.apps') && p.includes('resolveAppsHome'), 'akses page does not redirect authorized user to app home');
+  assert.ok(p.includes('Tidak ada akses aplikasi') && p.includes('belum diberi akses ke aplikasi manapun'), 'akses page missing Indonesian denied text');
+  assert.ok(p.includes('action="/keluar"') && p.includes('method="post"'), 'akses page Keluar form not a plain POST');
+  // Server component, no client JS needed — no "use client"
+  assert.ok(!p.startsWith('"use client"') && !p.includes("'use client'"), 'akses page must be a server component');
+});
+
+test('app/ckb/** files do not import SessionProvider or Shell nav', () => {
+  const layout = src('app/ckb/layout.tsx');
+  const page = src('app/ckb/page.tsx');
+  for (const f of [layout, page]) {
+    assert.ok(!f.includes('SessionProvider'), 'ckb file imports SessionProvider');
+    assert.ok(!f.includes('from "@/components/app/nav"'), 'ckb file imports Shell nav');
+    assert.ok(!f.includes('from "@/components/app/wave-alerts"'), 'ckb file imports WaveAlerts');
+    assert.ok(!f.includes('from "@/components/app/welcome-screen"'), 'ckb file imports WelcomeScreen');
+  }
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
