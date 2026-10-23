@@ -46,9 +46,9 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 
 | Bins | SKUs | Stock rows | Cartons | Migrations | SQL tests | TS test files |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **2,570** | **106** | **1,790** | **52,078** | **60** | **35** | **38** |
+| **2,970** | **106** | **1,790** | **52,078** | **60** | **35** | **38** |
 
-<sub>Stock figures are the seed (24 Sep 2026 WMS file). Aisles CA–CF; aisle CG does not exist.</sub>
+<sub>Stock figures are the seed (24 Sep 2026 WMS file). Aisles CA–CF for Shell; aisles CG–CH are the physically confirmed CKB 3PL area (0086) — the WMS sheet reads 0 there because it does not track 3PL stock.</sub>
 
 </div>
 
@@ -58,7 +58,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <tr><th align="left">Area</th><th align="left">What it does</th></tr>
 <tr><td><b>Labels</b></td><td>Rack column strips A–E on A4 (two 95 × 85 mm columns per sheet) or single 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
 <tr><td><b>Scan</b></td><td>Phone camera or USB/Bluetooth scanner, always focused, submits on Enter</td></tr>
-<tr><td><b>3D warehouse</b></td><td>2,570 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
+<tr><td><b>3D warehouse</b></td><td>2,970 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
 <tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>
 <tr><td><b>Waves</b></td><td>Idempotent posting into the <code>movements</code> ledger; pick and its Bin To Bin as one line; the rest of an opened pallet named on both rows (<code>CF40A01 (dipindah NO 6)</code>)</td></tr>
 <tr><td><b>Corrections</b></td><td><code>Isi dari picklist</code> (the whole wave from the paper, one posting), <code>Perlu ditangani</code> panel with <code>Perbaiki</code> / <code>Perbaiki semua</code>, <code>Posting sesuai lapangan</code>, <code>Ubah baris</code>, <code>Pecah</code>, <code>Batalkan posting</code> (also pick only), <code>Posting Bin To Bin saja</code>, <code>Tambah item</code> / <code>Tambah order</code>; every risky action lists the rows of other waves it would affect</td></tr>
@@ -111,7 +111,7 @@ The values below are **assumptions**. Change each one in the single file or menu
 | 3 | 1 rack bin = 1 pallet (capacity 1) | `bins.capacity` |
 | 4 | Rack dimensions for 3D (bay 2.7 m, level 1.6 m, depth 1.2 m, aisle 3.2 m) are **placeholders**. The rack layout itself is confirmed: back-to-back blocks, racks 01–20 on the left face, 21–40 on the right face (21 directly behind 01), with a walking lane between one block's right face and the next block's left face | `Pengaturan` (`Rak per sisi` = 20); pick route: `lib/allocator/config.ts` → `baysPerSide` |
 | 5 | ABC classes derived from 91 K_ONE picking rows: **provisional** | `Pengaturan` → `Hitung ulang` (after at least 1 month of picking data) |
-| 6 | ~~Aisle **CG** is missing from the `warehouse mapping` status table and was imported as active~~ **Settled 5 Oct 2026:** CG does not exist (racks stop at CF); its 400 template bins are blocked (`0054`) and the engine ignores CG | `0054_block_aisle_cg.sql`, `rackLocationPattern` in `lib/allocator/config.ts` |
+| 6 | ~~Aisle **CG** is missing from the `warehouse mapping` status table and was imported as active~~ **Reversed 21 Oct 2026:** aisles CG **and** CH physically exist and are the CKB 3PL area; 0054's 5-Oct-2026 "does not exist" reading of the 400 zero-qty WMS rows is undone by `0086_reopen_aisle_cg_ch.sql` (CH mirrored from CG). Shell FEFO picking still stops at CF; CG/CH are valid ledger locations (movements, rebagging) but never Shell pick routes | `0086_reopen_aisle_cg_ch.sql`, `rackLocationPattern` in `lib/allocator/config.ts` |
 | 7 | Racks CC19, CC20, CE33 are missing from the data (columns or pillars?) | check on site |
 | 8 | "Near expiry" threshold = 90 days | `config/warehouse.ts` → `NEAR_EXPIRY_DAYS` |
 | 9 | Shell lubricant shelf life = **48 months** from the production date encoded in the batch code (matches 97% of the 24 Sep batches); SKUs with a different shelf life are entered by hand | `Pengaturan` → `Aturan inventory`; per SKU in `Master item` |
@@ -140,7 +140,7 @@ The values below are **assumptions**. Change each one in the single file or menu
    supabase db push
    ```
    **A project that is already running** (0001–0003 applied): apply everything from `0004` onwards. Section [3](#3-phase-by-phase-files-commands-how-to-test) maps each range of migrations to the feature it delivers. Two worth knowing about: `supabase/migrations/0015_realtime.sql` turns on Realtime (pages refresh themselves, a *Live* dot sits in the title) — without it the pages still work but never receive changes; `supabase/migrations/0004_allocation.sql` changes the stock identity to bin + SKU + batch + **expiry**, and old data stays valid.
-3. Run `supabase/seed.sql` (2,570 bins, 106 SKUs, 1,790 stock rows from the WMS file). The file is about 230 KB; if the editor refuses it, use the CLI: `psql "<connection string>" -f supabase/seed.sql`.
+3. Run `supabase/seed.sql` (2,970 bins, 106 SKUs, 1,790 stock rows from the WMS file). The file is about 230 KB; if the editor refuses it, use the CLI: `psql "<connection string>" -f supabase/seed.sql`.
 4. **Site account**: create one account under **Authentication → Users → Add user** (name it e.g. *Gudang*), then in the SQL Editor:
    ```sql
    update public.profiles set role = 'admin', name = 'Gudang' where id = (select id from auth.users where email = '<site account email>');
@@ -190,7 +190,7 @@ psql -f supabase/tests/25_add_wave_items_edits.sql       # Tambah item follows t
 psql -f supabase/tests/26_edit_pick_row.sql              # Ubah baris (0052), same
 psql -f supabase/tests/27_unpost_pick_keep_move.sql      # Batalkan posting, pick only (0034/0035), same
 psql -f supabase/tests/28_post_move_early.sql            # Posting Bin To Bin saja (0053), same
-psql -f supabase/tests/29_block_aisle_cg.sql             # aisle CG blocked (0054), same
+psql -f supabase/tests/29_block_aisle_cg.sql             # aisle CG blocked (0054); `53_reopen_aisle_cg_ch.sql` current state (CG/CH active, 0086)
 psql -f supabase/tests/30_wms_day_report.sql             # Laporan WMS harian (0055), same
 psql -f supabase/tests/31_post_as_done.sql               # Posting sesuai lapangan (0056), same
 psql -f supabase/tests/32_post_wave_sheet.sql            # Isi dari picklist (0057), same
@@ -229,7 +229,7 @@ Files: `supabase/migrations/*`, `supabase/seed.sql`, `scripts/generate_seed.py`,
 
 Test:
 ```sql
-select count(*) from bins;                          -- 2570
+select count(*) from bins;                          -- 2970
 select count(*), sum(quantity) from inventory;       -- 1790 | 52078
 select * from bin_summary where bin_code = 'CA01C01';
 ```
@@ -263,7 +263,7 @@ Test: `/warehouse` → switch colour mode → click a box → the detail panel o
 
 Files: `app/(app)/dashboard/page.tsx`, `app/(app)/movements/page.tsx`, `app/api/movements/export/route.ts`, `lib/movement-query.ts`.
 
-Test: `Dashboard` shows 2,570 total bins plus stock on hold, expired and near-expiry stock, the ABC breakdown, and the audit accuracy figures. `Mutasi` → filter type `adjustment` → export .xlsx.
+Test: `Dashboard` shows 2,970 total bins plus stock on hold, expired and near-expiry stock, the ABC breakdown, and the audit accuracy figures. `Mutasi` → filter type `adjustment` → export .xlsx.
 
 ### Phase 7 — Allocation and waves (`0004`–`0007`)
 
@@ -441,7 +441,7 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 <details>
 <summary><b>3D</b></summary>
 
-- **One instanced mesh for 2,570 bins** (one draw call), so it stays light on an office laptop.
+- **One instanced mesh for 2,970 bins** (one draw call), so it stays light on an office laptop.
 - **Render on demand (`frameloop="demand"`).** The GPU only works while the camera moves or the data changes, which saves tablet battery.
 - **Coordinates are computed in the database from the layout configuration.** Change a rack dimension once and every bin follows.
 
@@ -496,7 +496,7 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 <details>
 <summary><b>Other</b></summary>
 
-- **List queries are paginated at 1,000 rows.** Supabase's default 1,000-row limit would truncate 2,570 bins without an error.
+- **List queries are paginated at 1,000 rows.** Supabase's default 1,000-row limit would truncate 2,970 bins without an error.
 - **The Excel reader stops at the last non-empty cell.** The WMS sheet declares a range up to row 1,048,563; reading only what exists cut the time from about 21 seconds to about 2 seconds.
 - **Roles gate the navigation** (`components/app/nav.tsx`): `operator` gets `Scan`, `Penerimaan` (receiving), `Wave`, `Inventory`, `Gudang 3D`, `Cycle count`, `Audit picking`, and `Audit putaway`; `supervisor` adds `Dashboard`, `Alokasi` (allocation), `Putaway`, `Pickface`, `Adjust stok` (adjust stock), `Mutasi` (movements), `Kualitas data` (data quality), `Lacak batch` (batch trace), `Label`, and `Master item`; `admin` adds `Import` and `Pengaturan` (settings).
 
@@ -508,7 +508,7 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 
 **Done** — in the development sandbox:
 
-- [x] Migrations and seed on PostgreSQL 16 (with a stub of Supabase's `auth` schema): 2,570 bins, 1,790 stock rows, 52,078 in total.
+- [x] Migrations and seed on PostgreSQL 16 (with a stub of Supabase's `auth` schema): 2,970 bins, 1,790 stock rows, 52,078 in total.
 - [x] Rules: a pick above the available stock is refused; a transfer keeps the expiry date; a transfer into a blocked bin is refused; an operator cannot adjust, import, change `inventory`, or delete a movement; a forged `user_id` is ignored; a supervisor's adjustment is recorded.
 - [x] Import of the real WMS file: 2,614 rows in, re-import after the seed gives 0 movements.
 - [x] Labels: exact page sizes (80 × 85 mm and 80 × 469 mm); QR and Code 128 read by zbar from the 203 dpi render.
@@ -534,3 +534,4 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - **Explicit grants (`0005`).** New Supabase projects no longer grant SELECT/INSERT/EXECUTE to `authenticated` by default; without `0005` every query fails with "permission denied". Safe to run on an existing project.
 - Old allocator audit documents live in `docs/archive/allocator/` and refer to code that has since been replaced.
 - The migration set is the real index of what exists: `supabase/migrations/0001_schema.sql`–`supabase/migrations/0060_post_wave_sheet_final.sql`, with the test covering each range named in section [3](#3-phase-by-phase-files-commands-how-to-test).
+# visualization_simulation
