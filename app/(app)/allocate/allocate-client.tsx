@@ -522,7 +522,7 @@ function CarryPanel({ matches, asOf }: { matches: CarryMatch[]; asOf: string }) 
               </li>
             ))}
             {m.unmatched.map((u, i) => (
-              <li key={`u${i}`} className="text-steel-500">SH {u.shipment} · {u.sku} · {fmtNum(u.qty)}: tidak ada di jadwal ini, {m.mode === "fresh" ? "ikut dibatalkan" : "ikut dipindah"}</li>
+              <li key={`u${i}`} className="text-steel-500">SH {u.shipment} · {u.sku} · {fmtNum(u.qty)}: tidak ada di jadwal ini, {m.mode === "fresh" ? "ikut dibatalkan" : "tugasnya dibatalkan (tidak jadi dipindah)"}</li>
             ))}
           </ul>
           {m.ambiguous && <p className="text-xs font-semibold text-bad">Satu shipment lama cocok dengan beberapa shipment baru: dipakai yang pertama. Periksa sebelum menyimpan.</p>}
