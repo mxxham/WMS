@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowDownRight, ArrowUpRight, Boxes, CalendarClock, CalendarOff, CalendarX2, ChevronRight, CircleCheck,
-  ClipboardCheck, ClipboardList, Gauge, Layers, PackageSearch, Route, ShieldAlert, Truck, Warehouse,
+  ClipboardCheck, ClipboardList, Droplets, Gauge, Layers, PackageSearch, Route, ShieldAlert, Truck, Warehouse,
 } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
@@ -40,6 +40,9 @@ type Inv = { bin_code: string; zone: string; rack: string | null; sku: string; d
 type Task = { status: string; task_type: string; quantity: number; actual_quantity: number | null; actual_from_bin: string | null; from_bin: string; actual_batch_lot: string | null; batch_lot: string; completed_at: string | null; planned_date: string };
 type Mv = { type: string; quantity: number; from_bin_id: string | null };
 type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH" };
+type Vol = { day: string; boxes: number | null; litres: number | null; picks: number | null };
+/** Outbound-volume window (today included). One strip, every day rendered. */
+const VOL_DAYS = 14;
 
 // Occupancy heat grid: one hue from the Coastal Blues ramp, light -> dark, 5 fixed steps.
 // Steps 4 and 5 carry white 12px bold text, so they stay on ckb (#2A6F97, 5.0:1) and
@@ -85,8 +88,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const today = jakartaDate();
   const todayStart = new Date(`${today}T00:00:00+07:00`);
   const accSince = new Date(Date.now() - ACCURACY_DAYS * 86_400_000).toISOString();
+  // Outbound-volume window: the last VOL_DAYS Jakarta calendar days (today included).
+  const volSince = new Date(todayStart.getTime() - (VOL_DAYS - 1) * 86_400_000)
+    .toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
-    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }, fefo] = await Promise.all([
+    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }, fefo, volRows] = await Promise.all([
     fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
@@ -106,6 +112,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     supabase.rpc("inventory_policy"),
     // A slow or failing count must never take the dashboard down: the tile shows "–" instead.
     getFefoCompliance().catch(() => null),
+    fetchAll<Vol>((a, b) => supabase.from("volume_out_daily").select("day, boxes, litres")
+      .gte("day", volSince).order("day", { ascending: true }).range(a, b)),
   ]);
   const cycleOk = cycleApplied.filter((c) => Number(c.variance_qty ?? 0) <= Number(c.tolerance)).length;
   const qtyIra = quantityAccuracy(cycleApplied);
@@ -314,6 +322,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const attentionWorst: Tone = attention.length === 0 ? "ok" : attention[0]!.tone;
 
   const dayName = todayStart.toLocaleDateString("id-ID", { weekday: "long", timeZone: "Asia/Jakarta" });
+
+  // Outbound volume, 14 slots ascending: real days from volume_out_daily, zero
+  // slots for quiet days — the strip never collapses and never invents data.
+  const volByDay = new Map(volRows.map((v) => [v.day, v]));
+  let prevMonth = "";
+  const volSeries = Array.from({ length: VOL_DAYS }, (_, i) => {
+    const d = new Date(todayStart.getTime() - (VOL_DAYS - 1 - i) * 86_400_000);
+    const day = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    const row = volByDay.get(day);
+    const num = d.toLocaleDateString("id-ID", { day: "numeric", timeZone: "Asia/Jakarta" });
+    const month = d.toLocaleDateString("id-ID", { month: "short", timeZone: "Asia/Jakarta" });
+    const showMonth = month !== prevMonth;
+    prevMonth = month;
+    return { day, litres: Number(row?.litres ?? 0), boxes: Number(row?.boxes ?? 0), label: showMonth ? `${num} ${month}` : num };
+  });
+  const volToday = volSeries[volSeries.length - 1];
+  const volMax = Math.max(1, ...volSeries.map((v) => v.litres));
+  const vol14Litres = volSeries.reduce((s, v) => s + v.litres, 0);
+  const vol14Boxes = volSeries.reduce((s, v) => s + v.boxes, 0);
   const riskyShown = risky.slice(0, RISKY_ROWS);
 
   return (
@@ -418,6 +445,48 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           )}
           <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
             Panjang batang membandingkan jumlah di dalam panel ini, bukan target. Klik satu baris untuk membuka daftar kerjanya.
+          </p>
+        </section>
+
+        {/* ---- Outbound volume: today's litres + the last {VOL_DAYS} days ------- */}
+        <section aria-labelledby="volume-title" className={PANEL}>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Droplets className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <h2 id="volume-title" className="font-cond text-lg font-semibold leading-tight">Volume keluar</h2>
+                <p className="text-xs text-steel-500">Liter yang keluar melalui picking terposting, {VOL_DAYS} hari terakhir.</p>
+              </div>
+            </div>
+            <Link href={`/audit/picking?date=${today}`} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-ckb-dark hover:bg-paper">
+              Buka audit picking<ChevronRight aria-hidden className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div className="flex flex-col gap-4 border-t border-steel-100 px-4 py-4 lg:flex-row lg:items-end">
+            <div className="shrink-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-steel-500">Hari ini</p>
+              <p className="font-cond text-3xl font-semibold leading-tight tabular">
+                {fmtNum(volToday.litres, 1)} <span className="text-base font-semibold text-steel-500">liter</span>
+              </p>
+              <p className="text-xs text-steel-500">
+                {fmtNum(volToday.boxes)} karton · {VOL_DAYS} hari: {fmtNum(vol14Boxes)} karton / {fmtNum(vol14Litres, 1)} liter
+              </p>
+            </div>
+            <div className="flex h-24 min-w-0 flex-1 items-end gap-[3px]" role="img"
+              aria-label={`Volume keluar per hari, ${VOL_DAYS} hari terakhir; hari ini ${fmtNum(volToday.litres, 1)} liter`}>
+              {volSeries.map((v) => (
+                <div key={v.day} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"
+                  title={`${v.label} — ${fmtNum(v.litres, 1)} liter`}>
+                  <div className={cn("w-full rounded-sm", v.day === today ? "bg-ckb-dark" : "bg-ckb/70")}
+                    style={{ height: `${v.litres > 0 ? Math.max(6, Math.round((v.litres / volMax) * 78)) : 3}px` }} />
+                  <span className={cn("whitespace-nowrap text-[10px] leading-none tabular", v.day === today ? "font-semibold text-ckb-dark" : "text-steel-500")}>{v.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+            Liter = karton terposting × volume per karton menurut MASTER DATA (items.volume_l). Hari tanpa pick tampil
+            sebagai garis tipis; SKU tanpa volume di master tidak dihitung.
           </p>
         </section>
 
