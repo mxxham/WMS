@@ -107,7 +107,7 @@ The values below are **assumptions**. Change each one in the single file or menu
 
 | # | Assumption | Change in |
 |---|---|---|
-| 1 | Label strip cell order: **A (top) → E (bottom)**; colours A red, B orange, C yellow, D green, E blue | `config/warehouse.ts` → `STRIP_LEVEL_ORDER`, `LEVEL_COLORS` |
+| 1 | Label strip cell order: **A (top) → E (bottom)**; colours A red, B orange, C yellow, D green, E blue (physical rack signs; screens use the separate `LEVEL_COLORS_WEB` ramp) | `config/warehouse.ts` → `STRIP_LEVEL_ORDER`, `LEVEL_COLORS` |
 | 2 | Arrow direction: position **01 = left**, **02 = right** (facing the rack) | `config/warehouse.ts` → `POSITION_ARROW` |
 | 3 | 1 rack bin = 1 pallet (capacity 1) | `bins.capacity` |
 | 4 | Rack dimensions for 3D (bay 2.7 m, level 1.6 m, depth 1.2 m, aisle 3.2 m) are **placeholders**. The rack layout itself is confirmed: back-to-back blocks, racks 01–20 on the left face, 21–40 on the right face (21 directly behind 01), with a walking lane between one block's right face and the next block's left face | `Pengaturan` (`Rak per sisi` = 20); pick route: `lib/allocator/config.ts` → `baysPerSide` |
@@ -457,6 +457,7 @@ Test: `supabase/tests/14`–`31`, plus `tests/carry-over.test.ts`, `tests/wave-e
 - **Stock identity = bin + SKU + batch + expiry.** Rule inherited from the allocator: two expiry dates inside one batch in one bin are two stock rows, so FEFO cannot mix them up. A movement without an expiry date still works when that batch has only one row in the bin.
 - **Posting is idempotent and atomic.** The unique index on `movements(task_id)` makes double posting impossible; *`Selesaikan wave`* runs in one transaction.
 - **Plans roll forward.** `save_plan` only replaces waves that have not been worked on; running waves stay, so no pick loses its plan.
+- **A parked wave's leftover work gets its own wave.** When `Jalankan alokasi` re-runs and a `Tunda`-ed wave already has posted picks, saving the plan retracts that shipment's open tasks in the carried wave (its bin-to-bin leftovers settle exactly like a cancel, migration `0090`), then replans today's sheet minus what was already picked to staging into a fresh wave with new FEFO picks. Nothing moves until `Simpan rencana` is confirmed; ambiguous layouts (one parked order split over several new numbers) are skipped loudly for a supervisor, as before.
 - **Reservation, not locking.** Physical stock stays a single number; open tasks only reduce the stock *for planning*. Manual moves of reserved stock are refused for operators.
 - **The actual is recorded, not guessed.** A confirmation that differs from the plan needs a reason and deducts from the bin that was really used.
 - **Plan tables have no write policy.** Every change goes through a role-checking SECURITY DEFINER RPC, and the client cannot forge a `task_id` in the ledger either (RLS).
