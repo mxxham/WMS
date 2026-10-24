@@ -57,7 +57,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <table>
 <tr><th align="left">Area</th><th align="left">What it does</th></tr>
 <tr><td><b>Labels</b></td><td>Rack column strips A–E on A4 (two 95 × 85 mm columns per sheet) or single 80 × 85 mm cells, vector QR + Code 128, black-and-white mode for thermal printers</td></tr>
-<tr><td><b>Pallet cards</b></td><td>Upload a Form Checker workbook on <code>Kartu palet</code> — one A4 landscape card per pallet row, huge fonts (SKU 108 pt, ACT. QTY and Batch 64 pt, Location 96 pt) to read from the floor with the item stacked up high, UoM from the item master, hand-fill lines when the file leaves Location/Batch empty; parser spec in <code>docs/FORM_CHECKER_FORMAT.md</code></td></tr>
+<tr><td><b>Pallet cards</b></td><td>Upload a Form Checker workbook on <code>Kartu palet</code> — one A4 landscape card per pallet row, print per shipment or the whole file at once; huge fonts (SKU 140 pt, quantity and batch 64 pt, location 96 pt) to read from the floor with the item stacked up high, UoM from the item master, hand-fill lines when the file leaves Location/Batch empty; parser spec in <code>docs/FORM_CHECKER_FORMAT.md</code></td></tr>
 <tr><td><b>Scan</b></td><td>Phone camera or USB/Bluetooth scanner, always focused, submits on Enter</td></tr>
 <tr><td><b>3D warehouse</b></td><td>2,970 bins in one draw call, rendered on demand, colour by ABC, utilisation or expiry</td></tr>
 <tr><td><b>FEFO allocation</b></td><td>From the database or the day's WMS file; one bin-choice rule; picklists per shipment, forklift and handpick apart; serpentine pick path</td></tr>

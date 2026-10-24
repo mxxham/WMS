@@ -68,10 +68,9 @@ export const PALLET_CARD = {
   pageWidthMm: 297,
   pageHeightMm: 210,
   marginMm: 12,
-  contextPt: 12,   // Month · user · shipment no
   labelPt: 10,     // small gray field labels
-  skuPt: 108,      // item code — 1.5× the start (72); 9 digits fill ~75% of the landscape width
-  qtyPt: 64,       // ACT. QTY value — same size as the batch no
+  skuPt: 140,      // item code — owner tuned 108 → 115 → 130 → 135 → 140; the shrink loop keeps 9 digits inside the sheet
+  qtyPt: 64,       // quantity value, printed without a label — same size as the batch no
   uomPt: 28,       // UoM beside the qty
   locationPt: 96,  // LOCATION value — big for reading from the floor
   batchPt: 64,     // Batch No. value — the thing a checker scans for from afar

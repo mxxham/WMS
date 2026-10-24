@@ -33,6 +33,104 @@ export const FC_COL = {
   PALLET_NON_LOSCAM: 23,
 } as const;
 
+/** Canonical header labels for detection (normalized: lowercase, alphanumeric only). */
+const CANONICAL_LABELS: Record<keyof typeof FC_COL, string[]> = {
+  MONTH: ["month"],
+  USER_NAME: ["username", "user"],
+  SHIPMENT_NO: ["shipmentno", "shipment"],
+  ITEM_CODE: ["itemcode", "item"],
+  QTY_ORDER: ["qtyorder", "qty"],
+  UOM: ["uom", "orderuom"],
+  ASN_NO: ["asnno", "asn"],
+  VENDOR_ASN_NO: ["vendorasnno", "vendorasn", "deliveryno", "vendorasnno deliveryno"],
+  ACT_QTY: ["actqty", "actualqty", "act"],
+  ACT_UOM: ["actuom", "actualuom", "uom2"],
+  PALLET_ID: ["palletid", "pallet"],
+  BIN_LOCATION: ["binlocation", "bin", "location"],
+  GR_NO: ["grno", "gr"],
+  BATCH_NO: ["batchno", "batch"],
+  MFG_DATE: ["mfgdate", "manufacturedate", "manufacturingdate"],
+  EXP_DATE: ["expdate", "expirydate", "expirationdate"],
+  PUTAWAY_NO: ["putawayno", "putaway"],
+  PRINT_PUTAWAY_SHEET: ["printputawaysheet", "printputaway"],
+  CONTAINER: ["container"],
+  VEHICLE_NO: ["vehicleno", "vehicle"],
+  SEAL: ["seal"],
+  TRANSPORTER: ["transporter"],
+  PALLET_LOSCAM: ["palletloscam", "loscam"],
+  PALLET_NON_LOSCAM: ["palletnonloscam", "nonloscam"],
+};
+
+/** Normalize a header cell text for matching. */
+function normalizeHeader(text: unknown): string {
+  if (text === null || text === undefined) return "";
+  const s = String(text).trim().toLowerCase();
+  return s.replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Detect column positions from a header row by matching normalized labels.
+ * Returns a column map matching FC_COL's keys, or null if detection fails
+ * (e.g. too few recognized headers).
+ */
+export function detectColumns(header: readonly unknown[]): Record<keyof typeof FC_COL, number> | null {
+  const found: Partial<Record<keyof typeof FC_COL, number>> = {};
+  let uomSeen = 0; // count of UoM-like headers encountered
+
+  for (let i = 0; i < header.length; i++) {
+    const norm = normalizeHeader(header[i]);
+    if (!norm) continue;
+
+    for (const [key, aliases] of Object.entries(CANONICAL_LABELS)) {
+      if (aliases.includes(norm)) {
+        const k = key as keyof typeof FC_COL;
+        // Special handling for duplicate "UoM": first occurrence -> UOM (order), second -> ACT_UOM
+        if (k === "UOM" || k === "ACT_UOM") {
+          if (norm === "uom" || norm === "orderuom") {
+            // Generic "UoM" header - assign based on occurrence order
+            if (uomSeen === 0) {
+              found.UOM = i;
+              uomSeen++;
+            } else if (uomSeen === 1 && !( "ACT_UOM" in found )) {
+              found.ACT_UOM = i;
+              uomSeen++;
+            }
+          } else if (k === "ACT_UOM" && uomSeen > 0 && !("ACT_UOM" in found)) {
+            // Explicit "Act UoM" header (actuom, actualuom, uom2) after a UoM
+            found.ACT_UOM = i;
+            uomSeen++;
+          } else if (!(k in found)) {
+            found[k] = i;
+          }
+        } else if (!(k in found)) {
+          found[k] = i;
+        }
+        break;
+      }
+    }
+  }
+
+  // Require at least the critical columns to consider detection successful
+  const critical: (keyof typeof FC_COL)[] = [
+    "MONTH", "USER_NAME", "SHIPMENT_NO", "ITEM_CODE", "ACT_QTY", "PALLET_ID", "BIN_LOCATION",
+  ];
+  if (critical.some((k) => !(k in found))) return null;
+
+  // Fill any missing with fixed-map defaults (best effort)
+  const result: Record<keyof typeof FC_COL, number> = {} as Record<keyof typeof FC_COL, number>;
+  for (const k of Object.keys(FC_COL) as (keyof typeof FC_COL)[]) {
+    result[k] = found[k] ?? FC_COL[k];
+  }
+  return result;
+}
+
+/** Return type for parseFormChecker with per-shipment row spans. */
+export type ParseResult = {
+  cards: FormCheckerCard[];
+  shipments: number;
+  spans: Array<{ shipmentNo: number; dataSetRows: [number, number][] }>;
+};
+
 // 1899-12-30 (Excel serial base), anchored in UTC so conversion is identical on every machine.
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 
@@ -89,11 +187,16 @@ function getNumber(v: unknown): number | null {
 /**
  * Parse Form Checker data rows (header already removed).
  * Implements forward-fill grouping rules 1–5 from docs/FORM_CHECKER_FORMAT.md.
+ * @param rows Data rows (header already removed)
+ * @param columns Optional column map; defaults to FC_COL for backward compatibility
  */
 export function parseFormChecker(
   rows: readonly unknown[][],
-): { cards: FormCheckerCard[]; shipments: number } {
+  columns: Record<keyof typeof FC_COL, number> = FC_COL,
+): ParseResult {
   const cards: FormCheckerCard[] = [];
+  // Track per-shipment row indices (0-based within the data rows array)
+  const shipmentRowIndices: Map<number, number[]> = new Map();
   let currentMonth: string | null = null;
   let currentUserName: string | null = null;
   let currentShipmentNo: number | null = null;
@@ -110,30 +213,31 @@ export function parseFormChecker(
 
   const seenShipments = new Set<number>();
 
-  for (const row of rows) {
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx];
     if (isBlankRow(row)) {
       // Rule 5: blank row skipped, context preserved
       continue;
     }
 
-    // Read raw values
-    const monthRaw = row[FC_COL.MONTH];
-    const userNameRaw = row[FC_COL.USER_NAME];
-    const shipmentNoRaw = row[FC_COL.SHIPMENT_NO];
-    const itemCodeRaw = row[FC_COL.ITEM_CODE];
-    const qtyOrderRaw = row[FC_COL.QTY_ORDER];
-    const uomRaw = row[FC_COL.UOM];
-    const asnNoRaw = row[FC_COL.ASN_NO];
-    const vendorAsnNoRaw = row[FC_COL.VENDOR_ASN_NO];
-    const actQtyRaw = row[FC_COL.ACT_QTY];
-    const actUomRaw = row[FC_COL.ACT_UOM];
-    const palletIdRaw = row[FC_COL.PALLET_ID];
-    const binLocationRaw = row[FC_COL.BIN_LOCATION];
-    const grNoRaw = row[FC_COL.GR_NO];
-    const batchNoRaw = row[FC_COL.BATCH_NO];
-    const mfgDateRaw = row[FC_COL.MFG_DATE];
-    const expDateRaw = row[FC_COL.EXP_DATE];
-    const putawayNoRaw = row[FC_COL.PUTAWAY_NO];
+    // Read raw values using the column map
+    const monthRaw = row[columns.MONTH];
+    const userNameRaw = row[columns.USER_NAME];
+    const shipmentNoRaw = row[columns.SHIPMENT_NO];
+    const itemCodeRaw = row[columns.ITEM_CODE];
+    const qtyOrderRaw = row[columns.QTY_ORDER];
+    const uomRaw = row[columns.UOM];
+    const asnNoRaw = row[columns.ASN_NO];
+    const vendorAsnNoRaw = row[columns.VENDOR_ASN_NO];
+    const actQtyRaw = row[columns.ACT_QTY];
+    const actUomRaw = row[columns.ACT_UOM];
+    const palletIdRaw = row[columns.PALLET_ID];
+    const binLocationRaw = row[columns.BIN_LOCATION];
+    const grNoRaw = row[columns.GR_NO];
+    const batchNoRaw = row[columns.BATCH_NO];
+    const mfgDateRaw = row[columns.MFG_DATE];
+    const expDateRaw = row[columns.EXP_DATE];
+    const putawayNoRaw = row[columns.PUTAWAY_NO];
 
     // Rule 1: Shipment No. starts a new shipment (month + user stay with it)
     const shipmentNo = getNumber(shipmentNoRaw);
@@ -216,6 +320,12 @@ export function parseFormChecker(
         // Malformed: pallet line without item/shipment context — skip
         continue;
       }
+      // Record this row index for the current shipment
+      if (currentShipmentNo !== null) {
+        const arr = shipmentRowIndices.get(currentShipmentNo) ?? [];
+        arr.push(rowIdx);
+        shipmentRowIndices.set(currentShipmentNo, arr);
+      }
       const card: FormCheckerCard = {
         month: currentMonth ?? "",
         userName: currentUserName ?? "",
@@ -240,5 +350,26 @@ export function parseFormChecker(
     // Rows that only update context (no Act. Qty, no Pallet ID) do not produce a card
   }
 
-  return { cards, shipments: seenShipments.size };
+  // Build spans: merge adjacent/overlapping row indices per shipment
+  const spans: ParseResult["spans"] = [];
+  for (const [shipmentNo, indices] of shipmentRowIndices) {
+    if (indices.length === 0) continue;
+    const sorted = [...indices].sort((a, b) => a - b);
+    const ranges: [number, number][] = [];
+    let rangeStart = sorted[0];
+    let rangeEnd = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] <= rangeEnd + 1) {
+        rangeEnd = sorted[i]; // merge adjacent or overlapping
+      } else {
+        ranges.push([rangeStart, rangeEnd]);
+        rangeStart = sorted[i];
+        rangeEnd = sorted[i];
+      }
+    }
+    ranges.push([rangeStart, rangeEnd]);
+    spans.push({ shipmentNo, dataSetRows: ranges });
+  }
+
+  return { cards, shipments: seenShipments.size, spans };
 }
