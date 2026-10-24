@@ -10,8 +10,12 @@
 --       - For each open PICK whose pallet break already posted, run the SAME
 --         settle logic 0074's CANCELLED path runs (complete_open_pallet with
 --         p_ignore_wave = p_wave_id so same-wave siblings don't block).
---       - All open tasks (PICK, REPLENISH, etc.) of that shipment in the wave
---         become CANCELLED with p_reason; execution events logged.
+--       - The shipment-scoped rows become CANCELLED with p_reason: open PICK
+--         tasks and outbound rows of that (wave_id, shipment_number).
+--         REPLENISH (Bin To Bin) rows are NOT touched: the plan payload builds
+--         them shipment-less (lib/allocator/plan.ts, shipment_number null), so
+--         a shipment-scoped cancel can never match them — they live with the
+--         wave, stay postable on the floor, and disappear when the wave does.
 --       - Posted tasks and movements untouched. Sibling shipments untouched.
 --    2. save_plan_with_retract(p_date, p_plan, p_retract)
 --       One transaction: for each p_retract entry call retract_shipment_open_tasks,
@@ -83,9 +87,11 @@ begin
   end loop;
 
   -- --------------------------------------------------------------
-  -- Step 3: Cancel ALL open tasks (PICK, REPLENISH, etc.) of this
-  --         shipment in this wave. This mirrors what set_wave_status
-  --         does for the whole wave, but scoped to one shipment.
+  -- Step 3: Cancel the shipment's open PICKs in this wave, then its
+  --         outbound rows. Keyed by shipment_number, so the wave's
+  --         shipment-less REPLENISH rows (Bin To Bin) are deliberately
+  --         untouched — see the header note. This mirrors what
+  --         set_wave_status does for a whole wave, scoped to one shipment.
   -- --------------------------------------------------------------
   with c as (
     update public.pick_tasks

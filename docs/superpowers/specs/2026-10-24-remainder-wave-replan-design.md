@@ -175,7 +175,11 @@ does not re-litigate them:
   that the sheet is the demand source of truth.
 - **Consequence for retraction:** because the new plan derives from sheet-minus-done, ALL
   of that shipment's open tasks in the carried wave are retracted (planned quantities no
-  longer define anything); only its posted history stays.
+  longer define anything); only its posted history stays. Reachable by shipment key:
+  the open PICK tasks and outbound rows of that `(wave_id, shipment_number)`. The wave's
+  REPLENISH (Bin To Bin) rows are shipment-less by construction (`plan.ts` builds them
+  with `shipment_number: null`), so a shipment-scoped retract cannot and does not cancel
+  them — they live with the wave, stay postable, and go when the wave does.
 
 
 ## What is left to the builder

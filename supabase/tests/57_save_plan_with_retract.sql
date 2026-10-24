@@ -40,11 +40,64 @@ create or replace function pg_temp.open_task_count(p_wave text, p_ship text) ret
   select count(*)::int from pick_tasks t join waves w on w.id = t.wave_id
   where w.planned_date = '2026-11-30' and w.wave_no = p_wave and t.shipment_number = p_ship
     and t.status = 'PLANNED' and w.status in ('PENDING','RESCHEDULED') $$;
-create or replace function pg_temp.drop_plan_temps() returns void language plpgsql as $$
+create or replace function pg_temp.drop_plan_temps() returns void language plpgsql security definer as $$
 begin execute 'drop table if exists _replace, _wave_ids, _seen'; exception when others then null; end $$;
 grant execute on function pg_temp.check(text, boolean), pg_temp.fails(text, text), pg_temp.qty(text, text),
   pg_temp.t(text, int), pg_temp.st(text, int), pg_temp.w(text), pg_temp.ship_wave(text, text),
   pg_temp.open_task_count(text, text), pg_temp.drop_plan_temps() to authenticated;
+
+-- Helper functions for guard test dates (2026-12-10 through 2026-12-13)
+create or replace function pg_temp.w10(p_wave text) returns uuid language sql as $$
+  select id from waves where planned_date = '2026-12-10' and wave_no = p_wave $$;
+create or replace function pg_temp.w11(p_wave text) returns uuid language sql as $$
+  select id from waves where planned_date = '2026-12-11' and wave_no = p_wave $$;
+create or replace function pg_temp.w12(p_wave text) returns uuid language sql as $$
+  select id from waves where planned_date = '2026-12-12' and wave_no = p_wave $$;
+create or replace function pg_temp.w13(p_wave text) returns uuid language sql as $$
+  select id from waves where planned_date = '2026-12-13' and wave_no = p_wave $$;
+create or replace function pg_temp.t10(p_wave text, p_seq int) returns uuid language sql as $$
+  select t.id from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-10' and w.wave_no = p_wave and t.seq = p_seq $$;
+create or replace function pg_temp.t11(p_wave text, p_seq int) returns uuid language sql as $$
+  select t.id from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-11' and w.wave_no = p_wave and t.seq = p_seq $$;
+create or replace function pg_temp.t12(p_wave text, p_seq int) returns uuid language sql as $$
+  select t.id from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-12' and w.wave_no = p_wave and t.seq = p_seq $$;
+create or replace function pg_temp.t13(p_wave text, p_seq int) returns uuid language sql as $$
+  select t.id from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-13' and w.wave_no = p_wave and t.seq = p_seq $$;
+create or replace function pg_temp.st10(p_wave text, p_seq int) returns text language sql as $$
+  select status from pick_tasks where id = pg_temp.t10(p_wave, p_seq) $$;
+create or replace function pg_temp.st11(p_wave text, p_seq int) returns text language sql as $$
+  select status from pick_tasks where id = pg_temp.t11(p_wave, p_seq) $$;
+create or replace function pg_temp.st12(p_wave text, p_seq int) returns text language sql as $$
+  select status from pick_tasks where id = pg_temp.t12(p_wave, p_seq) $$;
+create or replace function pg_temp.st13(p_wave text, p_seq int) returns text language sql as $$
+  select status from pick_tasks where id = pg_temp.t13(p_wave, p_seq) $$;
+create or replace function pg_temp.ship_wave13(p_ship text, p_wave text) returns boolean language sql as $$
+  select p_ship = any(shipment_numbers) from waves where id = pg_temp.w13(p_wave) $$;
+create or replace function pg_temp.open_task_count10(p_wave text, p_ship text) returns int language sql as $$
+  select count(*)::int from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-10' and w.wave_no = p_wave and t.shipment_number = p_ship
+    and t.status = 'PLANNED' and w.status in ('PENDING','RESCHEDULED') $$;
+create or replace function pg_temp.open_task_count11(p_wave text, p_ship text) returns int language sql as $$
+  select count(*)::int from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-11' and w.wave_no = p_wave and t.shipment_number = p_ship
+    and t.status = 'PLANNED' and w.status in ('PENDING','RESCHEDULED') $$;
+create or replace function pg_temp.open_task_count12(p_wave text, p_ship text) returns int language sql as $$
+  select count(*)::int from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-12' and w.wave_no = p_wave and t.shipment_number = p_ship
+    and t.status = 'PLANNED' and w.status in ('PENDING','RESCHEDULED') $$;
+create or replace function pg_temp.open_task_count13(p_wave text, p_ship text) returns int language sql as $$
+  select count(*)::int from pick_tasks t join waves w on w.id = t.wave_id
+  where w.planned_date = '2026-12-13' and w.wave_no = p_wave and t.shipment_number = p_ship
+    and t.status = 'PLANNED' and w.status in ('PENDING','RESCHEDULED') $$;
+grant execute on function pg_temp.w10(text), pg_temp.w11(text), pg_temp.w12(text), pg_temp.w13(text),
+  pg_temp.t10(text, int), pg_temp.t11(text, int), pg_temp.t12(text, int), pg_temp.t13(text, int),
+  pg_temp.st10(text, int), pg_temp.st11(text, int), pg_temp.st12(text, int), pg_temp.st13(text, int),
+  pg_temp.open_task_count10(text, text), pg_temp.open_task_count11(text, text), pg_temp.open_task_count12(text, text), pg_temp.open_task_count13(text, text)
+  to authenticated;
 
 -- ============================================================================
 -- Fixture: SKU 550070614 (UPP=36), batch RW1, expiry 2030-09-01.
@@ -188,5 +241,137 @@ select pg_temp.check('clash: rollback - wave 5 still has both shipments, wave 6 
   and (select count(*) from waves where planned_date = '2026-11-30' and wave_no = '6') = 1);
 select pg_temp.check('clash: rollback - wave 5 A open task still CANCELLED, B still PLANNED',
   pg_temp.st('5', 3) = 'CANCELLED' and pg_temp.st('5', 4) = 'PLANNED');
+
+-- ============================================================================
+-- SHIPMENT-LESS REPLENISH PINS (24 Oct 2026 investigation).
+-- An adversarial review claimed a shipment retract cancels the wave's Bin To Bin
+-- rows and starves other waves waiting on that pickface. Reality: the plan
+-- payload builds every REPLENISH with shipment_number null (lib/allocator/
+-- plan.ts) and 0007 stores it NULL, so the shipment-scoped cancel never matches
+-- them. These cases pin the actual behavior: shipment retract touches PICKs and
+-- outbound only; Bin To Bin rows live with the wave.
+-- ============================================================================
+
+select pg_temp.drop_plan_temps();
+
+-- Reset stock for the pin-test bins - run as superuser to bypass RLS
+reset role;
+delete from inventory where bin_id in (select id from bins where bin_code in ('CB11B01','CB11A01'));
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set local app.by_name = 'Test User';
+set local app.adjust_approved = 'on';
+insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, reason_code, note)
+select 'adjustment', (select id from items where sku = '550070614'), 'RW1', 72,
+       (select id from bins where bin_code = 'CB11B01'), '2030-09-01', 'DATA_ENTRY', 'fixture replenish pins';
+
+-- -----------------------------------------------------------------------------
+-- (a) Wave 10 (2026-12-10): A PICK, shipment-less REPLENISH, A PICK, B PICK.
+--     Wave 11 (2026-12-11): a PICK needing 10 from the empty pickface CB11A01.
+--     Retract shipment A of wave 10: PICKs die, REPLENISH survives, waiter safe.
+-- -----------------------------------------------------------------------------
+select save_plan_with_retract('2026-12-10', '{
+  "waves":[{"wave_no":"10","shipment_numbers":["109722231","109721549"],"planned_slot":"00:52"}],
+  "tasks":[
+   {"wave_no":"10","shipment_number":"109722231","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"10","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":32,"pick_type":"CASE","breaks_pallet":true,"seq":2},
+   {"wave_no":"10","shipment_number":"109722231","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":2,"pick_type":"CASE","breaks_pallet":true,"seq":3},
+   {"wave_no":"10","shipment_number":"109721549","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":4,"pick_type":"CASE","breaks_pallet":true,"seq":4}],
+  "outbound":[
+   {"wave_no":"10","shipment_number":"109722231","sku":"550070614","description":"","order_nos":[],"quantity_requested":4,"quantity_allocated":4},
+   {"wave_no":"10","shipment_number":"109721549","sku":"550070614","description":"","order_nos":[],"quantity_requested":4,"quantity_allocated":4}]}'::jsonb, '[]'::jsonb) \g /dev/null
+
+select save_plan_with_retract('2026-12-11', '{
+  "waves":[{"wave_no":"11","shipment_numbers":["109722999"],"planned_slot":"02:00"}],
+  "tasks":[
+   {"wave_no":"11","shipment_number":"109722999","task_type":"PICK","sku":"550070614","from_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":10,"pick_type":"CASE","breaks_pallet":false,"seq":1}],
+  "outbound":[{"wave_no":"11","shipment_number":"109722999","sku":"550070614","description":"","order_nos":[],"quantity_requested":10,"quantity_allocated":10}]}'::jsonb, '[]'::jsonb) \g /dev/null
+
+select pg_temp.check('replenish-pins fixture: wave 10 A has 2 open PICKs, REPLENISH open, wave 11 waiter open',
+  pg_temp.open_task_count10('10', '109722231') = 2
+  and pg_temp.st10('10', 2) = 'PLANNED'
+  and pg_temp.open_task_count11('11', '109722999') = 1);
+
+select retract_shipment_open_tasks(pg_temp.w10('10'), '109722231', 'pin test a') \g /dev/null
+
+select pg_temp.check('retract: shipment A open PICKs CANCELLED',
+  pg_temp.open_task_count10('10', '109722231') = 0
+  and pg_temp.st10('10', 1) = 'CANCELLED' and pg_temp.st10('10', 3) = 'CANCELLED');
+select pg_temp.check('retract: shipment-less REPLENISH still PLANNED (it lives with the wave)',
+  pg_temp.st10('10', 2) = 'PLANNED');
+select pg_temp.check('retract: sibling shipment B untouched',
+  pg_temp.open_task_count10('10', '109721549') = 1);
+select pg_temp.check('retract: other wave PICK waiting on the pickface untouched (no starvation)',
+  pg_temp.st11('11', 1) = 'PLANNED');
+select pg_temp.check('retract: outbound row of A -> CANCELLED, sibling B still PLANNED',
+  (select o.status = 'CANCELLED' from outbound o where o.wave_id = pg_temp.w10('10') and o.shipment_number = '109722231')
+  and (select o.status = 'PLANNED' from outbound o where o.wave_id = pg_temp.w10('10') and o.shipment_number = '109721549'));
+
+-- -----------------------------------------------------------------------------
+-- (b) Retract on a Tunda-shaped wave (status RESCHEDULED) succeeds; the wave
+--     keeps its status and its shipment-less REPLENISH.
+-- -----------------------------------------------------------------------------
+select pg_temp.drop_plan_temps();
+select save_plan_with_retract('2026-12-12', '{
+  "waves":[{"wave_no":"12","shipment_numbers":["109723000"],"planned_slot":"03:00"}],
+  "tasks":[
+   {"wave_no":"12","task_type":"REPLENISH","sku":"550070614","from_bin":"CB11B01","to_bin":"CB11A01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":20,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"12","shipment_number":"109723000","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":5,"pick_type":"CASE","breaks_pallet":true,"seq":2}]}'::jsonb, '[]'::jsonb) \g /dev/null
+
+-- Fixture: park the wave like Tunda does (superuser write; Tunda itself is RPC-gated)
+reset role;
+update waves set status = 'RESCHEDULED' where id = pg_temp.w12('12');
+set role authenticated;
+
+select pg_temp.check('replenish-pins fixture: wave 12 RESCHEDULED, REPLENISH + PICK open',
+  (select status from waves where id = pg_temp.w12('12')) = 'RESCHEDULED'
+  and pg_temp.st12('12', 1) = 'PLANNED' and pg_temp.st12('12', 2) = 'PLANNED');
+
+select retract_shipment_open_tasks(pg_temp.w12('12'), '109723000', 'pin test b') \g /dev/null
+
+select pg_temp.check('retract: RESCHEDULED wave accepted the retract; PICK CANCELLED, REPLENISH survives',
+  pg_temp.st12('12', 2) = 'CANCELLED' and pg_temp.st12('12', 1) = 'PLANNED');
+select pg_temp.check('retract: wave 12 status still RESCHEDULED (retract is not a wave status change)',
+  (select status from waves where id = pg_temp.w12('12')) = 'RESCHEDULED');
+
+-- -----------------------------------------------------------------------------
+-- Test (d): p_retract with TWO entries (different shipments) in one call
+-- -> both retracted, both outcomes asserted
+-- -----------------------------------------------------------------------------
+-- Create wave 13 on 2026-12-13 with two shipments, each with open tasks
+select pg_temp.drop_plan_temps();
+select save_plan('2026-12-13', '{
+  "waves":[{"wave_no":"13","shipment_numbers":["109723001","109723002"],"planned_slot":"04:00"}],
+  "tasks":[
+   {"wave_no":"13","shipment_number":"109723001","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":3,"pick_type":"CASE","breaks_pallet":true,"seq":1},
+   {"wave_no":"13","shipment_number":"109723002","task_type":"PICK","sku":"550070614","from_bin":"CB11B01","batch_lot":"RW1","expiry_date":"2030-09-01","quantity":5,"pick_type":"CASE","breaks_pallet":true,"seq":2}],
+  "outbound":[
+   {"wave_no":"13","shipment_number":"109723001","sku":"550070614","description":"","order_nos":[],"quantity_requested":3,"quantity_allocated":3},
+   {"wave_no":"13","shipment_number":"109723002","sku":"550070614","description":"","order_nos":[],"quantity_requested":5,"quantity_allocated":5}]}'::jsonb) \g /dev/null
+
+select pg_temp.check('multi-retract fixture: wave 13 has two shipments with open PICKs',
+  pg_temp.open_task_count13('13','109723001') = 1 and pg_temp.open_task_count13('13','109723002') = 1);
+
+-- Call save_plan_with_retract with TWO retract entries in one call
+select pg_temp.drop_plan_temps();
+do $$ declare v_retract jsonb; v_wave13 uuid; v_plan jsonb; begin
+  v_wave13 := pg_temp.w13('13');
+  v_retract := jsonb_build_array(
+    jsonb_build_object('wave_id', v_wave13, 'shipment_number', '109723001', 'reason', 'retract ship 1'),
+    jsonb_build_object('wave_id', v_wave13, 'shipment_number', '109723002', 'reason', 'retract ship 2')
+  );
+  -- Empty plan (no new waves/tasks) just to test double retract
+  v_plan := jsonb_build_object('waves', '[]'::jsonb, 'tasks', '[]'::jsonb, 'outbound', '[]'::jsonb);
+  perform save_plan_with_retract('2026-12-13', v_plan, v_retract);
+end $$; \g /dev/null
+
+select pg_temp.check('multi-retract: both shipments retracted - ship 1 PICK CANCELLED',
+  pg_temp.st13('13', 1) = 'CANCELLED');
+select pg_temp.check('multi-retract: both shipments retracted - ship 2 PICK CANCELLED',
+  pg_temp.st13('13', 2) = 'CANCELLED');
+select pg_temp.check('multi-retract: wave 13 still exists PENDING (kept wave)',
+  (select status from waves where id = pg_temp.w13('13')) = 'PENDING');
+select pg_temp.check('multi-retract: both shipments still on wave 13',
+  pg_temp.ship_wave13('109723001','13') and pg_temp.ship_wave13('109723002','13'));
 
 rollback;
