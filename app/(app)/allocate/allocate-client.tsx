@@ -182,9 +182,9 @@ export function AllocateClient() {
       // save_plan_with_retract handles retraction of open tasks in carried waves
       // and saves the new plan (including remainder waves) atomically.
       const r = await savePlan(db, run.asOf, run, run.demand, run.remainders.retracts);
-      // After save_plan_with_retract (which replaces the date's untouched waves), handle fresh-mode carries only.
-      // Ordinary carry matches (with posted tasks) are handled by the RPC; ambiguous carries are skipped.
-      const carried: string[] = [];
+      // After save_plan_with_retract (which replaces the date's untouched waves), the carried waves are handled here:
+      // fresh-mode waves are cancelled (the new plan holds the whole shipment); ordinary carry is inside the RPC;
+      // ambiguous carries are skipped loudly for a supervisor.
       for (const m of run.carry) {
         const why = `order muncul lagi di jadwal ${run.asOf}`;
         if (m.mode === "fresh") {
@@ -206,7 +206,6 @@ export function AllocateClient() {
       setSaved(`${fmtNum(r.waves)} wave, ${fmtNum(r.tasks)} tugas, ${fmtNum(r.outbound)} baris order disimpan`
         + (r.replaced ? `, ${r.replaced} wave lama yang belum dikerjakan diganti` : "")
         + (r.kept ? `, ${r.kept} wave yang sudah berjalan tetap` : "")
-        + (carried.length ? `, ${carried.length} wave yang ditunda dilanjutkan (${carried.join(", ")})` : "")
         + (fresh ? `, ${fresh} wave yang ditunda diganti rencana baru` : "")
         + (remainderWaveNos.length > 0 ? `, sisa ${remainderWaveNos.length} wave Tunda diteruskan sebagai wave baru (NO ${remainderWaveNos.join(", ")})` : "")
         + (run.remainders.retracts.length > remainderWaveNos.length ? `, ${run.remainders.retracts.length - remainderWaveNos.length} wave Tunda selesai sisa kosong` : "") + ".");
