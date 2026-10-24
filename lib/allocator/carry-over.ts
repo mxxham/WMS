@@ -4,8 +4,10 @@ import type { DemandLine } from './types';
  * Orders parked with Tunda come back on a later Schedule of the day. A line
  * of today's schedule is the same order as a parked one when it has the same
  * SKU and the same shipment number (it stays when rescheduled) or a shared
- * Order No (in case a new shipment number is ever issued). Matches are grouped per parked wave, which is
- * carried over whole (carry_over_wave, 0036) instead of being planned again.
+ * Order No (in case a new shipment number is ever issued). Matches are grouped per parked wave.
+ * The `shipments` rename map feeds `carry_over_wave` (0036). For ordinary carries (mode === 'carry'
+ * with posted tasks), per docs/superpowers/specs/2026-10-24-remainder-wave-replan-design.md the
+ * parked plan is superseded: open tasks are retracted at save and the remainder is planned fresh.
  */
 export type ParkedOrder = {
   wave_id: string; wave_no: string; planned_date: string; shipment_number: string; sku: string; description: string;
@@ -29,7 +31,145 @@ export type CarryMatch = {
   mode: 'fresh' | 'carry';
 };
 
+/** Return value from planRemainders describing what the save step must do. */
+export interface RemainderSave {
+  /** Open tasks to retract in the carried wave(s). One per shipment that gets replanned. */
+  retracts: { wave_id: string; shipment_number: string; reason: string }[];
+  /** Wave numbers of ambiguous carries that were skipped (today's behavior). */
+  skippedFrom: string[];
+}
+
 const clean = (s: string) => s.trim();
+
+/**
+ * Returns the smallest numeric wave NO (>= 1) not present in `taken`, as a string.
+ * Non-numeric entries in `taken` (e.g., "T5", "5-2") are ignored.
+ */
+export function nextFreeWaveNo(taken: ReadonlySet<string>): string {
+  let n = 1;
+  while (taken.has(String(n))) {
+    n++;
+  }
+  return String(n);
+}
+
+/**
+ * Plans the remainder (sheet minus already picked) for carried waves that have posted tasks.
+ *
+ * For `ambiguous: true` carry matches: demand lines are left untouched (today's skip behavior),
+ * and the wave_no is recorded in `skippedFrom`.
+ *
+ * For ordinary `carry` matches (mode === 'carry' && !ambiguous):
+ * - Each demand line matched to that wave gets `qtyCartons = newQty - quantity_picked`
+ *   from the corresponding ParkedOrder.
+ * - If the result is <= 0, the line is dropped entirely.
+ * - A fresh numeric waveNo is assigned via `nextFreeWaveNo(takenWaveNos)`.
+ * - Each such match yields one retract entry with reason 'sisanya direncanakan ulang'
+ *   per shipment actually planned from that wave.
+ *
+ * References: docs/superpowers/specs/2026-10-24-remainder-wave-replan-design.md,
+ * migrations 0074 (cancel settle) and 0036 (carry_over_wave semantics).
+ */
+export function planRemainders(
+  demand: DemandLine[],
+  matches: CarryMatch[],
+  parked: ParkedOrder[],
+  takenWaveNos: ReadonlySet<string>
+): { demand: DemandLine[]; remainders: RemainderSave } {
+  const retracts: RemainderSave['retracts'] = [];
+  const skippedFrom: string[] = [];
+
+  // Build a lookup for parked orders by (wave_id, sku, shipment_number)
+  const parkedLookup = new Map<string, ParkedOrder>();
+  for (const p of parked) {
+    const key = `${p.wave_id}|${p.sku}|${p.shipment_number}`;
+    parkedLookup.set(key, p);
+  }
+
+  // Track which demand lines are matched to ordinary carry waves
+  const matchedToOrdinaryCarry = new Set<DemandLine>();
+  // Track which shipments have been processed for retract entries per wave
+  const processedShipments = new Set<string>();
+
+  // First pass: identify demand lines matched to ordinary carry waves
+  for (const match of matches) {
+    if (match.mode !== 'carry' || match.ambiguous) continue;
+
+    for (const line of match.lines) {
+      // Find the corresponding demand line
+      const origDemand = demand.find(d => d.sku === line.sku && d.shipmentNumber === line.newShipment);
+      if (origDemand) {
+        matchedToOrdinaryCarry.add(origDemand);
+      }
+    }
+  }
+
+  // Build new demand array
+  const newDemand: DemandLine[] = [];
+  const localTaken = new Set(takenWaveNos);
+
+  for (const d of demand) {
+    if (matchedToOrdinaryCarry.has(d)) {
+      // This line is handled by its carry match below
+      continue;
+    }
+    // Unmatched lines (fresh demand, ambiguous carry matches, etc.) pass through
+    newDemand.push(d);
+  }
+
+  // Second pass: process ordinary carry matches and add remainder lines
+  for (const match of matches) {
+    if (match.mode !== 'carry' || match.ambiguous) continue;
+
+    const freshWaveNo = nextFreeWaveNo(localTaken);
+    localTaken.add(freshWaveNo);
+
+    for (const line of match.lines) {
+      const p = parkedLookup.get(`${match.wave_id}|${line.sku}|${line.oldShipment}`);
+      const picked = p?.quantity_picked ?? 0;
+      const remainder = line.newQty - picked;
+
+      if (remainder > 0) {
+        // Find the original demand line to copy other fields
+        const origDemand = demand.find(d => d.sku === line.sku && d.shipmentNumber === line.newShipment);
+        if (origDemand) {
+          newDemand.push({
+            ...origDemand,
+            qtyCartons: remainder,
+            waveNo: freshWaveNo,
+          });
+        }
+      }
+      // If remainder <= 0, line is dropped (not added to newDemand)
+    }
+
+    // Create retract entries from unique oldShipment values in match.lines
+    // This covers both same-number (oldShipment === newShipment) and rename cases.
+    const seenOldShipments = new Set<string>();
+    for (const line of match.lines) {
+      const oldShipment = line.oldShipment;
+      if (seenOldShipments.has(oldShipment)) continue;
+      seenOldShipments.add(oldShipment);
+      if (!processedShipments.has(`${match.wave_id}|${oldShipment}`)) {
+        retracts.push({
+          wave_id: match.wave_id,
+          shipment_number: oldShipment,
+          reason: 'sisanya direncanakan ulang',
+        });
+        processedShipments.add(`${match.wave_id}|${oldShipment}`);
+      }
+    }
+  }
+
+  // Third pass: handle ambiguous carry matches (record skippedFrom)
+  for (const match of matches) {
+    if (match.mode !== 'carry' || !match.ambiguous) continue;
+    skippedFrom.push(match.wave_no);
+    // Demand lines for ambiguous matches already passed through in first pass
+  }
+
+  return { demand: newDemand, remainders: { retracts, skippedFrom } };
+}
 
 export function matchParked(demand: DemandLine[], parked: ParkedOrder[]): { matches: CarryMatch[]; matchedDemand: Set<DemandLine> } {
   const byWave = new Map<string, CarryMatch>();
