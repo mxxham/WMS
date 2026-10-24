@@ -9,6 +9,7 @@ import { saveSheets } from "@/lib/save-xlsx";
 type LineRow = {
   task_id: string; shipment_number: string; wave_no: string; seq: number; from_bin: string; zone: string; sku: string;
   description: string; uom: string | null; batch_lot: string; expiry_date: string | null; picked_qty: number; line_state: ExportLine["line_state"];
+  volume_l: number | null;
 };
 
 type MoveLineRow = {
@@ -31,7 +32,7 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
 
       // ---- Pick audit (existing) ----
       let pickQ = db.from("pick_audit_line")
-        .select("task_id, shipment_number, wave_no, seq, from_bin, zone, sku, description, uom, batch_lot, expiry_date, picked_qty, line_state")
+        .select("task_id, shipment_number, wave_no, seq, from_bin, zone, sku, description, uom, batch_lot, expiry_date, picked_qty, line_state, volume_l")
         .eq("planned_date", date).neq("wave_status", "CANCELLED");
       if (zone) pickQ = pickQ.eq("zone", zone);
       const { data: pickData, error: pickError } = await pickQ;
@@ -67,7 +68,7 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
       const pickLines: ExportLine[] = pickRows.map((l) => ({
         id: l.task_id, shipment_number: l.shipment_number, wave_no: l.wave_no, picklist: null, seq: l.seq, bin_code: l.from_bin,
         sku: l.sku, description: l.description, uom: l.uom, batch: l.batch_lot, expiry: l.expiry_date, qty: Number(l.picked_qty),
-        bin_remaining: null, line_state: l.line_state,
+        bin_remaining: null, line_state: l.line_state, volume_l: l.volume_l,
       }));
 
       // Build move workbook sheets

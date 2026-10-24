@@ -62,10 +62,11 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
       </div>
     );
   } else {
-    const [{ data: today }, { data: carried }, { data: moves }] = await Promise.all([
+    const [{ data: today }, { data: carried }, { data: moves }, { data: vol }] = await Promise.all([
       supabase.from("pick_audit_shipment").select("*").eq("planned_date", date).order("wave_no").order("shipment_number"),
       supabase.from("pick_audit_shipment").select("*").lt("planned_date", date).in("state", OPEN).order("planned_date").order("shipment_number"),
       supabase.from("pick_audit_move").select("wave_id, wave_no, planned_date, line_state").eq("planned_date", date).order("wave_no").order("seq"),
+      supabase.from("volume_out_daily").select("boxes, litres").eq("day", date).maybeSingle(),
     ]);
     const rows = (today ?? []) as ShipmentRow[];
     const earlier = (carried ?? []) as ShipmentRow[];
@@ -73,6 +74,8 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
     const count = (s: ShipmentState) => rows.filter((r) => r.state === s).length;
     const moveCount = (s: MoveState) => moveRows.filter((r) => r.line_state === s).length;
     const moveWaves = [...new Set(moveRows.map((m) => m.wave_no))].sort();
+    const dayBoxes = vol?.boxes ?? 0;
+    const dayLitres = vol?.litres ?? 0;
     body = (
       <div className="space-y-4">
         <DownloadPickAudit date={date} />
@@ -83,6 +86,10 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
               <div className="text-xs text-steel-500">{SHIPMENT_STATE_LABEL[s]}</div>
             </div>
           ))}
+        </div>
+        <div className="rounded-lg bg-white p-3">
+          <div className="font-cond text-2xl font-semibold tabular text-ckb">{fmtNum(dayLitres, 1)} L</div>
+          <div className="text-xs text-steel-500">Volume keluar hari ini · {fmtNum(dayBoxes)} karton</div>
         </div>
         <ShipmentList rows={rows} empty="Belum ada shipment dengan pick di tanggal ini." />
         {earlier.length > 0 && (

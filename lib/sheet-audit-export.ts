@@ -10,6 +10,7 @@ export type ExportLine = {
   id: string; shipment_number: string; wave_no: string | null; picklist: string | null; seq: number;
   bin_code: string; sku: string; description: string; uom: string | null; batch: string; expiry: string | null;
   qty: number; bin_remaining: number | null; line_state: "TODO" | "OK" | "MISMATCH" | "RESOLVED" | "AUTO_PASS";
+  volume_l: number | null; // litres per carton/article for this SKU
 };
 export type ExportAttempt = {
   line_id: string; attempt_no: number; checker_name: string; method: "STAGING" | "RACK" | "MOVE" | null; result: "OK" | "MISMATCH";
@@ -64,13 +65,24 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
 
   const lineRows: Row[] = [...lines].sort((a, b) => a.shipment_number.localeCompare(b.shipment_number) || a.seq - b.seq).map((l) => {
     const last = lastOf(l.id);
+    const vol = l.volume_l != null ? Number((l.qty * l.volume_l).toFixed(1)) : null;
     return {
       Shipment: l.shipment_number, NO: l.wave_no, Picklist: l.picklist, Seq: l.seq, Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description,
-      Batch: l.batch, Expired: l.expiry, "Qty pick": Number(l.qty), Status: STATE[l.line_state], Error: last ? errorText(last.errors) : null,
+      Batch: l.batch, Expired: l.expiry, "Qty pick": Number(l.qty), "Volume (L)": vol, Status: STATE[l.line_state], Error: last ? errorText(last.errors) : null,
       "Dihitung (baris)": last ? Number(last.counted_qty) : null, Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
       Catatan: last?.note ?? null, Audit: byLine.get(l.id)?.length ?? 0,
     };
   });
+
+  // Totals row for the day
+  const totalBoxes = lineRows.reduce((s, r) => s + (Number(r["Qty pick"]) || 0), 0);
+  const totalLitres = lineRows.reduce((s, r) => s + (Number(r["Volume (L)"]) || 0), 0);
+  const totalsRow: Row = {
+    Shipment: "TOTAL", NO: null, Picklist: null, Seq: null, Bin: null, SKU: null, Deskripsi: null,
+    Batch: null, Expired: null, "Qty pick": totalBoxes, "Volume (L)": Number(totalLitres.toFixed(1)), Status: null, Error: null,
+    "Dihitung (baris)": null, Checker: null, Waktu: null, Catatan: null, Audit: null,
+  };
+  const linesWithTotals = [...lineRows, totalsRow];
 
   const history: Row[] = [...attempts].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((a) => {
     const l = lineById.get(a.line_id);
@@ -81,7 +93,7 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
       "Dihitung (baris)": Number(a.counted_qty), Ditemukan: a.found_sku, Catatan: a.note, Ubah: a.correction ? "Ya" : null,
     };
   });
-  return { bins, lines: lineRows, history };
+  return { bins, lines: linesWithTotals, history };
 }
 
 /**
