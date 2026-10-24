@@ -63,7 +63,9 @@ export function nextFreeWaveNo(taken: ReadonlySet<string>): string {
  * - Each demand line matched to that wave gets `qtyCartons = newQty - quantity_picked`
  *   from the corresponding ParkedOrder.
  * - If the result is <= 0, the line is dropped entirely.
- * - A fresh numeric waveNo is assigned via `nextFreeWaveNo(takenWaveNos)`.
+ * - A fresh numeric waveNo is assigned via `nextFreeWaveNo(takenWaveNos)`. The caller must
+ *   pass the taken set as EVERY textually-existing NO the save touches: existing waves of
+ *   the date (replaceable + kept) and the ordinary waveNos the run plans from the workbook.
  * - Each such match yields one retract entry with reason 'sisanya direncanakan ulang'
  *   per shipment actually planned from that wave.
  *

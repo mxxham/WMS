@@ -20,7 +20,7 @@ import { runPipeline, type PipelineResult } from "@/lib/allocator/pipeline";
 import { buildPlan } from "@/lib/allocator/plan";
 import { binToBin, sisaPrinted, uomLabel } from "@/lib/allocator/picklist";
 import { parseLocation } from "@/lib/allocator/pickpath";
-import { matchParked, type CarryMatch, type ParkedOrder } from "@/lib/allocator/carry-over";
+import { matchParked, planRemainders, type CarryMatch, type ParkedOrder, type RemainderSave } from "@/lib/allocator/carry-over";
 import { fileDate, sortEarlier, type EarlierDecision } from "@/lib/allocator/earlier-waves";
 
 type Source = "db" | "file";
@@ -71,6 +71,10 @@ export function AllocateClient() {
     check: { ok: boolean; rows: StockCheckRow[] } | null;
     /** parked (Tunda) orders of earlier days found again on this schedule: carried over on save (0036) */
     carry: CarryMatch[];
+    /** Remainder planning result for carried waves with posted tasks */
+    remainders: RemainderSave;
+    /** Status lines for the run summary (Indonesian) */
+    statusLines: string[];
   }) | null>(null);
   const [tab, setTab] = useState<Tab>("picklist");
   const fileDay = file ? fileDate(file.name) : null;
@@ -113,9 +117,45 @@ export function AllocateClient() {
       // Something posted: the old wave is carried over and only the new items are planned.
       const { data: parked, error: pe } = await supabase.rpc("parked_orders", { p_date: asOf });
       if (pe) throw new Error(pe.message);
-      const found = matchParked(demand, ((parked ?? []) as ParkedOrder[]).filter((p) => p.planned_date < asOf));
+      const parkedFiltered = ((parked ?? []) as ParkedOrder[]).filter((p) => p.planned_date < asOf);
+      const found = matchParked(demand, parkedFiltered);
       const carry = found.matches;
-      demand = demand.filter((d) => !found.matchedDemand.has(d));
+
+      // Plan remainders for carried waves with posted tasks (Tunda mid-run)
+      // Taken = the date's existing wave NOs (replaceable drafts keep their NO; kept waves are
+      // permanent for the day) PLUS every NO this same run plans from the workbook — a remainder
+      // wave must never collide with either, or two waves in one save payload share a NO.
+      const takenWaveNos = new Set<string>([
+        ...ctx.replaceable.map((w) => w.wave_no), ...ctx.kept.map((w) => w.wave_no),
+        ...demand.map((d) => d.waveNo),
+      ]);
+      const { demand: demandWithRemainders, remainders } = planRemainders(demand, carry, parkedFiltered, takenWaveNos);
+
+      // Build status lines for run summary (Indonesian)
+      const statusLines: string[] = [];
+      // For each ordinary-carry remainder planned, show items+cartons
+      for (const match of carry) {
+        if (match.mode !== 'carry' || match.ambiguous) continue;
+        // Collect remainder lines for this wave from the new demand
+        const remainderLines = demandWithRemainders.filter((d) => {
+          // Find if this demand line came from this match's lines
+          return match.lines.some((ml) => ml.sku === d.sku && ml.newShipment === d.shipmentNumber);
+        });
+        if (remainderLines.length > 0) {
+          const items = remainderLines.length;
+          const cartons = remainderLines.reduce((sum, d) => sum + d.qtyCartons, 0);
+          // Determine the new waveNo assigned (all remainder lines for this match share the same waveNo)
+          const newWaveNo = remainderLines[0].waveNo;
+          statusLines.push(`sisa wave Tunda ${match.wave_no} diteruskan sebagai wave baru ${newWaveNo} (${items} item, ${cartons} kar)`);
+        }
+      }
+      // For ambiguous carries, keep today's skip listing
+      for (const waveNo of remainders.skippedFrom) {
+        statusLines.push(`wave Tunda ${waveNo} dilewati: shipment ambigu, periksa sebelum menyimpan`);
+      }
+      // Keep the existing skip line for kept shipments (already handled by `skipped` array)
+
+      demand = demandWithRemainders.filter((d) => !found.matchedDemand.has(d));
       const release = carry.filter((m) => m.mode === "fresh").map((m) => m.wave_id);
       if (source === "db") {
         const db = inventoryToStock(await loadPlanningStock(supabase, asOf, release), config);
@@ -127,7 +167,7 @@ export function AllocateClient() {
       const check = source === "file"
         ? checkPlanStock(buildPlan(result.allocation, demand, result.pickfaces).tasks, wb.stock, await loadStockCheckRows(supabase, asOf, release))
         : null;
-      setRun({ ...result, source, asOf, demand, ctx, skipped, earlier: earlier.decisions, carry, check });
+      setRun({ ...result, source, asOf, demand, ctx, skipped, earlier: earlier.decisions, carry, check, remainders, statusLines });
       setTab("picklist");
     } catch (e) {
       setError((e as Error).message);
@@ -138,9 +178,12 @@ export function AllocateClient() {
     if (!run) return null;
     try {
       const db = createClient();
-      const r = await savePlan(db, run.asOf, run, run.demand);
-      // After save_plan (which replaces the date's untouched waves), the parked waves:
-      // fresh -> cancelled (the new plan has the whole shipment); carry -> moved in, new items merged.
+      // Pass retracts from remainder planning to the save RPC.
+      // save_plan_with_retract handles retraction of open tasks in carried waves
+      // and saves the new plan (including remainder waves) atomically.
+      const r = await savePlan(db, run.asOf, run, run.demand, run.remainders.retracts);
+      // After save_plan_with_retract (which replaces the date's untouched waves), handle fresh-mode carries only.
+      // Ordinary carry matches (with posted tasks) are handled by the RPC; ambiguous carries are skipped.
       const carried: string[] = [];
       for (const m of run.carry) {
         const why = `order muncul lagi di jadwal ${run.asOf}`;
@@ -149,21 +192,24 @@ export function AllocateClient() {
           if (error) throw new Error(`Rencana tersimpan, tapi wave lama NO ${m.wave_no} (${m.planned_date}) gagal dibatalkan: ${error.message}. Batalkan manual di halaman wave.`);
           continue;
         }
-        const { data, error } = await db.rpc("carry_over_wave", { p_wave_id: m.wave_id, p_date: run.asOf, p_shipments: m.shipments, p_reason: why });
-        if (error) throw new Error(`Rencana tersimpan, tapi wave NO ${m.wave_no} (${m.planned_date}) gagal dilanjutkan: ${error.message}`);
-        const moved = data as { wave_no: string; shipment_numbers: string[] };
-        for (const sh of moved.shipment_numbers) {
-          const { error: me } = await db.rpc("merge_into_carried_wave", { p_wave_id: m.wave_id, p_shipment: sh });
-          if (me) throw new Error(`Wave ${moved.wave_no} dilanjutkan, tapi item baru SH ${sh} gagal digabung: ${me.message}`);
+        // For ordinary carry (mode === 'carry' && !ambiguous), the RPC already handled retraction and new wave creation.
+        // Ambiguous carries (m.ambiguous === true) are skipped and not planned.
+        if (m.mode === "carry" && !m.ambiguous) {
+          // The remainder wave was created by save_plan_with_retract; nothing more to do here.
+          continue;
         }
-        carried.push(moved.wave_no);
       }
       const fresh = run.carry.filter((m) => m.mode === "fresh").length;
+      const remainderWaveNos = run.remainders.retracts.length > 0
+        ? [...new Set(run.demand.filter((d) => run.carry.some((m) => m.mode === 'carry' && !m.ambiguous && m.lines.some((ml) => ml.sku === d.sku && ml.newShipment === d.shipmentNumber))).map((d) => d.waveNo))]
+        : [];
       setSaved(`${fmtNum(r.waves)} wave, ${fmtNum(r.tasks)} tugas, ${fmtNum(r.outbound)} baris order disimpan`
         + (r.replaced ? `, ${r.replaced} wave lama yang belum dikerjakan diganti` : "")
         + (r.kept ? `, ${r.kept} wave yang sudah berjalan tetap` : "")
         + (carried.length ? `, ${carried.length} wave yang ditunda dilanjutkan (${carried.join(", ")})` : "")
-        + (fresh ? `, ${fresh} wave yang ditunda diganti rencana baru` : "") + ".");
+        + (fresh ? `, ${fresh} wave yang ditunda diganti rencana baru` : "")
+        + (remainderWaveNos.length > 0 ? `, sisa ${remainderWaveNos.length} wave Tunda diteruskan sebagai wave baru (NO ${remainderWaveNos.join(", ")})` : "")
+        + (run.remainders.retracts.length > remainderWaveNos.length ? `, ${run.remainders.retracts.length - remainderWaveNos.length} wave Tunda selesai sisa kosong` : "") + ".");
       return null;
     } catch (e) { return (e as Error).message; }
   }
@@ -271,6 +317,13 @@ export function AllocateClient() {
               Double pick: {run.doubles.total} bin cadangan diambil lebih dari sekali ({run.doubles.pickDoubles.map((d) => d.location).join(", ")})
             </p>
           )}
+          {run.statusLines && run.statusLines.length > 0 && (
+            <div role="status" className="space-y-1 rounded-md border border-steel-300 bg-white p-3 text-sm">
+              {run.statusLines.map((line, i) => (
+                <p key={i} className="text-steel-700">{line}</p>
+              ))}
+            </div>
+          )}
 
           <Card>
             <CardHeader className="flex flex-wrap items-center justify-between gap-2">
@@ -286,10 +339,20 @@ export function AllocateClient() {
                 <Button variant="outline" size="sm" onClick={async () => (await import("@/lib/allocator/browser/downloads")).downloadAllocationWorkbook(run.allocation, run.movement, run.pickfaces, `picklist_${run.asOf}.xlsx`)}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
                 {run.source === "db" || run.check?.ok ? (
                   <ConfirmButton size="sm" variant="accent" title="Simpan rencana"
-                    summary={`Simpan ${plan.waves.length} wave dan ${plan.tasks.length} tugas untuk ${run.asOf}${run.source === "file" ? " (picklist dari file WMS; stok di semua bin-nya sama dengan database)" : ""}.`
-                      + (run.ctx?.replaceable.length ? ` ${run.ctx.replaceable.length} wave tanggal ini yang belum dikerjakan akan diganti.` : "")
-                      + (run.ctx?.kept.length ? ` ${run.ctx.kept.length} wave yang sudah berjalan tidak diubah.` : "")
-                      + " Stok belum berubah sampai tugas diposting."}
+                    summary={(() => {
+                      const base = `Simpan ${plan.waves.length} wave dan ${plan.tasks.length} tugas untuk ${run.asOf}${run.source === "file" ? " (picklist dari file WMS; stok di semua bin-nya sama dengan database)" : ""}.`
+                        + (run.ctx?.replaceable.length ? ` ${run.ctx.replaceable.length} wave tanggal ini yang belum dikerjakan akan diganti.` : "")
+                        + (run.ctx?.kept.length ? ` ${run.ctx.kept.length} wave yang sudah berjalan tidak diubah.` : "");
+                      if (run.remainders.retracts.length > 0) {
+                        const makeNos = [...new Set(run.demand
+                          .filter((d) => run.carry.some((m) => m.mode === 'carry' && !m.ambiguous && m.lines.some((ml) => ml.sku === d.sku && ml.newShipment === d.shipmentNumber)))
+                          .map((d) => d.waveNo))];
+                        let extra = ` Sisa ${run.remainders.retracts.length} wave Tunda disentuh: tugas terbukanya ditarik.`;
+                        if (makeNos.length > 0) extra += ` Sisanya direncanakan sebagai wave baru (NO ${makeNos.join(", ")}).`;
+                        return base + extra + " Stok belum berubah sampai tugas diposting.";
+                      }
+                      return base + " Stok belum berubah sampai tugas diposting.";
+                    })()}
                     onConfirm={save}><Save className="h-4 w-4" />Simpan rencana</ConfirmButton>
                 ) : (
                   <span className="self-center text-xs font-semibold text-bad">Simpan dikunci: stok file berbeda dengan database di {run.check?.rows.filter((r) => r.problem).length} baris (lihat Cek stok).</span>

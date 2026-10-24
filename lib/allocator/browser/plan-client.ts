@@ -23,7 +23,7 @@ export interface PlanContext {
   kept: { id: string; wave_no: string; status: string; shipment_numbers: string[] }[];
 }
 
-export interface SaveResult { waves: number; tasks: number; outbound: number; replaced: number; kept: number }
+export interface SaveResult { waves: number; tasks: number; outbound: number; replaced: number; kept: number; remainder_wave_nos?: string[] }
 
 const STOCK_COLUMNS = 'bin_code, bin_status, sku, description, uom, upp, batch_lot, quantity, expiry_date, received_date';
 
@@ -112,9 +112,20 @@ export function keptShipments(ctx: PlanContext): Set<string> {
   return new Set(ctx.kept.flatMap((w) => w.shipment_numbers));
 }
 
-export async function savePlan(db: SupabaseClient, date: string, run: PipelineResult, demand: DemandLine[]): Promise<SaveResult> {
+export async function savePlan(
+  db: SupabaseClient,
+  date: string,
+  run: PipelineResult,
+  demand: DemandLine[],
+  retracts: { wave_id: string; shipment_number: string; reason: string }[] = [],
+): Promise<SaveResult> {
   const plan = buildPlan(run.allocation, demand, run.pickfaces);
-  const { data, error } = await db.rpc('save_plan', { p_date: date, p_plan: plan });
+  let data, error;
+  if (retracts.length === 0) {
+    ({ data, error } = await db.rpc('save_plan', { p_date: date, p_plan: plan }));
+  } else {
+    ({ data, error } = await db.rpc('save_plan_with_retract', { p_date: date, p_plan: plan, p_retract: retracts }));
+  }
   if (error) throw new Error(error.message);
   return data as SaveResult;
 }
