@@ -1,18 +1,21 @@
 import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowDownRight, ArrowUpRight, Boxes, CalendarClock, CalendarOff, CalendarX2, ChevronRight, CircleCheck,
+  ClipboardCheck, ClipboardList, Gauge, Layers, PackageSearch, Route, ShieldAlert, Truck, Warehouse,
+} from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Table, Td, Th } from "@/components/ui/table";
 import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
 import type { BinSummary } from "@/lib/warehouse-types";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
-import { jakartaDate, locType } from "@/lib/inventory-view";
-import { StatusIcon } from "@/components/ui/status-icon";
+import { SHELF_BUCKETS, jakartaDate, locType, shelfBucket } from "@/lib/inventory-view";
 
 // fefo_exceptions timed out (over 8 s) before 0070 made it ~0.1 s; the counts
 // are still cached for 15 min so dashboard loads don't wait on it. A cached function may not read cookies
@@ -38,21 +41,43 @@ type Task = { status: string; task_type: string; quantity: number; actual_quanti
 type Mv = { type: string; quantity: number; from_bin_id: string | null };
 type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH" };
 
-// Occupancy heat grid: one hue (brand navy), light -> dark, 5 fixed steps.
+// Occupancy heat grid: one hue from the Coastal Blues ramp, light -> dark, 5 fixed steps.
+// Steps 4 and 5 carry white 12px bold text, so they stay on ckb (#2A6F97, 5.0:1) and
+// ckb-dark (#01497C, 7.5:1) rather than the lighter ckb-light.
 const OCC_STEPS = [
-  { min: 0, bg: "#E0E8EE", fg: "text-steel" },
-  { min: 0.2, bg: "#B3C5D3", fg: "text-steel" },
-  { min: 0.4, bg: "#7F9CB3", fg: "text-steel" },
-  { min: 0.6, bg: "#2C5677", fg: "text-white" },
-  { min: 0.8, bg: "#032741", fg: "text-white" },
+  { min: 0, bg: "#E8F1F7", fg: "text-steel-700" },
+  { min: 0.2, bg: "#CBE2EE", fg: "text-steel-700" },
+  { min: 0.4, bg: "#A9D6E5", fg: "text-steel" },
+  { min: 0.6, bg: "#2A6F97", fg: "text-white" },
+  { min: 0.8, bg: "#01497C", fg: "text-white" },
 ];
 const occStep = (p: number) => [...OCC_STEPS].reverse().find((s) => p >= s.min)!;
+/** One decimal, rounded (7,27% reads as 7,3% — the old page rounded, floor looked like a drop). */
+const dec1 = (x: number) => Math.round(x * 10) / 10;
 const LEVELS = ["A", "B", "C", "D", "E"];
 const ACCURACY_DAYS = 30;
 // Expiry calendar ranges: up to 2 years per month, longer ranges per quarter
 // (60 monthly bars would be too thin to read).
 const CAL_RANGES = [1, 2, 3, 5] as const;
 type CalRange = (typeof CAL_RANGES)[number];
+
+/** Shelf-life horizon: the same buckets the Inventory page uses, so the two screens agree. */
+const SHELF_FILL: Record<string, string> = {
+  expired: "#C0392B", d90: "#D9941A", d180: "#89C2D9", d365: "#468FAF",
+  y2: "#2A6F97", y3: "#01497C", more: "#032741", none: "#A3B2BE",
+};
+/** ABC classes on the Coastal Blues ramp (no plate: the owner moved bars off the pale accent). */
+const ABC_FILL: Record<string, string> = { A: "#01497C", B: "#2A6F97", C: "#468FAF", "–": "#A3B2BE" };
+
+type Tone = "bad" | "warn" | "wait" | "ok";
+const PANEL = "flex flex-col overflow-hidden rounded-xl bg-white shadow-[0_1px_2px_rgba(3,39,65,0.05)] ring-1 ring-steel-100";
+const TONE_TILE: Record<Tone, string> = { bad: "bg-bad/10 text-bad", warn: "bg-warn/10 text-warn", wait: "bg-ckb/10 text-ckb-dark", ok: "bg-ok/10 text-ok" };
+const TONE_FILL: Record<Tone, string> = { bad: "bg-bad", warn: "bg-warn", wait: "bg-ckb", ok: "bg-ok" };
+const TONE_DOT: Record<Tone, string> = { bad: "bg-bad", warn: "bg-warn", wait: "bg-ckb", ok: "bg-ok" };
+const TONE_RANK: Record<Tone, number> = { bad: 0, warn: 1, wait: 2, ok: 3 };
+
+type AttentionItem = { key: string; label: string; detail: string; count: number; unit: string; tone: Tone; href: string; icon: LucideIcon };
+const RISKY_ROWS = 25;
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ kalender?: string }> }) {
   await requireRole(["supervisor", "admin"]);
@@ -107,12 +132,26 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const risky = inv
     .filter((r) => r.days_remaining !== null && r.days_remaining <= NEAR_EXPIRY_DAYS)
     .sort((a, b) => (a.days_remaining ?? 0) - (b.days_remaining ?? 0));
+  const expiredRows = risky.filter((r) => (r.days_remaining ?? 0) < 0);
+  const nearRows = risky.filter((r) => (r.days_remaining ?? 0) >= 0);
   const noDate = inv.filter((r) => r.expiry_date === null).length;
+  const noDateQty = inv.filter((r) => r.expiry_date === null).reduce((s, r) => s + Number(r.quantity), 0);
+  const sumQty = (rows: Inv[]) => rows.reduce((s, r) => s + Number(r.quantity), 0);
 
   // ---- Today ---------------------------------------------------------------
   const picks = todayTasks.filter((t) => t.task_type === "PICK" && t.status !== "CANCELLED");
   const picksDone = picks.filter((t) => t.status === "COMPLETED").length;
-  const waveCount = { total: todayWaves?.length ?? 0, done: (todayWaves ?? []).filter((w) => w.status === "COMPLETED").length };
+  const repl = todayTasks.filter((t) => t.task_type === "REPLENISH" && t.status !== "CANCELLED");
+  const replDone = repl.filter((t) => t.status === "COMPLETED").length;
+  // Cancelled waves were never going to run: they are not part of today's plan.
+  const planWaves = (todayWaves ?? []).filter((w) => w.status !== "CANCELLED");
+  const wavesDone = planWaves.filter((w) => w.status === "COMPLETED").length;
+  const pickPct = picks.length ? picksDone / picks.length : 0;
+  const wavePct = planWaves.length ? wavesDone / planWaves.length : 0;
+  const hasPlan = picks.length > 0 || planWaves.length > 0;
+  const planPct = picks.length ? pickPct : wavePct;
+  const cartonsPlanned = picks.reduce((s, t) => s + Number(t.quantity), 0);
+  const cartonsPosted = picks.reduce((s, t) => s + (t.status === "COMPLETED" ? Number(t.actual_quantity ?? t.quantity) : 0), 0);
 
   // Today's flow: in = new receipts (inbound, putaway without a source bin), out = picking.
   const todayFlow = { masuk: 0, keluar: 0 };
@@ -133,11 +172,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   }));
   const levelTotals = LEVELS.map((lv) => occCell(rackBins.filter((b) => b.level === lv)));
   const rackOcc = occCell(rackBins);
+  const rackState = rackOcc.pct > 0.85 ? "sesak" : rackOcc.pct >= 0.8 ? "sehat" : "longgar";
 
   // ---- Staging (dock-to-stock stand-in) ------------------------------------
   const staged = inv.filter((r) => locType(r) === "staging");
   const stagedQty = staged.reduce((s, r) => s + Number(r.quantity), 0);
   const oldestStaged = staged.map((r) => r.received_date).filter(Boolean).sort()[0] ?? null;
+  const stagedDays = oldestStaged ? Math.floor((todayStart.getTime() - new Date(`${oldestStaged}T00:00:00+07:00`).getTime()) / 86_400_000) : null;
 
   // ---- Accuracy (last 30 days) ---------------------------------------------
   const acc = (k: Audit["kind"]) => {
@@ -150,12 +191,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const fefoBad = fefo?.bad ?? 0;
   const fefoOk = fefoN - fefoBad;
   const pickTarget = parsePolicy(policyRaw).pick_accuracy_target_pct;
+  const pickPctAcc = pickAcc.n ? (pickAcc.ok / pickAcc.n) * 100 : null;
+  const putPctAcc = putAcc.n ? (putAcc.ok / putAcc.n) * 100 : null;
+  const fefoPct = fefo ? (fefoN ? (fefoOk / fefoN) * 100 : 100) : null;
   const pct = (x: { n: number; ok: number }) => (x.n ? `${Math.round((x.ok / x.n) * 1000) / 10}%` : "–");
   const recentPicks = recentTasks.filter((t) => t.task_type === "PICK");
   const deviated = recentPicks.filter((t) =>
     (t.actual_quantity !== null && Number(t.actual_quantity) !== Number(t.quantity))
     || (t.actual_from_bin && t.actual_from_bin !== t.from_bin)
     || (t.actual_batch_lot !== null && t.actual_batch_lot !== t.batch_lot)).length;
+  const devPct = recentPicks.length ? (deviated / recentPicks.length) * 100 : null;
 
   // ---- Expiry calendar: cartons expiring per month (<= 2 years) or quarter -------
   const calRaw = Number((await searchParams).kalender);
@@ -180,10 +225,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     };
   });
   const monthIdx = new Map(months.map((m, i) => [m.ym, i]));
-  let expiredQty = 0, laterQty = 0, noDateQty = 0;
+  let expiredQty = 0, laterQty = 0;
   for (const r of inv) {
     const q = Number(r.quantity);
-    if (!r.expiry_date) { noDateQty += q; continue; }
+    if (!r.expiry_date) continue;
     if (r.expiry_date < today) { expiredQty += q; continue; }
     const i = monthIdx.get(bucketKey(r.expiry_date));
     if (i === undefined) laterQty += q;
@@ -191,6 +236,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   }
   const monthMax = Math.max(1, ...months.map((m) => m.qty));
   const nextCal = months.reduce((s, m) => s + m.qty, 0);
+  const calPeak = months.reduce((best, m) => (m.qty > best.qty ? m : best), months[0]);
+
+  // ---- Shelf life: every stock row in its horizon bucket ---------------------
+  const shelf = SHELF_BUCKETS.map((b) => ({ key: b.key as string, label: b.label as string, qty: 0, rows: 0, skus: new Set<string>() }));
+  const shelfIdx = new Map(SHELF_BUCKETS.map((b, i) => [b.key as string, i]));
+  for (const r of inv) {
+    const bucket = shelf[shelfIdx.get(shelfBucket(r.days_remaining))!]!;
+    bucket.qty += Number(r.quantity); bucket.rows++; bucket.skus.add(r.sku);
+  }
+  const shelfTotal = Math.max(1, shelf.reduce((s, b) => s + b.qty, 0));
 
   // ---- Top SKUs by stock ------------------------------------------------------
   const bySku = new Map<string, { sku: string; description: string; uom: string | null; qty: number; pallets: number; bins: Set<string> }>();
@@ -201,242 +256,597 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   }
   const topSkus = [...bySku.values()].sort((a, b) => b.qty - a.qty).slice(0, 10);
 
+  // ---- What needs a hand right now -------------------------------------------
+  const attention: AttentionItem[] = [];
+  if (expiredRows.length) attention.push({
+    key: "expired", label: "Stok sudah expired", tone: "bad", icon: CalendarX2, href: "#risiko",
+    detail: `${fmtNum(sumQty(expiredRows))} karton · ${expiredRows.length} posisi · pisahkan sebelum picking`,
+    count: expiredRows.length, unit: "posisi",
+  });
+  if (fefoBad) attention.push({
+    key: "fefo", label: "Pick tidak mengikuti FEFO", tone: "bad", icon: Route, href: "/inventory?tab=fefo",
+    detail: `${fmtNum(fefoBad)} dari ${fmtNum(fefoN)} pick rak · ${fmtNum(dec1(fefoN ? (fefoBad / fefoN) * 100 : 0), 1)}% tidak FEFO`,
+    count: fefoBad, unit: "pick",
+  });
+  if (nearRows.length) attention.push({
+    key: "near", label: `Expired dalam ${NEAR_EXPIRY_DAYS} hari`, tone: "warn", icon: CalendarClock, href: "#risiko",
+    detail: `${fmtNum(sumQty(nearRows))} karton · ${new Set(nearRows.map((r) => r.sku)).size} SKU · sisa umur terpendek ${fmtNum(Math.min(...nearRows.map((r) => r.days_remaining ?? 0)))} hari`,
+    count: nearRows.length, unit: "posisi",
+  });
+  if (activeHolds) attention.push({
+    key: "hold", label: "Stok ditahan", tone: "warn", icon: ShieldAlert, href: "/inventory?tab=hold",
+    detail: "QC, rusak, investigasi, recall — tidak bisa dipicking",
+    count: activeHolds, unit: "hold",
+  });
+  if (stagedDays !== null && stagedDays > 0) attention.push({
+    key: "staging", label: "Barang mengendap di staging", tone: "warn", icon: Boxes, href: "/inventory?tab=inap",
+    detail: `Tertua ${fmtDate(oldestStaged)} · ${stagedDays} hari belum masuk rak`,
+    count: staged.length, unit: "baris",
+  });
+  if (shipmentsWaiting) attention.push({
+    key: "shipments", label: "Shipment menunggu audit / muat", tone: "wait", icon: Truck, href: "/audit/picking",
+    detail: "Setiap baris harus lolos audit sebelum dimuat",
+    count: shipmentsWaiting, unit: "shipment",
+  });
+  if (openCounts) attention.push({
+    key: "counts", label: "Tugas cycle count terbuka", tone: "wait", icon: ClipboardList, href: "/inventory?tab=akurasi",
+    detail: "Hitung fisik sudah dibuka, belum ditutup",
+    count: openCounts, unit: "tugas",
+  });
+  if (openReceipts) attention.push({
+    key: "receipts", label: "Penerimaan belum diposting", tone: "wait", icon: PackageSearch, href: "/receiving",
+    detail: "Cocokkan dengan DO Shell lalu posting",
+    count: openReceipts, unit: "penerimaan",
+  });
+  if (pendingApprovals) attention.push({
+    key: "approvals", label: "Adjustment menunggu persetujuan", tone: "wait", icon: ClipboardCheck, href: "/inventory?tab=persetujuan",
+    detail: "Di atas batas, perlu orang lain menyetujui",
+    count: pendingApprovals, unit: "permintaan",
+  });
+  if (noDate) attention.push({
+    key: "nodate", label: "Baris tanpa tanggal expired", tone: "wait", icon: CalendarOff, href: "/inventory?tab=fefo",
+    detail: `${fmtNum(noDateQty)} karton tidak bisa diurutkan FEFO`,
+    count: noDate, unit: "baris",
+  });
+  attention.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone] || b.count - a.count);
+  const attentionMax = Math.max(1, ...attention.map((a) => a.count));
+  const attentionBad = attention.filter((a) => a.tone === "bad").length;
+  const attentionWorst: Tone = attention.length === 0 ? "ok" : attention[0]!.tone;
+
+  const dayName = todayStart.toLocaleDateString("id-ID", { weekday: "long", timeZone: "Asia/Jakarta" });
+  const riskyShown = risky.slice(0, RISKY_ROWS);
+
   return (
     <main>
       <PageHeader title="Dashboard gudang" live={["pick_tasks", "movements", "audits", "count_tasks", "stock_holds", "adjustment_requests", "receipts", "pick_audits", "shipment_loads"]} liveDebounceMs={5000} />
-      <div className="space-y-6 p-4 lg:p-8">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Kpi label="Total bin" value={fmtNum(bins.length)} note={`${fmtNum(rackBins.length)} rak · ${fmtNum(bins.length - rackBins.length)} lantai`} />
-          <Kpi label="Terisi" value={fmtNum(occupied)} note={`${Math.round((occupied / Math.max(bins.length, 1)) * 100)}% dari semua bin`} />
-          <Kpi label="Kosong" value={fmtNum(bins.length - occupied)} note={`${blocked} bin diblokir`} />
-          <Kpi label={`Expired / ≤ ${NEAR_EXPIRY_DAYS} hari`} value={fmtNum(risky.length)} note={`${noDate} baris tanpa tanggal expired`} tone={risky.length ? "bad" : undefined} />
-        </div>
+      <div className="space-y-5 p-4 lg:p-8">
 
-        <section aria-labelledby="today" className="space-y-2">
-          <h2 id="today" className="font-cond text-lg font-semibold">Operasi hari ini · {fmtDate(today)}</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <Kpi label="Wave" value={fmtNum(waveCount.total)} note={`${fmtNum(waveCount.done)} selesai`} href={`/waves?date=${today}`} />
-            <Kpi label="Tugas pick" value={`${fmtNum(picksDone)}/${fmtNum(picks.length)}`} note={picks.length ? `${Math.round((picksDone / picks.length) * 100)}% diposting` : "belum ada rencana"} href={`/waves?date=${today}`} />
-            <Kpi label="Karton keluar" value={fmtNum(todayFlow.keluar)} note="picking hari ini" />
-            <Kpi label="Karton masuk" value={fmtNum(todayFlow.masuk)} note="terima + putaway baru" href={`/audit/putaway?date=${today}`} />
-            <Kpi label="Menunggu di staging" value={fmtNum(stagedQty)} note={stagedQty ? `${staged.length} baris · tertua ${fmtDate(oldestStaged)}` : "staging kosong"} tone={oldestStaged && oldestStaged < today ? "warn" : undefined} />
-          </div>
-        </section>
-
-        <section aria-labelledby="acc" className="space-y-2">
-          <h2 id="acc" className="font-cond text-lg font-semibold">Akurasi · {ACCURACY_DAYS} hari terakhir</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Akurasi picking (audit)" value={pct(pickAcc)} note={`percobaan pertama · ${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} · target ≥ ${fmtNum(pickTarget, 1)}%`} href="/audit/picking?tab=akurasi" tone={pickAcc.n && (pickAcc.ok / pickAcc.n) * 100 < pickTarget ? "warn" : undefined} />
-            <Kpi label="FEFO compliance" value={fefoN ? `${Math.round((fefoOk / fefoN) * 1000) / 10}%` : "–"}
-              note={!fefo ? "tidak terbaca, coba muat ulang" : fefoN ? `${fmtNum(fefoBad)} pelanggaran dari ${fmtNum(fefoN)} pick rak` : "belum ada pick rak"} href="/inventory?tab=fefo"
-              tone={fefoBad ? "warn" : undefined} />
-            <Kpi label="Shipment menunggu audit / muat" value={fmtNum(shipmentsWaiting ?? 0)} note="semua baris harus lolos audit sebelum dimuat" href="/audit/picking" tone={shipmentsWaiting ? "warn" : undefined} />
-            <Kpi label="Akurasi putaway (audit)" value={pct(putAcc)} note={`${fmtNum(putAcc.ok)} OK dari ${fmtNum(putAcc.n)} diaudit · target ≥ 99,5%`} href="/audit/putaway" tone={putAcc.n && putAcc.ok / putAcc.n < 0.995 ? "warn" : undefined} />
-            <Kpi label="Picker lapor beda" value={recentPicks.length ? `${Math.round((deviated / recentPicks.length) * 1000) / 10}%` : "–"} note={`${fmtNum(deviated)} dari ${fmtNum(recentPicks.length)} pick selesai`} />
-            <Kpi label="Akurasi stok (cycle count)" value={qtyIra === null ? "–" : `${qtyIra.toFixed(1)}%`}
-              note={`akurasi qty · ${fmtNum(cycleOk)} dari ${fmtNum(cycleApplied.length)} bin tepat · ${fmtNum(openCounts ?? 0)} tugas terbuka · target ≥ 98%`} href="/inventory?tab=akurasi"
-              tone={qtyIra !== null && qtyIra < 98 ? "warn" : undefined} />
-          </div>
-        </section>
-
-        <section aria-labelledby="ctl" className="space-y-2">
-          <h2 id="ctl" className="font-cond text-lg font-semibold">Kontrol inventory</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Adjustment menunggu persetujuan" value={fmtNum(pendingApprovals ?? 0)} note="di atas batas, perlu orang lain" href="/inventory?tab=persetujuan" tone={pendingApprovals ? "warn" : undefined} />
-            <Kpi label="Stok ditahan (hold aktif)" value={fmtNum(activeHolds ?? 0)} note="QC, rusak, investigasi, recall" href="/inventory?tab=hold" />
-            <Kpi label="Penerimaan belum diposting" value={fmtNum(openReceipts ?? 0)} note="dicek dengan DO Shell" href="/receiving" tone={openReceipts ? "warn" : undefined} />
-            <Kpi label="Rekonsiliasi SAP terakhir" value={lastRecon?.accuracy_pct != null ? `${Number(lastRecon.accuracy_pct).toFixed(1)}%` : "–"}
-              note={lastRecon ? `${fmtDate(lastRecon.as_of)} · ${fmtNum(lastRecon.open_diffs)} selisih belum dijelaskan` : "belum ada"} href="/inventory?tab=rekonsiliasi"
-              tone={lastRecon?.open_diffs ? "warn" : undefined} />
-          </div>
-        </section>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="flex flex-wrap items-baseline justify-between gap-2">
-              <CardTitle>Okupansi rak · aisle × level</CardTitle>
-              <span className={cn("text-sm font-semibold", rackOcc.pct > 0.85 ? "text-warn" : "text-steel-700")}>
-                Total {Math.round(rackOcc.pct * 100)}% · {fmtNum(rackOcc.occ)}/{fmtNum(rackOcc.total)} posisi
+        {/* ---- Today: the plan, the flow, what is waiting on the dock ------------- */}
+        <section aria-labelledby="hari-ini" className="home-rise relative overflow-hidden rounded-2xl bg-jeir-side text-white ring-1 ring-jeir-navy/30">
+          <span aria-hidden className="home-dots pointer-events-none absolute -right-10 -top-10 h-40 w-72 opacity-80" />
+          <div className="relative px-4 pt-4 lg:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-jeir-teal">Operasi hari ini</p>
+                <h2 id="hari-ini" className="font-cond text-xl font-semibold leading-tight lg:text-2xl">{dayName}, {fmtDate(today)}</h2>
+              </div>
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/85 ring-1 ring-inset ring-white/15">
+                <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", hasPlan ? "bg-jeir-teal" : "bg-white/50")} />
+                {hasPlan ? `Rencana berjalan · ${Math.round(planPct * 100)}%${planWaves.length && wavesDone === planWaves.length && picksDone === picks.length ? " · selesai" : ""}` : "Belum ada rencana"}
               </span>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <table className="w-full table-fixed border-separate border-spacing-[3px] text-center text-sm">
-                <thead><tr className="text-xs text-steel-500">
-                  <th className="w-12 text-left font-medium">Aisle</th>
-                  {LEVELS.map((lv) => <th key={lv} className="font-medium">Level {lv}</th>)}
-                  <th className="font-medium">Total</th>
-                </tr></thead>
+            </div>
+
+            <div className="mt-4">
+              {hasPlan ? (
+                <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                  <PlanGauge label="Tugas pick" done={picksDone} total={picks.length} pct={pickPct}
+                    note={`${fmtNum(cartonsPosted)} dari ${fmtNum(cartonsPlanned)} karton terposting${repl.length ? ` · isi ulang pickface ${fmtNum(replDone)}/${fmtNum(repl.length)}` : ""}`} />
+                  <PlanGauge label="Wave" done={wavesDone} total={planWaves.length} pct={wavePct}
+                    note={`${fmtNum(wavesDone)} selesai · ${fmtNum(planWaves.length - wavesDone)} belum selesai`} />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 rounded-lg bg-white/[0.06] p-3 ring-1 ring-inset ring-white/10 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-jeir-teal"><CalendarClock className="h-5 w-5" /></span>
+                    <div>
+                      <p className="font-cond text-base font-semibold">Rencana hari ini belum disimpan</p>
+                      <p className="text-sm text-white/65">Belum ada picklist dan urutan jalan. Susun wave dari order Shell.</p>
+                    </div>
+                  </div>
+                  <Link href={`/waves?date=${today}`}
+                    className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md bg-jeir-teal px-4 py-2 text-sm font-semibold text-jeir-navy transition-colors hover:bg-ckb-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-jeir-navy sm:py-1.5">
+                    Buka Wave<ChevronRight aria-hidden className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="relative mt-4 grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
+            <BandStat label="Karton masuk" value={fmtNum(todayFlow.masuk)} sub="terima + putaway" href={`/audit/putaway?date=${today}`} icon={ArrowDownRight} />
+            <BandStat label="Karton keluar" value={fmtNum(todayFlow.keluar)} sub="picking hari ini" href={`/waves?date=${today}`} icon={ArrowUpRight} />
+            <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={staged.length ? `${fmtNum(staged.length)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={Boxes} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
+            <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState}`} href="#okupansi" icon={Warehouse} tone={rackState === "sesak" ? "warn" : undefined} />
+          </div>
+        </section>
+
+        {/* ---- What needs a hand right now --------------------------------------- */}
+        <section aria-labelledby="perhatian-title" className={PANEL}>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><ShieldAlert className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <h2 id="perhatian-title" className="font-cond text-lg font-semibold leading-tight">Butuh perhatian sekarang</h2>
+                <p className="text-xs text-steel-500">Antrean dan penyimpangan yang menunggu orang — bukan sekadar angka.</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-steel-700 ring-1 ring-inset ring-steel-100">
+              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[attentionWorst])} />
+              {attention.length === 0 ? "Tidak ada antrean" : `${fmtNum(attention.length)} hal${attentionBad ? ` · ${fmtNum(attentionBad)} bermasalah` : " · menunggu"}`}
+            </span>
+          </div>
+
+          {attention.length === 0 ? (
+            <div className="flex items-center gap-3 border-t border-steel-100 px-4 py-5">
+              <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ok/10 text-ok"><CircleCheck className="h-5 w-5" /></span>
+              <div>
+                <p className="font-cond text-base font-semibold">Tidak ada yang perlu dicek</p>
+                <p className="text-sm text-steel-500">Antrean persetujuan, hold, penerimaan tertunda, dan hitung terbuka semuanya kosong. Stok berisiko juga tidak ada.</p>
+              </div>
+            </div>
+          ) : (
+            <ul className="grid gap-x-2 border-t border-steel-100 p-2 sm:grid-cols-2">
+              {attention.map((a) => (
+                <li key={a.key}>
+                  <Link href={a.href} className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-paper">
+                    <span aria-hidden className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", TONE_TILE[a.tone])}><a.icon className="h-[18px] w-[18px]" /></span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-steel">{a.label}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-steel-500">{a.detail}</span>
+                      <span aria-hidden className="mt-2 block h-[3px] overflow-hidden rounded-full bg-steel-300/45">
+                        <span className={cn("block h-full rounded-full", TONE_FILL[a.tone])} style={{ width: `${Math.max(4, (a.count / attentionMax) * 100)}%` }} />
+                      </span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block font-cond text-2xl font-semibold leading-none tabular text-steel">{fmtNum(a.count)}</span>
+                      <span className="block text-[11px] leading-tight text-steel-500">{a.unit}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+            Panjang batang membandingkan jumlah di dalam panel ini, bukan target. Klik satu baris untuk membuka daftar kerjanya.
+          </p>
+        </section>
+
+        {/* ---- Stock health: capacity, then shelf life -------------------------- */}
+        <div className="grid gap-5 lg:grid-cols-5">
+          <section aria-labelledby="okupansi-title" id="okupansi" className={cn(PANEL, "scroll-mt-4 lg:col-span-3")}>
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-2 pt-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Warehouse className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <h2 id="okupansi-title" className="font-cond text-lg font-semibold leading-tight">Okupansi rak</h2>
+                  <p className="text-xs text-steel-500">Posisi terisi per aisle dan level.</p>
+                </div>
+              </div>
+              <span className={cn("inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset",
+                rackState === "sesak" ? "bg-warn/10 text-steel ring-warn/30" : rackState === "sehat" ? "bg-ok/10 text-steel ring-ok/30" : "bg-paper text-steel-700 ring-steel-100")}>
+                <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", rackState === "sesak" ? "bg-warn" : rackState === "sehat" ? "bg-ok" : "bg-ckb")} />
+                {Math.round(rackOcc.pct * 100)}% · {rackState}
+              </span>
+            </div>
+
+            <div className="px-3 pt-1 sm:px-4">
+              <table className="w-full table-fixed border-separate border-spacing-[2px] text-center text-[11px] sm:border-spacing-[3px]">
+                <caption className="sr-only">Posisi rak terisi per aisle dan level, dalam persen. Klik sel untuk melihat posisi kosongnya.</caption>
+                <thead>
+                  <tr className="text-[10px] text-steel-500">
+                    <th scope="col" className="w-9 text-left font-medium sm:w-10">Aisle</th>
+                    {LEVELS.map((lv) => <th key={lv} scope="col" className="font-medium"><span className="sm:hidden">{lv}</span><span className="hidden sm:inline">Level {lv}</span></th>)}
+                    <th scope="col" className="w-11 font-medium sm:w-12">Total</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {grid.map((g) => (
                     <tr key={g.zone}>
-                      <th scope="row" className="text-left font-cond text-base font-semibold">{g.zone}</th>
+                      <th scope="row" className="text-left font-cond text-sm font-semibold text-steel">{g.zone}</th>
                       {g.cells.map((c) => {
                         const st = occStep(c.pct);
                         return (
-                          <td key={c.level} className={cn("rounded p-0 font-semibold tabular", c.total ? st.fg : "text-steel-300")}
+                          <td key={c.level} className={cn("rounded font-semibold tabular", c.total ? st.fg : "text-steel-300")}
                             style={{ background: c.total ? st.bg : undefined }}>
                             {c.total ? (
-                              <Link href={`/inventory?aisle=${g.zone}&level=${c.level}`} className="block rounded py-2 hover:ring-2 hover:ring-plate"
+                              <Link href={`/inventory?aisle=${g.zone}&level=${c.level}`} className="block rounded py-[7px] transition-shadow hover:ring-2 hover:ring-ckb/40"
                                 title={`${g.zone} level ${c.level}: ${c.occ}/${c.total} posisi terisi, ${c.total - c.occ} kosong. Klik untuk detail.`}>
                                 {Math.round(c.pct * 100)}%
                               </Link>
-                            ) : <span className="block py-2">–</span>}
+                            ) : <span className="block py-[7px]">–</span>}
                           </td>
                         );
                       })}
-                      <td className="p-0 font-semibold tabular text-steel-700">
-                        <Link href={`/inventory?aisle=${g.zone}`} className="block rounded py-2 hover:bg-paper hover:ring-1 hover:ring-ckb" title={`${g.zone}: ${g.all.occ}/${g.all.total} posisi. Klik untuk detail.`}>{Math.round(g.all.pct * 100)}%</Link>
+                      <td className="rounded bg-paper font-semibold tabular text-steel-700">
+                        <Link href={`/inventory?aisle=${g.zone}`} className="block rounded py-[3px] leading-tight transition-shadow hover:ring-2 hover:ring-ckb/40"
+                          title={`${g.zone}: ${g.all.occ}/${g.all.total} posisi terisi. Klik untuk detail.`}>
+                          <span className="block text-xs">{Math.round(g.all.pct * 100)}%</span>
+                          <span className="block text-[9px] font-medium text-steel-500">{g.all.occ}/{g.all.total}</span>
+                        </Link>
                       </td>
                     </tr>
                   ))}
                   <tr className="text-steel-700">
-                    <th scope="row" className="text-left text-xs font-medium">Total</th>
+                    <th scope="row" className="text-left text-[10px] font-medium text-steel-500">Total</th>
                     {levelTotals.map((c, i) => (
-                      <td key={LEVELS[i]} className="p-0 text-xs font-semibold tabular">
-                        <Link href={`/inventory?level=${LEVELS[i]}`} className="block rounded py-1 hover:bg-paper hover:ring-1 hover:ring-ckb" title={`Level ${LEVELS[i]}: ${c.occ}/${c.total} posisi. Klik untuk detail.`}>{Math.round(c.pct * 100)}%</Link>
+                      <td key={LEVELS[i]} className="rounded">
+                        <Link href={`/inventory?level=${LEVELS[i]}`} className="block rounded py-1 text-[11px] font-semibold tabular transition-colors hover:bg-paper hover:ring-1 hover:ring-ckb/40"
+                          title={`Level ${LEVELS[i]}: ${c.occ}/${c.total} posisi terisi. Klik untuk detail.`}>{Math.round(c.pct * 100)}%</Link>
                       </td>
                     ))}
-                    <td className="py-1 text-xs font-semibold tabular">{Math.round(rackOcc.pct * 100)}%</td>
+                    <td className="rounded border-t-2 border-steel-300 py-1 text-[11px] font-semibold tabular">{Math.round(rackOcc.pct * 100)}%</td>
                   </tr>
                 </tbody>
               </table>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-steel-500">
+            </div>
+
+            <div className="mt-auto space-y-2.5 px-4 pb-4 pt-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-steel-500">
                 <span>Posisi terisi:</span>
                 {OCC_STEPS.map((st, i) => (
                   <span key={st.min} className="inline-flex items-center gap-1">
-                    <span className="inline-block h-3 w-5 rounded-sm" style={{ background: st.bg }} />
-                    {Math.round(st.min * 100)}{i < OCC_STEPS.length - 1 ? `–${Math.round(OCC_STEPS[i + 1].min * 100)}%` : "%+"}
+                    <span aria-hidden className="inline-block h-3 w-5 rounded-sm ring-1 ring-inset ring-steel/5" style={{ background: st.bg }} />
+                    {Math.round(st.min * 100)}{i < OCC_STEPS.length - 1 ? `–${Math.round(OCC_STEPS[i + 1]!.min * 100)}%` : "%+"}
                   </span>
                 ))}
               </div>
-              <p className="text-xs text-steel-500">Klik sel, total aisle atau total level untuk melihat isi dan posisi kosongnya. Sehat: 80–85% terisi. Di atas 85% gudang mulai sesak (putaway &amp; picking lebih lambat). Arahkan kursor ke sel untuk jumlah posisi.</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-wrap items-baseline justify-between gap-2">
-              <CardTitle>Kalender expired</CardTitle>
-              <nav className="flex rounded-md border border-steel-300 text-xs" aria-label="Rentang kalender">
+              <dl className="grid grid-cols-4 gap-px overflow-hidden rounded-lg bg-steel-100 text-center">
+                {[
+                  { k: "Bin", v: fmtNum(bins.length) },
+                  { k: "Terisi", v: fmtNum(occupied) },
+                  { k: "Kosong", v: fmtNum(bins.length - occupied) },
+                  { k: "Diblokir", v: fmtNum(blocked) },
+                ].map((s) => (
+                  <div key={s.k} className="bg-white px-1 py-2">
+                    <dt className="text-[10px] text-steel-500">{s.k}</dt>
+                    <dd className="font-cond text-base font-semibold leading-tight tabular">{s.v}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="text-[11px] text-steel-500">
+                {fmtNum(rackBins.length)} posisi rak di grid; {fmtNum(bins.length - rackBins.length)} bin lantai/staging tidak dihitung.
+                Sehat 80–85% terisi — di atas 85% gudang sesak, putaway dan picking melambat.
+              </p>
+            </div>
+          </section>
+
+          <section aria-labelledby="expired-title" className={cn(PANEL, "lg:col-span-2")}>
+            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><CalendarClock className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <h2 id="expired-title" className="font-cond text-lg font-semibold leading-tight">Umur simpan stok</h2>
+                  <p className="text-xs text-steel-500">Berapa karton, dan berapa lama lagi.</p>
+                </div>
+              </div>
+              <nav className="flex rounded-md bg-paper p-0.5 text-[11px] ring-1 ring-inset ring-steel-100" aria-label="Rentang kalender">
                 {CAL_RANGES.map((y) => (
                   <Link key={y} href={`/dashboard?kalender=${y}`} scroll={false} aria-current={y === calYears ? "true" : undefined}
-                    className={cn("px-2.5 py-1 first:rounded-l-md last:rounded-r-md", y === calYears ? "bg-ckb text-white" : "hover:bg-steel-100")}>
+                    className={cn("rounded px-2 py-1", y === calYears ? "bg-ckb font-semibold text-white" : "text-steel-700 hover:bg-steel-100")}>
                     {y} th
                   </Link>
                 ))}
               </nav>
-              <span className="w-full text-sm text-steel-700">{fmtNum(nextCal)} karton expired dalam {calYears} tahun · per {byQuarter ? "kuartal" : "bulan"}</span>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex h-40 items-end gap-[3px] border-b border-steel-300" role="img" aria-label={`Karton yang expired per ${byQuarter ? "kuartal" : "bulan"}, ${calYears} tahun ke depan`}>
-                {months.map((m) => (
-                  <div key={m.ym} className="flex h-full flex-1 flex-col items-center justify-end gap-1"
-                    title={`${m.full}: ${fmtNum(m.qty)} karton, ${m.skus.size} SKU`}>
-                    {m.qty > 0 && <span className="text-[9px] font-semibold tabular text-steel-700">{fmtNum(m.qty)}</span>}
-                    <div className={cn("w-full max-w-5 rounded-t", m.ym === thisMonth ? "bg-warn" : "bg-ckb-light")}
-                      style={{ height: m.qty ? `max(3px, ${(m.qty / monthMax) * 85}%)` : 0 }} />
+            </div>
+
+            <div className="flex-1 space-y-3 px-4 pb-4">
+              {/* The whole shelf in one bar: the answer to "is stock healthy", before the month detail. */}
+              <div>
+                <div className="flex h-3 overflow-hidden rounded-full ring-1 ring-inset ring-steel/10" role="img"
+                  aria-label={`Sebaran umur simpan: ${shelf.map((b) => `${b.label} ${fmtNum(b.qty)} karton`).join(", ")}`}>
+                  {shelf.map((b) => b.qty > 0 ? (
+                    <span key={b.key} title={`${b.label}: ${fmtNum(b.qty)} karton · ${fmtNum(b.rows)} baris · ${fmtNum(b.skus.size)} SKU`}
+                      style={{ width: `${(b.qty / shelfTotal) * 100}%`, background: SHELF_FILL[b.key] }} />
+                  ) : null)}
+                </div>
+                <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                  {shelf.map((b) => (
+                    <li key={b.key} className="flex items-center gap-1.5">
+                      <span aria-hidden className="h-2 w-2 shrink-0 rounded-sm" style={{ background: SHELF_FILL[b.key] }} />
+                      <span className="truncate text-steel-500">{b.label}</span>
+                      <span className="ml-auto font-semibold tabular text-steel-700">{fmtNum(b.qty)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-steel-700">Karton kedaluwarsa per {byQuarter ? "kuartal" : "bulan"}</h3>
+                  <span className="text-[11px] text-steel-500">{fmtNum(nextCal)} dalam {calYears} tahun</span>
+                </div>
+                <div className="mt-1.5 flex h-20 items-end gap-[3px] border-b border-steel-300" role="img"
+                  aria-label={`Karton yang kedaluwarsa per ${byQuarter ? "kuartal" : "bulan"} dalam ${calYears} tahun ke depan`}>
+                  {months.map((m) => (
+                    <div key={m.ym} className="relative flex h-full flex-1 flex-col items-center justify-end"
+                      title={`${m.full}: ${fmtNum(m.qty)} karton, ${m.skus.size} SKU`}>
+                      {m.qty > 0
+                        ? <span className={cn("mb-0.5 text-[9px] font-semibold tabular", m.ym === thisMonth ? "text-warn" : "text-steel-700")}>{fmtNum(m.qty)}</span>
+                        : <span aria-hidden className="mb-0.5 h-0.5 w-2.5 rounded-full bg-steel-300" />}
+                      <div className={cn("w-full max-w-5 rounded-t", m.ym === thisMonth ? "bg-warn" : "bg-ckb")}
+                        style={{ height: m.qty ? `max(3px, ${(m.qty / monthMax) * 78}%)` : 0 }} />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1 flex gap-[3px] text-[9px] text-steel-500">
+                  {months.map((m, i) => {
+                    // Every label up to 12 bars; with more, every third bar plus each year start. Year under the first bar and each year start.
+                    const show = months.length <= 12 || i === 0 || m.yearStart || i % 3 === 0;
+                    return (
+                      <span key={m.ym} className={cn("flex-1 whitespace-nowrap text-center", m.yearStart && "font-semibold text-steel-700")}>
+                        {show ? m.label : ""}{i === 0 || m.yearStart ? <><br />{m.year}</> : null}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-steel-100 text-center">
+                {[
+                  { k: `Dalam ${calYears} th`, v: fmtNum(nextCal) },
+                  { k: "Setelahnya", v: fmtNum(laterQty) },
+                  { k: "Tanpa tanggal", v: fmtNum(noDateQty) },
+                ].map((s) => (
+                  <div key={s.k} className="bg-white px-1 py-2">
+                    <dt className="flex min-h-[1.8em] items-end justify-center text-[10px] leading-tight text-steel-500">{s.k}</dt>
+                    <dd className="font-cond text-base font-semibold leading-tight tabular">{s.v}</dd>
                   </div>
                 ))}
-              </div>
-              <div className="flex gap-[3px] text-[10px] text-steel-500">
-                {months.map((m, i) => {
-                  // Every label up to 12 bars; with more, every third bar plus each year start. Year under the first bar and each year start.
-                  const show = months.length <= 12 || i === 0 || m.yearStart || i % 3 === 0;
-                  return (
-                    <span key={m.ym} className={cn("flex-1 overflow-visible whitespace-nowrap text-center", m.yearStart && "font-semibold text-steel-700")}>
-                      {show ? m.label : ""}{i === 0 || m.yearStart ? <><br />{m.year}</> : null}
-                    </span>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-sm">
-                <div className={cn("rounded-md p-2", expiredQty ? "bg-bad/10" : "bg-paper")}>
-                  <div className={cn("font-semibold tabular", expiredQty && "text-bad")}>{fmtNum(expiredQty)}</div><div className="text-xs text-steel-500">sudah expired</div>
+              </dl>
+
+              <p className="text-[11px] text-steel-500">
+                {expiredQty > 0
+                  ? <>{fmtNum(expiredQty)} karton sudah lewat tanggal dan harus dipisahkan. </>
+                  : <>Tidak ada karton yang sudah lewat tanggal. </>}
+                {calPeak.qty > 0 ? <>Puncak terdekat {calPeak.full}: {fmtNum(calPeak.qty)} karton.</> : null}
+                {byQuarter ? " Kuartal" : " Bulan"} berjalan berwarna kuning. Rincian per SKU ada di <Link className="underline" href="/inventory?tab=fefo">Inventory</Link>.
+              </p>
+            </div>
+          </section>
+        </div>
+
+        {/* ---- Quality: process accuracy next to where the stock sits ------------- */}
+        <div className="grid gap-5 lg:grid-cols-5">
+          <section aria-labelledby="mutu-title" className={cn(PANEL, "lg:col-span-3")}>
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-1 pt-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Gauge className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <h2 id="mutu-title" className="font-cond text-lg font-semibold leading-tight">Mutu &amp; kendali</h2>
+                  <p className="text-xs text-steel-500">{ACCURACY_DAYS} hari terakhir, dibanding target.</p>
                 </div>
-                <div className="rounded-md bg-paper p-2"><div className="font-semibold tabular">{fmtNum(laterQty)}</div><div className="text-xs text-steel-500">expired setelah {calYears} tahun</div></div>
-                <div className="rounded-md bg-paper p-2"><div className="font-semibold tabular">{fmtNum(noDateQty)}</div><div className="text-xs text-steel-500">tanpa tanggal expired</div></div>
               </div>
-              <p className="text-xs text-steel-500">{byQuarter ? "Kuartal" : "Bulan"} ini berwarna kuning. Arahkan kursor ke batang untuk periode, jumlah karton dan SKU. Detail per SKU di <Link className="underline" href="/inventory">Inventory</Link>.</p>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="grid gap-x-2 p-2 sm:grid-cols-2">
+              <Metric label="Akurasi picking (audit)" value={pct(pickAcc)} pct={pickPctAcc} target={pickTarget}
+                note={`${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} percobaan pertama · target ≥ ${fmtNum(pickTarget, 1)}%`}
+                tone={pickPctAcc === null ? undefined : pickPctAcc >= pickTarget ? "ok" : "warn"} href="/audit/picking?tab=akurasi" />
+              <Metric label="Akurasi putaway (audit)" value={pct(putAcc)} pct={putPctAcc} target={99.5}
+                note={putAcc.n ? `${fmtNum(putAcc.ok)} OK dari ${fmtNum(putAcc.n)} diaudit · target ≥ 99,5%` : "Belum ada audit putaway 30 hari · target ≥ 99,5%"}
+                tone={putPctAcc === null ? undefined : putPctAcc >= 99.5 ? "ok" : "warn"} href="/audit/putaway" />
+              <Metric label="FEFO compliance" value={fefoPct === null ? "–" : `${fmtNum(dec1(fefoPct), 1)}%`} pct={fefoPct} target={100}
+                note={!fefo ? "Tidak terbaca, coba muat ulang" : fefoN ? `${fmtNum(fefoBad)} pelanggaran dari ${fmtNum(fefoN)} pick rak · wajib 100%` : "Belum ada pick rak 30 hari"}
+                tone={fefoPct === null ? undefined : fefoPct >= 100 ? "ok" : "bad"} href="/inventory?tab=fefo" />
+              <Metric label="Picker lapor beda" value={devPct === null ? "–" : `${fmtNum(dec1(devPct), 1)}%`} pct={devPct}
+                note={recentPicks.length ? `${fmtNum(deviated)} dari ${fmtNum(recentPicks.length)} pick selesai · makin kecil makin baik` : "Belum ada pick selesai 30 hari"}
+                tone={devPct === null ? undefined : "warn"} href="/audit/picking" />
+              <Metric label="Akurasi stok (cycle count)" value={qtyIra === null ? "–" : `${qtyIra.toFixed(1)}%`} pct={qtyIra} target={98}
+                note={`${fmtNum(cycleOk)} dari ${fmtNum(cycleApplied.length)} bin tepat · ${fmtNum(openCounts ?? 0)} tugas terbuka · target ≥ 98%`}
+                tone={qtyIra === null ? undefined : qtyIra >= 98 ? "ok" : "warn"} href="/inventory?tab=akurasi" />
+              <Metric label="Rekonsiliasi SAP terakhir" value={lastRecon?.accuracy_pct != null ? `${fmtNum(Number(lastRecon.accuracy_pct), 1)}%` : "–"}
+                pct={lastRecon?.accuracy_pct != null ? Number(lastRecon.accuracy_pct) : null}
+                note={lastRecon ? `${fmtDate(lastRecon.as_of)} · ${fmtNum(lastRecon.open_diffs)} selisih belum dijelaskan` : "Belum ada rekonsiliasi"}
+                tone={lastRecon?.accuracy_pct == null ? undefined : Number(lastRecon.accuracy_pct) >= 99 ? "ok" : "warn"} href="/inventory?tab=rekonsiliasi" />
+            </div>
+            <p className="mt-auto border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+              Garis kecil di batang adalah target; isian adalah capaian {ACCURACY_DAYS} hari. Klik baris untuk membuka auditnya.
+            </p>
+          </section>
+
+          <section aria-labelledby="abc-title" className={cn(PANEL, "lg:col-span-2")}>
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Layers className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <h2 id="abc-title" className="font-cond text-lg font-semibold leading-tight">Kelas ABC stok</h2>
+                  <p className="text-xs text-steel-500">Kelas dari frekuensi baris picking.</p>
+                </div>
+              </div>
+              <span className="text-[11px] text-steel-500">{fmtNum(totalQty)} karton</span>
+            </div>
+            <div className="flex-1 space-y-3 px-4 pb-4">
+              <div className="flex h-3 overflow-hidden rounded-full ring-1 ring-inset ring-steel/10" role="img"
+                aria-label={`Sebaran stok: ${abc.map((a) => `${a.k === "–" ? "tanpa kelas" : `kelas ${a.k}`} ${fmtNum(a.qty)} karton`).join(", ")}`}>
+                {abc.map((a) => a.qty > 0 ? (
+                  <span key={a.k} title={`${a.k === "–" ? "Tanpa kelas" : `Kelas ${a.k}`}: ${fmtNum(a.qty)} karton · ${fmtNum(a.skus)} SKU`}
+                    style={{ width: `${(a.qty / Math.max(totalQty, 1)) * 100}%`, background: ABC_FILL[a.k] }} />
+                ) : null)}
+              </div>
+              <ul className="grid grid-cols-2 gap-2">
+                {abc.map((a) => (
+                  <li key={a.k}>
+                    <Link href={`/inventory?abc=${encodeURIComponent(a.k)}&sort=qty`} title={`Lihat ${a.skus} SKU kelas ${a.k === "–" ? "tanpa kelas" : a.k} di Inventory`}
+                      className="block h-full rounded-lg bg-paper px-2.5 py-2 transition-colors hover:bg-steel-100 hover:ring-1 hover:ring-ckb/40">
+                      <span className="flex items-center gap-1.5 text-[11px] text-steel-500">
+                        <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: ABC_FILL[a.k] }} />
+                        {a.k === "–" ? "Tanpa kelas" : `Kelas ${a.k}`}
+                      </span>
+                      <span className="block font-cond text-xl font-semibold leading-tight tabular">{Math.round((a.qty / Math.max(totalQty, 1)) * 100)}%</span>
+                      <span className="block text-[11px] leading-tight text-steel-500">{fmtNum(a.qty)} karton · {fmtNum(a.skus)} SKU</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-steel-500">
+                Kelas A paling sering dipicking, jadi paletnya di dekat jalur. Hitung ulang kelas di Pengaturan setelah data mutasi cukup.
+              </p>
+            </div>
+          </section>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader><CardTitle>Keterisian per aisle</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {zones.map((z) => (
-                <Link key={z.zone} href={`/inventory?aisle=${z.zone}`} title={`Lihat isi dan posisi kosong aisle ${z.zone}`}
-                  className="-mx-2 grid grid-cols-[3rem_1fr_7rem] items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-paper hover:ring-1 hover:ring-ckb">
-                  <span className="font-cond text-lg font-semibold">{z.zone}</span>
-                  <div className="h-5 rounded bg-steel-100"><div className="h-5 rounded bg-ckb" style={{ width: `${z.pct * 100}%` }} /></div>
-                  <span className="text-right tabular">{Math.round(z.pct * 100)}% · {z.occ}/{z.total} ›</span>
-                </Link>
-              ))}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>Stok per kelas ABC</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {abc.map((a) => (
-                <Link key={a.k} href={`/inventory?abc=${encodeURIComponent(a.k)}&sort=qty`} title={`Lihat ${a.skus} SKU kelas ${a.k === "–" ? "tanpa kelas" : a.k} di Inventory`}
-                  className="-mx-2 grid grid-cols-[3rem_1fr_9rem] items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-paper hover:ring-1 hover:ring-ckb">
-                  <span className="font-cond text-lg font-semibold">{a.k === "–" ? "Tanpa" : a.k}</span>
-                  <div className="h-5 rounded bg-steel-100"><div className="h-5 rounded bg-plate" style={{ width: `${(a.qty / Math.max(totalQty, 1)) * 100}%` }} /></div>
-                  <span className="text-right tabular">{fmtNum(a.qty)} unit · {a.skus} SKU ›</span>
-                </Link>
-              ))}
-              <p className="text-xs text-steel-500">Klik kelas untuk melihat SKU-nya di Inventory. Kelas ABC berdasarkan frekuensi baris picking. Hitung ulang di Pengaturan setelah data mutasi cukup.</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader><CardTitle>Top 10 SKU menurut stok</CardTitle></CardHeader>
-          <CardContent>
+        {/* ---- Top SKUs: a desktop table, cards on the floor -------------------- */}
+        <section aria-labelledby="top-title" className={PANEL}>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Boxes className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <h2 id="top-title" className="font-cond text-lg font-semibold leading-tight">Top 10 SKU menurut stok</h2>
+                <p className="text-xs text-steel-500">Karton, setara palet, dan jumlah bin yang dipakai.</p>
+              </div>
+            </div>
+            <Link href="/inventory" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-ckb-dark hover:bg-paper">
+              Buka Inventory<ChevronRight aria-hidden className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div className="hidden border-t border-steel-100 px-4 pb-4 pt-2 md:block">
             <Table>
               <thead><tr><Th>SKU</Th><Th>Deskripsi</Th><Th className="text-right">Stok</Th><Th className="text-right">Palet (setara)</Th><Th className="text-right">Bin</Th></tr></thead>
               <tbody>{topSkus.map((t) => (
-                <tr key={t.sku}>
-                  <Td><Link className="font-semibold underline" href={`/inventory?q=${t.sku}`}>{t.sku}</Link></Td><Td>{t.description}</Td>
-                  <Td className="text-right tabular">{fmtNum(t.qty)} {t.uom}</Td><Td className="text-right tabular">{fmtNum(t.pallets, 1)}</Td><Td className="text-right tabular">{t.bins.size}</Td>
+                <tr key={t.sku} className="hover:bg-paper">
+                  <Td><Link className="font-cond font-semibold text-ckb-dark underline decoration-steel-300 underline-offset-2 hover:decoration-ckb" href={`/inventory?q=${t.sku}`}>{t.sku}</Link></Td>
+                  <Td className="text-steel-700">{t.description}</Td>
+                  <Td className="text-right font-semibold tabular">{fmtNum(t.qty)} {t.uom}</Td><Td className="text-right tabular">{fmtNum(t.pallets, 1)}</Td><Td className="text-right tabular">{t.bins.size}</Td>
                 </tr>
               ))}</tbody>
             </Table>
-          </CardContent>
-        </Card>
+          </div>
+          <ul className="divide-y divide-steel-100 border-t border-steel-100 md:hidden">
+            {topSkus.map((t) => (
+              <li key={t.sku} className="flex items-baseline justify-between gap-3 px-4 py-2.5">
+                <span className="min-w-0">
+                  <Link href={`/inventory?q=${t.sku}`} className="font-cond text-sm font-semibold text-ckb-dark">{t.sku}</Link>
+                  <span className="block truncate text-[11px] text-steel-500">{t.description}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block text-sm font-semibold tabular">{fmtNum(t.qty)} {t.uom}</span>
+                  <span className="block text-[11px] text-steel-500">{fmtNum(t.pallets, 1)} palet · {t.bins.size} bin</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-        <Card>
-          <CardHeader><CardTitle>Stok expired dan mendekati expired</CardTitle></CardHeader>
-          <CardContent>
-            {risky.length === 0 ? <p className="text-sm text-steel-500">Tidak ada stok yang expired atau expired dalam {NEAR_EXPIRY_DAYS} hari.</p> : (
-              <Table>
-                <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Deskripsi</Th><Th>Batch</Th><Th className="text-right">Qty</Th><Th>Expired</Th><Th className="text-right">Sisa hari</Th><Th>Status</Th></tr></thead>
-                <tbody>{risky.map((r, i) => (
-                  <tr key={i}>
-                    <Td><Link className="font-semibold underline" href={`/bin/${r.bin_code}`}>{r.bin_code}</Link></Td><Td>{r.sku}</Td><Td>{r.description}</Td><Td>{r.batch_lot || "–"}</Td>
-                    <Td className="text-right">{fmtNum(r.quantity)} {r.uom}</Td><Td>{fmtDate(r.expiry_date)}</Td><Td className="text-right">{r.days_remaining}</Td><Td><ExpiryBadge status={expiryStatus(r.expiry_date)} /></Td>
-                  </tr>
-                ))}</tbody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        {/* ---- The stock that needs separating, in full ------------------------- */}
+        <section aria-labelledby="risiko-title" id="risiko" className={cn(PANEL, "scroll-mt-4")}>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span aria-hidden className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", expiredRows.length ? TONE_TILE.bad : TONE_TILE.warn)}><CalendarX2 className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <h2 id="risiko-title" className="font-cond text-lg font-semibold leading-tight">Stok expired dan mendekati expired</h2>
+                <p className="text-xs text-steel-500">Expired, atau sisa umur ≤ {NEAR_EXPIRY_DAYS} hari — terdekat lebih dulu.</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-steel-700 ring-1 ring-inset ring-steel-100">
+              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[risky.length ? (expiredRows.length ? "bad" : "warn") : "ok"])} />
+              {risky.length ? `${fmtNum(risky.length)} posisi · ${fmtNum(sumQty(risky))} karton` : "Tidak ada"}
+            </span>
+          </div>
+          {risky.length === 0 ? (
+            <p className="flex items-center gap-2 border-t border-steel-100 px-4 py-4 text-sm text-steel-500">
+              <CircleCheck aria-hidden className="h-4 w-4 text-ok" />Tidak ada stok yang expired atau expired dalam {NEAR_EXPIRY_DAYS} hari.
+            </p>
+          ) : (
+            <>
+              <ul className="divide-y divide-steel-100 border-t border-steel-100 md:hidden">
+                {riskyShown.map((r, i) => (
+                  <li key={`${r.bin_code}-${r.sku}-${i}`} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link href={`/bin/${r.bin_code}`} className="font-cond text-base font-semibold text-ckb-dark">{r.bin_code}</Link>
+                        <p className="text-sm text-steel-700">{r.sku} · {r.batch_lot || "–"}</p>
+                        <p className="truncate text-[11px] text-steel-500">{r.description}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-cond text-lg font-semibold leading-tight tabular">{fmtNum(r.quantity)} {r.uom}</p>
+                        <ExpiryBadge status={expiryStatus(r.expiry_date)} />
+                      </div>
+                    </div>
+                    <p className="mt-1 text-[11px] text-steel-500">{fmtDate(r.expiry_date)} · sisa {fmtNum(r.days_remaining)} hari</p>
+                  </li>
+                ))}
+              </ul>
+              <div className="hidden border-t border-steel-100 px-4 pb-4 pt-2 md:block">
+                <Table>
+                  <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Deskripsi</Th><Th>Batch</Th><Th className="text-right">Qty</Th><Th>Expired</Th><Th className="text-right">Sisa hari</Th><Th>Status</Th></tr></thead>
+                  <tbody>{riskyShown.map((r, i) => (
+                    <tr key={i} className="hover:bg-paper">
+                      <Td><Link className="font-cond font-semibold text-ckb-dark underline decoration-steel-300 underline-offset-2 hover:decoration-ckb" href={`/bin/${r.bin_code}`}>{r.bin_code}</Link></Td><Td>{r.sku}</Td><Td className="text-steel-700">{r.description}</Td><Td>{r.batch_lot || "–"}</Td>
+                      <Td className="text-right tabular">{fmtNum(r.quantity)} {r.uom}</Td><Td>{fmtDate(r.expiry_date)}</Td><Td className="text-right tabular">{fmtNum(r.days_remaining)}</Td><Td><ExpiryBadge status={expiryStatus(r.expiry_date)} /></Td>
+                    </tr>
+                  ))}</tbody>
+                </Table>
+              </div>
+              {risky.length > RISKY_ROWS && (
+                <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+                  Menampilkan {RISKY_ROWS} dari {fmtNum(risky.length)} posisi.{" "}
+                  <Link className="underline" href="/inventory?tab=fefo">Buka daftar lengkap di Inventory</Link>.
+                </p>
+              )}
+            </>
+          )}
+        </section>
       </div>
     </main>
   );
 }
 
-function Kpi({ label, value, note, tone, href }: { label: string; value: string; note: string; tone?: "bad" | "warn"; href?: string }) {
-  const body = (
-    <>
-      <div className="flex items-start justify-between gap-2 text-sm text-steel-500">
-        {label}
-        {tone && <StatusIcon tone={tone} />}
+/** One block of the navy band: a labelled progress meter over a real ratio. */
+function PlanGauge({ label, done, total, pct, note }: { label: string; done: number; total: number; pct: number; note: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-white/60">{label}</span>
+        <span className="font-cond text-2xl font-semibold leading-none tabular">{fmtNum(done)}<span className="text-white/45">/{fmtNum(total)}</span></span>
       </div>
-      <div className="font-cond text-4xl font-semibold tabular">{value}</div>
-      <div className="text-xs text-steel-500">{note}</div>
-    </>
+      <div aria-hidden className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/15">
+        <div className="h-full rounded-full bg-jeir-teal" style={{ width: `${Math.min(100, pct * 100)}%` }} />
+      </div>
+      <p className="mt-1 text-[11px] text-white/60">{note}</p>
+    </div>
   );
-  const cls = cn("block rounded-lg bg-white p-4", href && "hover:ring-2 hover:ring-ckb");
-  return href ? <Link href={href} className={cls}>{body}</Link> : <div className={cls}>{body}</div>;
 }
 
+function BandStat({ label, value, sub, href, icon: Icon, tone }: { label: string; value: string; sub: string; href: string; icon: LucideIcon; tone?: "warn" }) {
+  return (
+    <Link href={href} className="min-w-0 border-t border-white/10 px-3 py-3 transition-colors [&:nth-child(-n+2)]:border-t-0 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/70 sm:border-l sm:border-t-0 sm:first:border-l-0 lg:px-6 lg:py-4">
+      <span className="flex items-center gap-1.5 text-[9px] font-medium uppercase tracking-wide text-white/55 sm:text-[10px]">
+        <Icon aria-hidden className="hidden h-3.5 w-3.5 sm:block" />{label}
+      </span>
+      <span className="mt-0.5 block font-cond text-2xl font-semibold leading-none tabular">{value}</span>
+      <span className={cn("mt-1 block text-[11px] text-white/55", tone === "warn" && "text-warn")}>{sub}</span>
+    </Link>
+  );
+}
+
+/** A metric against its target: the fill is the achievement, the tick is the goal. */
+function Metric({ label, value, note, pct, target, tone, href }: {
+  label: string; value: string; note: string; pct: number | null; target?: number;
+  tone?: "bad" | "warn" | "ok"; href: string;
+}) {
+  return (
+    <Link href={href} className="block rounded-lg px-2.5 py-2 transition-colors hover:bg-paper">
+      <span className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium text-steel-700">{label}</span>
+        <span className={cn("font-cond text-xl font-semibold leading-none tabular", tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : tone === "ok" ? "text-ok" : "text-steel")}>{value}</span>
+      </span>
+      {pct !== null && (
+        <span aria-hidden className="relative mt-1.5 block h-1.5 rounded-full bg-steel-300/45">
+          <span className={cn("block h-full rounded-full", tone === "ok" ? "bg-ok" : tone === "bad" ? "bg-bad" : tone === "warn" ? "bg-warn" : "bg-ckb")}
+            style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
+          {target !== undefined && <span title={`Target ${fmtNum(target, 1)}%`} className="absolute -top-[2px] h-[10px] w-[2px] rounded-full bg-steel shadow-[0_0_0_1px_rgba(255,255,255,0.9)]" style={{ left: `calc(${Math.min(100, target)}% - 1px)` }} />}
+        </span>
+      )}
+      <span className="mt-1 block text-[11px] leading-snug text-steel-500">{note}</span>
+    </Link>
+  );
+}
