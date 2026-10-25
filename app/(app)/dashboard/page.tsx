@@ -1,9 +1,10 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
+import type { TablerIcon } from "@tabler/icons-react";
 import {
-  ArrowDownRight, ArrowUpRight, Boxes, CalendarClock, CalendarOff, CalendarX2, ChevronRight, CircleCheck,
-  ClipboardCheck, ClipboardList, Droplets, Gauge, Layers, PackageSearch, Route, ShieldAlert, Truck, Warehouse,
-} from "lucide-react";
+  IconArrowDownRight, IconArrowUpRight, IconBox, IconCalendarOff, IconCalendarTime, IconCalendarX,
+  IconChevronRight, IconCircleCheck, IconClipboardCheck, IconClipboardList, IconPackage,
+  IconRoute, IconTruck, IconBuildingWarehouse, IconLock,
+} from "@tabler/icons-react";
 import { requireRole } from "@/lib/auth";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -127,7 +128,7 @@ const TONE_FILL: Record<Tone, string> = { bad: "bg-bad", warn: "bg-warn", wait: 
 const TONE_DOT: Record<Tone, string> = { bad: "bg-bad", warn: "bg-warn", wait: "bg-ckb", ok: "bg-ok" };
 const TONE_RANK: Record<Tone, number> = { bad: 0, warn: 1, wait: 2, ok: 3 };
 
-type AttentionItem = { key: string; label: string; detail: string; count: number; unit: string; tone: Tone; href: string; icon: LucideIcon };
+type AttentionItem = { key: string; label: string; detail: string; count: number; unit: string; tone: Tone; href: string; icon: TablerIcon };
 const RISKY_ROWS = 25;
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ kalender?: string }> }) {
@@ -354,54 +355,54 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // ---- What needs a hand right now -------------------------------------------
   const attention: AttentionItem[] = [];
   if (expiredRows.length) attention.push({
-    key: "expired", label: "Stok sudah expired", tone: "bad", icon: CalendarX2, href: "#risiko",
+    key: "expired", label: "Stok sudah expired", tone: "bad", icon: IconCalendarX, href: "#risiko",
     detail: `${fmtNum(sumQty(expiredRows))} karton · ${expiredRows.length} posisi · pisahkan sebelum picking`,
     count: expiredRows.length, unit: "posisi",
   });
   if (fefoBad) attention.push({
-    key: "fefo", label: "Pick tidak mengikuti FEFO", tone: "bad", icon: Route, href: "/inventory?tab=fefo",
+    key: "fefo", label: "Pick tidak mengikuti FEFO", tone: "bad", icon: IconRoute, href: "/inventory?tab=fefo",
     detail: `${fmtNum(fefoBad)} dari ${fmtNum(fefoN)} pick rak · ${fmtNum(dec1(fefoN ? (fefoBad / fefoN) * 100 : 0), 1)}% tidak FEFO`,
     count: fefoBad, unit: "pick",
   });
   if (nearRows.length) attention.push({
-    key: "near", label: `Expired dalam ${NEAR_EXPIRY_DAYS} hari`, tone: "warn", icon: CalendarClock, href: "#risiko",
+    key: "near", label: `Expired dalam ${NEAR_EXPIRY_DAYS} hari`, tone: "warn", icon: IconCalendarTime, href: "#risiko",
     detail: `${fmtNum(sumQty(nearRows))} karton · ${new Set(nearRows.map((r) => r.sku)).size} SKU · sisa umur terpendek ${fmtNum(Math.min(...nearRows.map((r) => r.days_remaining ?? 0)))} hari`,
     count: nearRows.length, unit: "posisi",
   });
   if (activeHolds) attention.push({
-    key: "hold", label: "Stok ditahan", tone: "warn", icon: ShieldAlert, href: "/inventory?tab=hold",
+    key: "hold", label: "Stok ditahan", tone: "warn", icon: IconLock, href: "/inventory?tab=hold",
     detail: "QC, rusak, investigasi, recall — tidak bisa dipicking",
     count: activeHolds, unit: "hold",
   });
   if (stagedDays !== null && stagedDays > 0) attention.push({
-    key: "staging", label: "Barang mengendap di staging", tone: "warn", icon: Boxes, href: "/inventory?tab=inap",
+    key: "staging", label: "Barang mengendap di staging", tone: "warn", icon: IconBox, href: "/inventory?tab=inap",
     detail: `Tertua ${fmtDate(oldestStaged)} · ${stagedDays} hari belum masuk rak`,
     count: staged.length, unit: "baris",
   });
   // shipmentsWaiting keeps the original total; per-state counts drive the stacked bar.
   const shipmentsWaiting = (shipReadyAudit ?? 0) + (shipMismatch ?? 0) + (shipReadyLoad ?? 0);
   if (shipmentsWaiting) attention.push({
-    key: "shipments", label: "Shipment menunggu audit / muat", tone: "wait", icon: Truck, href: "/audit/picking",
+    key: "shipments", label: "Shipment menunggu audit / muat", tone: "wait", icon: IconTruck, href: "/audit/picking",
     detail: "Setiap baris harus lolos audit sebelum dimuat",
     count: shipmentsWaiting, unit: "shipment",
   });
   if (openCounts) attention.push({
-    key: "counts", label: "Tugas cycle count terbuka", tone: "wait", icon: ClipboardList, href: "/inventory?tab=akurasi",
+    key: "counts", label: "Tugas cycle count terbuka", tone: "wait", icon: IconClipboardList, href: "/inventory?tab=akurasi",
     detail: "Hitung fisik sudah dibuka, belum ditutup",
     count: openCounts, unit: "tugas",
   });
   if (openReceipts) attention.push({
-    key: "receipts", label: "Penerimaan belum diposting", tone: "wait", icon: PackageSearch, href: "/receiving",
+    key: "receipts", label: "Penerimaan belum diposting", tone: "wait", icon: IconPackage, href: "/receiving",
     detail: "Cocokkan dengan DO Shell lalu posting",
     count: openReceipts, unit: "penerimaan",
   });
   if (pendingApprovals) attention.push({
-    key: "approvals", label: "Adjustment menunggu persetujuan", tone: "wait", icon: ClipboardCheck, href: "/inventory?tab=persetujuan",
+    key: "approvals", label: "Adjustment menunggu persetujuan", tone: "wait", icon: IconClipboardCheck, href: "/inventory?tab=persetujuan",
     detail: "Di atas batas, perlu orang lain menyetujui",
     count: pendingApprovals, unit: "permintaan",
   });
   if (noDate) attention.push({
-    key: "nodate", label: "Baris tanpa tanggal expired", tone: "wait", icon: CalendarOff, href: "/inventory?tab=fefo",
+    key: "nodate", label: "Baris tanpa tanggal expired", tone: "wait", icon: IconCalendarOff, href: "/inventory?tab=fefo",
     detail: `${fmtNum(noDateQty)} karton tidak bisa diurutkan FEFO`,
     count: noDate, unit: "baris",
   });
@@ -480,7 +481,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               ) : (
                 <div className="flex flex-col gap-3 rounded-lg bg-white/[0.06] p-3 ring-1 ring-inset ring-white/10 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-start gap-3">
-                    <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-jeir-teal"><CalendarClock className="h-5 w-5" /></span>
                     <div>
                       <p className="font-cond text-base font-semibold">Rencana hari ini belum disimpan</p>
                       <p className="text-sm text-white/65">Belum ada picklist dan urutan jalan. Susun wave dari order Shell.</p>
@@ -488,7 +488,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   </div>
                   <Link href={`/waves?date=${today}`}
                     className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md bg-jeir-teal px-4 py-2 text-sm font-semibold text-jeir-navy transition-colors hover:bg-ckb-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-jeir-navy sm:py-1.5">
-                    Buka Wave<ChevronRight aria-hidden className="h-4 w-4" />
+                    Buka Wave<IconChevronRight aria-hidden className="h-4 w-4" />
                   </Link>
                 </div>
               )}
@@ -496,25 +496,24 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </div>
 
           <div className="relative mt-4 grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
-            <BandStat label="Karton masuk" value={fmtNum(todayFlow.masuk)} sub="terima + putaway" href={`/audit/putaway?date=${today}`} icon={ArrowDownRight} />
-            <BandStat label="Karton keluar" value={fmtNum(todayFlow.keluar)} sub="picking hari ini" href={`/waves?date=${today}`} icon={ArrowUpRight} />
-            <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={staged.length ? `${fmtNum(staged.length)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={Boxes} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
-            <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState}`} href="#okupansi" icon={Warehouse} tone={rackState === "sesak" ? "warn" : undefined} />
+            <BandStat label="Karton masuk" value={fmtNum(todayFlow.masuk)} sub="terima + putaway" href={`/audit/putaway?date=${today}`} icon={IconArrowDownRight} />
+            <BandStat label="Karton keluar" value={fmtNum(todayFlow.keluar)} sub="picking hari ini" href={`/waves?date=${today}`} icon={IconArrowUpRight} />
+            <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={staged.length ? `${fmtNum(staged.length)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={IconBox} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
+            <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState}`} href="#okupansi" icon={IconBuildingWarehouse} tone={rackState === "sesak" ? "warn" : undefined} />
           </div>
         </section>
 
         {/* ---- Arus barang: litres in and out per day; outbound days click into the picking audit ---- */}
         <section aria-labelledby="volume-title" className={PANEL}>
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Droplets className="h-5 w-5" /></span>
+            <div className="min-w-0">
               <div className="min-w-0">
                 <h2 id="volume-title" className="font-cond text-lg font-semibold leading-tight">Arus barang</h2>
                 <p className="text-xs text-steel-500">Karton dan liter yang masuk dan keluar, {VOL_DAYS} hari terakhir — klik satu hari untuk membuka audit picking.</p>
               </div>
             </div>
             <Link href={`/audit/picking?date=${today}`} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-ckb-dark hover:bg-paper">
-              Buka audit picking<ChevronRight aria-hidden className="h-3.5 w-3.5" />
+              Buka audit picking<IconChevronRight aria-hidden className="h-3.5 w-3.5" />
             </Link>
           </div>
           <div className="flex flex-col gap-3 border-t border-steel-100 px-4 py-4">
@@ -578,8 +577,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         {/* ---- What needs a hand right now --------------------------------------- */}
         <section aria-labelledby="perhatian-title" className={PANEL}>
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><ShieldAlert className="h-5 w-5" /></span>
+            <div className="min-w-0">
               <div className="min-w-0">
                 <h2 id="perhatian-title" className="font-cond text-lg font-semibold leading-tight">Butuh perhatian sekarang</h2>
                 <p className="text-xs text-steel-500">Antrean dan penyimpangan yang menunggu orang — bukan sekadar angka.</p>
@@ -593,7 +591,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
           {attention.length === 0 ? (
             <div className="flex items-center gap-3 border-t border-steel-100 px-4 py-5">
-              <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ok/10 text-ok"><CircleCheck className="h-5 w-5" /></span>
+              <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ok/10 text-ok"><IconCircleCheck className="h-5 w-5" /></span>
               <div>
                 <p className="font-cond text-base font-semibold">Tidak ada yang perlu dicek</p>
                 <p className="text-sm text-steel-500">Antrean persetujuan, hold, penerimaan tertunda, dan hitung terbuka semuanya kosong. Stok berisiko juga tidak ada.</p>
@@ -686,8 +684,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <div className="grid gap-5 lg:grid-cols-5">
           <section aria-labelledby="okupansi-title" id="okupansi" className={cn(PANEL, "scroll-mt-4 lg:col-span-3")}>
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-2 pt-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Warehouse className="h-5 w-5" /></span>
+              <div className="min-w-0">
                 <div className="min-w-0">
                   <h2 id="okupansi-title" className="font-cond text-lg font-semibold leading-tight">Okupansi rak</h2>
                   <p className="text-xs text-steel-500">Posisi terisi per aisle dan level.</p>
@@ -783,8 +780,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
           <section aria-labelledby="expired-title" className={cn(PANEL, "lg:col-span-2")}>
             <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><CalendarClock className="h-5 w-5" /></span>
+              <div className="min-w-0">
                 <div className="min-w-0">
                   <h2 id="expired-title" className="font-cond text-lg font-semibold leading-tight">Umur simpan stok</h2>
                   <p className="text-xs text-steel-500">Berapa karton, dan berapa lama lagi.</p>
@@ -880,8 +876,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <div className="grid gap-5 lg:grid-cols-5">
           <section aria-labelledby="mutu-title" className={cn(PANEL, "lg:col-span-3")}>
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-1 pt-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Gauge className="h-5 w-5" /></span>
+              <div className="min-w-0">
                 <div className="min-w-0">
                   <h2 id="mutu-title" className="font-cond text-lg font-semibold leading-tight">Mutu &amp; kendali</h2>
                   <p className="text-xs text-steel-500">{ACCURACY_DAYS} hari terakhir, dibanding target.</p>
@@ -920,8 +915,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
           <section aria-labelledby="abc-title" className={cn(PANEL, "lg:col-span-2")}>
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Layers className="h-5 w-5" /></span>
+              <div className="min-w-0">
                 <div className="min-w-0">
                   <h2 id="abc-title" className="font-cond text-lg font-semibold leading-tight">Kelas ABC stok</h2>
                   <p className="text-xs text-steel-500">Kelas dari frekuensi baris picking.</p>
@@ -962,15 +956,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         {/* ---- Top SKUs: a desktop table, cards on the floor -------------------- */}
         <section aria-labelledby="top-title" className={PANEL}>
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark"><Boxes className="h-5 w-5" /></span>
+            <div className="min-w-0">
               <div className="min-w-0">
                 <h2 id="top-title" className="font-cond text-lg font-semibold leading-tight">Top 10 SKU menurut stok</h2>
                 <p className="text-xs text-steel-500">Karton, setara palet, dan jumlah bin yang dipakai.</p>
               </div>
             </div>
             <Link href="/inventory" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-ckb-dark hover:bg-paper">
-              Buka Inventory<ChevronRight aria-hidden className="h-3.5 w-3.5" />
+              Buka Inventory<IconChevronRight aria-hidden className="h-3.5 w-3.5" />
             </Link>
           </div>
           <div className="hidden border-t border-steel-100 px-4 pb-4 pt-2 md:block">
@@ -1004,8 +997,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         {/* ---- The stock that needs separating, in full ------------------------- */}
         <section aria-labelledby="risiko-title" id="risiko" className={cn(PANEL, "scroll-mt-4")}>
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span aria-hidden className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", expiredRows.length ? TONE_TILE.bad : TONE_TILE.warn)}><CalendarX2 className="h-5 w-5" /></span>
+            <div className="min-w-0">
               <div className="min-w-0">
                 <h2 id="risiko-title" className="font-cond text-lg font-semibold leading-tight">Stok expired dan mendekati expired</h2>
                 <p className="text-xs text-steel-500">Expired, atau sisa umur ≤ {NEAR_EXPIRY_DAYS} hari — terdekat lebih dulu.</p>
@@ -1018,7 +1010,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </div>
           {risky.length === 0 ? (
             <p className="flex items-center gap-2 border-t border-steel-100 px-4 py-4 text-sm text-steel-500">
-              <CircleCheck aria-hidden className="h-4 w-4 text-ok" />Tidak ada stok yang expired atau expired dalam {NEAR_EXPIRY_DAYS} hari.
+              <IconCircleCheck aria-hidden className="h-4 w-4 text-ok" />Tidak ada stok yang expired atau expired dalam {NEAR_EXPIRY_DAYS} hari.
             </p>
           ) : (
             <>
@@ -1081,7 +1073,7 @@ function PlanGauge({ label, done, total, pct, note }: { label: string; done: num
   );
 }
 
-function BandStat({ label, value, sub, href, icon: Icon, tone }: { label: string; value: string; sub: string; href: string; icon: LucideIcon; tone?: "warn" }) {
+function BandStat({ label, value, sub, href, icon: Icon, tone }: { label: string; value: string; sub: string; href: string; icon: TablerIcon; tone?: "warn" }) {
   return (
     <Link href={href} className="min-w-0 border-t border-white/10 px-3 py-3 transition-colors [&:nth-child(-n+2)]:border-t-0 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/70 sm:border-l sm:border-t-0 sm:first:border-l-0 lg:px-6 lg:py-4">
       <span className="flex items-center gap-1.5 text-[9px] font-medium uppercase tracking-wide text-white/55 sm:text-[10px]">
