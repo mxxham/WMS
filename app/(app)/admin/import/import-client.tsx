@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
-import * as XLSX from "xlsx";
+// Type-only: the ~400 kB reader bundle loads lazily at the first file pick.
+import type * as XLSX from "xlsx";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,13 @@ import { Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet, type SheetRows } from "@/lib/read-sheet";
 import { FIELDS, FIELD_LABELS, binsWithErrors, detectHeader, toPayload, validateRows, type ImportRow, type Mapping, type RowStatus } from "@/lib/import-validate";
+
+/** Column index -> spreadsheet letters (A, B, … AA), replacing XLSX.utils.encode_col. */
+function colLetter(i: number) {
+  let s = "";
+  for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s;
+  return s;
+}
 import { cn, fmtNum } from "@/lib/utils";
 
 type Step = "upload" | "map" | "review" | "done";
@@ -45,6 +53,7 @@ export function ImportClient() {
     setError(null); setBusy(true); setFileName(f.name);
     try {
       // cellDates: real Date objects for date cells; formula cells use cached values.
+      const XLSX = await import("xlsx");
       const book = XLSX.read(await f.arrayBuffer(), { cellDates: true });
       setWb(book);
       loadSheet(book, book.SheetNames.includes("WMS") ? "WMS" : book.SheetNames[0]);
@@ -65,7 +74,8 @@ export function ImportClient() {
   const counts = useMemo(() => rows.reduce((a, r) => ({ ...a, [r.status]: a[r.status] + 1 }), { ok: 0, warning: 0, error: 0 } as Record<RowStatus, number>), [rows]);
   const shown = useMemo(() => (filter === "all" ? rows : rows.filter((r) => r.status === filter)).slice(0, 500), [rows, filter]);
 
-  function downloadReport() {
+  async function downloadReport() {
+    const XLSX = await import("xlsx");
     const issues = rows.filter((r) => r.status !== "ok").map((r) => ({
       "Baris Excel": r.line, Status: r.status === "error" ? "ERROR (tidak diimpor)" : "PERINGATAN (diimpor)",
       "Kode bin": r.bin_code, SKU: r.sku, Batch: r.batch_lot, Qty: r.quantity, Expired: r.expiry_date, Masalah: r.messages.join("; "),
@@ -125,7 +135,7 @@ export function ImportClient() {
                 <div key={f}><Label htmlFor={f}>{FIELD_LABELS[f]}</Label>
                   <Select id={f} value={mapping[f] ?? ""} onChange={(e) => setMapping({ ...mapping, [f]: e.target.value === "" ? undefined : Number(e.target.value) })}>
                     <option value="">— tidak dipakai —</option>
-                    {(data.rows[headerRow] ?? []).map((h, i) => h !== null && <option key={i} value={i}>{XLSX.utils.encode_col(i)}: {String(h)}</option>)}
+                    {(data.rows[headerRow] ?? []).map((h, i) => h !== null && <option key={i} value={i}>{colLetter(i)}: {String(h)}</option>)}
                   </Select></div>
               ))}
             </div>

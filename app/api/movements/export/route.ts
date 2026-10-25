@@ -16,12 +16,29 @@ type Row = {
 };
 
 // Same filters as /movements, all matching rows, as .xlsx.
+// Unbounded: a ledger-sized pull must never be built in memory, so an export
+// without a date window defaults to the last 30 days and anything above the
+// row cap is refused with a message to narrow the range.
+const MAX_ROWS = 100_000;
+
 export async function GET(req: Request) {
   if (!(await checkRole(["supervisor", "admin"]))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const f = Object.fromEntries(new URL(req.url).searchParams) as MovementFilters;
+  if (!f.from && !f.to) {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    f.to = today;
+    f.from = new Date(new Date(`${today}T00:00:00+07:00`).getTime() - 29 * 86_400_000)
+      .toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  }
   const supabase = await createClient();
   const build = await movementQuery(supabase, f);
   const rows = build ? await fetchAll<Row>(build) : [];
+  if (rows.length > MAX_ROWS) {
+    return NextResponse.json(
+      { error: `Terlalu banyak baris untuk diekspor (${rows.length.toLocaleString("id-ID")}). Batas ${MAX_ROWS.toLocaleString("id-ID")} baris — persempit rentang tanggal atau filter.` },
+      { status: 413 },
+    );
+  }
   const sheet = XLSX.utils.json_to_sheet(rows.map((m) => ({
     Waktu: new Date(m.created_at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), Jenis: m.type,
     SKU: m.items?.sku, Deskripsi: m.items?.description, Batch: m.batch_lot, Qty: Number(m.quantity), UoM: m.items?.uom,

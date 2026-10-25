@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
+// Type-only: the ~400 kB reader bundle loads lazily at the first file pick.
+import type * as XLSX from "xlsx";
 import { FileSpreadsheet, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,7 @@ function ImportFromFile({ existing }: { existing: string[] }) {
   async function read(f: File) {
     setMsg(null); setItems(null); setFile(f.name);
     try {
+      const XLSX = await import("xlsx");
       const wb = XLSX.read(await f.arrayBuffer(), { cellDates: true });
       const have = new Set(existing);
       const missing = allMasterSkus(wb).filter((s) => !have.has(s));

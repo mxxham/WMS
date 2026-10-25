@@ -17,7 +17,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
   const supabase = await createClient();
 
-  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }, { data: waits }, { data: counts }, { data: lastImport }, { data: corrections }, { data: requests }] = await Promise.all([
+  const [{ data: waves }, tasks, { data: outbound }, { data: recent }, { data: shortfalls }, { data: auditStates }, { data: waits }, { data: counts }, { data: lastImport }, { data: corrections }, { data: requests }, { data: after }] = await Promise.all([
     supabase.from("waves").select("id, wave_no, planned_date, shipment_numbers, truck, destination, planned_slot, status")
       .eq("planned_date", date).order("planned_slot", { nullsFirst: false }).order("wave_no"),
     fetchAll<TaskRow>((from, to) => supabase.from("pick_task_detail").select("*").eq("planned_date", date).order("seq").order("id").range(from, to)),
@@ -36,8 +36,9 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     supabase.from("picklist_corrections").select("*").eq("planned_date", date).order("sku").order("bin_code"),
     // Minta supervisor (0067): picker lines the picking screen could not post.
     supabase.from("pick_line_requests_open").select("*").eq("planned_date", date).order("created_at"),
+    // The nearest planned day after this one, for the day arrows.
+    supabase.from("waves").select("planned_date").gt("planned_date", date).order("planned_date").limit(1),
   ]);
-  const { data: after } = await supabase.from("waves").select("planned_date").gt("planned_date", date).order("planned_date").limit(1);
   const prevDate = (recent?.[0]?.planned_date as string | undefined) ?? null;
   const nextDate = (after?.[0]?.planned_date as string | undefined) ?? null;
 

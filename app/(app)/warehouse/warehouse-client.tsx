@@ -45,7 +45,9 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
   }, []);
 
   // Stock moved elsewhere: recolour the racks and reload the open panel in
-  // place (no "Memuat…" flash). 3 s debounce: one /api/warehouse call per burst.
+  // place (no "Memuat…" flash). 30 s debounce: /api/warehouse is a full
+  // bin_summary pull, so bursts of movement traffic must not poll it every few
+  // seconds — colours catch up on the next reload or manual refresh.
   const live = useLiveTables(["movements"], async () => {
     loadBins();
     const code = selected?.bin_code;
@@ -55,7 +57,7 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
     const fresh: BinDetail = await res.json();
     // Only if the panel still shows that bin (the user may have clicked another).
     setDetail((d) => (d?.bin.bin_code === code ? fresh : d));
-  }, 3000);
+  }, 30000);
 
   const select = useCallback((b: BinSummary) => {
     setSelected(b); setHighlighted(new Set([b.id])); loadDetail(b.bin_code);

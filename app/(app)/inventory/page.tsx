@@ -72,7 +72,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 
   return (
     <main>
-      <PageHeader title="Inventory" live={["movements", "pick_tasks", "count_tasks", "stock_holds", "adjustment_requests", "stock_recon_lines", "stock_recons"]} liveDebounceMs={2000} />
+      <PageHeader title="Inventory" live={["movements", "pick_tasks", "count_tasks", "stock_holds", "adjustment_requests", "stock_recon_lines", "stock_recons"]} liveDebounceMs={10000} />
       <TabsNav base="/inventory" tabs={tabs} active={tab} />
       {tab === "stok" && <WmsDayDownload />}
       {tab === "stok" && await stockTab(sp)}

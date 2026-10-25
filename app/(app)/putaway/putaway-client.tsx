@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
+// Type-only: the ~400 kB reader bundle loads lazily at the first file pick.
+import type * as XLSX from "xlsx";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
 import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawaySheet, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
 import { masterFromWorkbook } from "@/lib/master-from-workbook";
-import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import { PutawayFixPanel } from "./putaway-fix-panel";
 import { PutawayHistory } from "./putaway-history";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -55,10 +56,56 @@ export function PutawayClient() {
   const [confirming, setConfirming] = useState(false);
   const [limit, setLimit] = useState(20);
   const [historyKey, setHistoryKey] = useState(0);
+  const [draftBanner, setDraftBanner] = useState<{ source: string; rows: number; updated_at: string } | null>(null);
 
   useEffect(() => {
     createClient().rpc("inventory_policy").then(({ data }) => setLimit(Number((data as { adjust_approval_qty?: number } | null)?.adjust_approval_qty ?? 20)));
   }, []);
+
+  // Load draft on mount when at upload step with no rows
+  useEffect(() => {
+    let mounted = true;
+    if (step === "upload" && rows.length === 0) {
+      createClient()
+        .rpc("putaway_draft_load")
+        .then(({ data, error }) => {
+          if (!mounted) return;
+          if (error) {
+            console.error("putaway_draft_load:", error.message);
+            return;
+          }
+          const draft = data as { source?: string; by_name?: string; rows: unknown[]; actions: Record<string, string>; fixes: Record<string, FixLine[]>; updated_at: string } | null;
+          if (!draft || !Array.isArray(draft.rows) || draft.rows.length === 0) return;
+          const restoredRows = draft.rows as PutawayRow[];
+          const restoredActions: Record<number, PutawayAction | undefined> = {};
+          for (const [k, v] of Object.entries(draft.actions)) {
+            restoredActions[Number(k)] = v as PutawayAction | undefined;
+          }
+          const restoredFixes: Record<number, FixLine[]> = {};
+          for (const [k, v] of Object.entries(draft.fixes)) {
+            restoredFixes[Number(k)] = v;
+          }
+          setRows(restoredRows);
+          setActions(restoredActions);
+          setFixes(restoredFixes);
+          setFileName(draft.source ?? "draf tersimpan");
+          // Run preview with restored actions to get verdicts
+          call(false, restoredActions, restoredRows).then((res) => {
+            if (!mounted || !res) return;
+            setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
+            setFilter(res.rows.some((v) => v.status === "conflict") ? "conflict" : "all");
+            setStep("review");
+            setDraftBanner({
+              source: draft.source ?? "draf tersimpan",
+              rows: restoredRows.length,
+              updated_at: draft.updated_at,
+            });
+          });
+        });
+    }
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a snapshot: restored once on mount when the page still holds an empty upload step, like wave-sheet's file tab
+  }, [step, rows.length]);
 
   async function call(apply: boolean, acts: typeof actions, sheetRows = rows): Promise<Result | null> {
     const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({
@@ -67,6 +114,22 @@ export function PutawayClient() {
     const { data, error } = await createClient().rpc("putaway_import", { p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null });
     if (error) { setError(error.message); return null; }
     return data as Result;
+  }
+
+  // Fire-and-forget draft save. Never blocks the UI.
+  /** Fire-and-forget. Call with the freshly computed rows/actions/fixes —
+   *  state setters have not applied yet inside the handlers that call this. */
+  function saveDraft(nextRows = rows, nextActions = actions, nextFixes = fixes) {
+    if (nextRows.length === 0) return;
+    Promise.resolve(
+      createClient().rpc("putaway_draft_save", {
+        p_source: fileName,
+        p_rows: nextRows,
+        p_actions: Object.fromEntries(Object.entries(nextActions).filter(([, v]) => v !== undefined)),
+        p_fixes: nextFixes,
+        p_by_name: name.trim() || "",
+      })
+    ).catch((e: Error) => console.error("putaway_draft_save:", e));
   }
 
   async function loadSheet(book: XLSX.WorkBook, name: string) {
@@ -79,6 +142,7 @@ export function PutawayClient() {
       setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
       setFilter(res.rows.some((v) => v.status === "conflict") ? "conflict" : "all");
       setStep("review");
+      saveDraft(parsed, {}, {}); // save after successful load + preview
     } catch (e) {
       setError((e as Error).message); setRows([]); setStep("review");
     } finally { setBusy(false); }
@@ -86,6 +150,7 @@ export function PutawayClient() {
 
   async function onFile(f: File) {
     setError(null); setFileName(f.name);
+    const XLSX = await import("xlsx");
     let book: XLSX.WorkBook;
     try { book = XLSX.read(await f.arrayBuffer(), { cellDates: true }); }
     catch { return setError("File tidak bisa dibaca. Gunakan .xlsx atau .csv."); }
@@ -108,6 +173,7 @@ export function PutawayClient() {
     setRows(next); setActions(acts); setMoveTo((m) => ({ ...m, [line]: "" }));
     setFixes(({ [line]: _, ...rest }) => rest);
     setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
+    saveDraft(next, acts); // save after successful redirect
   }
 
   async function post() {
@@ -117,6 +183,9 @@ export function PutawayClient() {
     if (!res) return;
     setResult(res); setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
     setStep("done"); setConfirming(false); setHistoryKey((k) => k + 1);
+    // Clear draft after successful post
+    Promise.resolve(createClient().rpc("putaway_draft_clear")).catch((e: Error) => console.error("putaway_draft_clear:", e));
+    setDraftBanner(null);
   }
 
   /** Before the confirmation: the database checks every "Sheet benar" again (reserved, held, bin changed). */
@@ -130,9 +199,14 @@ export function PutawayClient() {
   }
 
   function choose(r: PutawayRow, a: PutawayAction | undefined) {
-    setActions({ ...actions, [r.line]: a });
-    if (a === "fix" && !fixes[r.line]) setFixes({ ...fixes, [r.line]: fixLinesFor(verdicts.get(r.line)?.current ?? []) });
+    const nextActions = { ...actions, [r.line]: a };
+    const nextFixes = a === "fix" && !fixes[r.line]
+      ? { ...fixes, [r.line]: fixLinesFor(verdicts.get(r.line)?.current ?? []) }
+      : fixes;
+    setActions(nextActions);
+    if (nextFixes !== fixes) setFixes(nextFixes);
     setConfirming(false);
+    saveDraft(rows, nextActions, nextFixes);
   }
 
   const statusOf = (r: PutawayRow): Status => (r.error ? "error" : verdicts.get(r.line)?.status ?? "error");
@@ -169,7 +243,9 @@ export function PutawayClient() {
     return v?.kind ? KIND_LABELS[v.kind] : "";
   }
 
-  function downloadReport() {
+  async function downloadReport() {
+    // Full xlsx export loads on demand, on top of the already-loaded reader.
+    const XLSX = await import("xlsx");
     const issues = rows.filter((r) => ["conflict", "error"].includes(statusOf(r))).map((r) => {
       const v = verdicts.get(r.line);
       return {
@@ -184,7 +260,7 @@ export function PutawayClient() {
     XLSX.writeFile(book, `konflik-putaway-${fileName.replace(/\.\w+$/, "")}.xlsx`);
   }
 
-  function reset() { setStep("upload"); setRows([]); setVerdicts(new Map()); setActions({}); setFixes({}); setConfirming(false); setResult(null); setError(null); }
+  function reset() { setStep("upload"); setRows([]); setVerdicts(new Map()); setActions({}); setFixes({}); setConfirming(false); setResult(null); setError(null); setDraftBanner(null); Promise.resolve(createClient().rpc("putaway_draft_clear")).catch((e: Error) => console.error("putaway_draft_clear:", e)); }
 
   return (
     <div className="space-y-6 p-4 lg:p-8">
@@ -207,6 +283,15 @@ export function PutawayClient() {
             </Select></div>
           <Button variant="outline" onClick={reset} disabled={busy}>Ganti file</Button>
         </div>
+      )}
+
+      {draftBanner && step === "review" && (
+        <Card className="bg-ckb-tint/60 ring-1 ring-ckb/30">
+          <CardContent className="text-sm">
+            <p className="font-semibold">Melanjutkan draf «{draftBanner.source}» — {draftBanner.rows} baris, disimpan {fmtDateTime(draftBanner.updated_at)}.</p>
+            <p className="text-steel-500">Semua baris diperiksa ulang dengan stok sekarang; keputusan yang tidak berlaku lagi dilepas.</p>
+          </CardContent>
+        </Card>
       )}
 
       {step !== "upload" && rows.length > 0 && (
@@ -278,9 +363,11 @@ export function PutawayClient() {
                         {st === "conflict" && step === "review" && actions[r.line] === "fix" && (
                           <PutawayFixPanel bin={r.bin_code} lines={fixes[r.line] ?? []} limit={limit} error={v?.fix_error}
                             onChange={(lines) => {
-                              setFixes({ ...fixes, [r.line]: lines }); setConfirming(false);
+                              const nextFixes = { ...fixes, [r.line]: lines };
+                              setFixes(nextFixes); setConfirming(false);
                               // A changed decision is checked again on the next Posting.
                               if (v?.fix_error) setVerdicts(new Map(verdicts).set(r.line, { ...v, fix_error: null }));
+                              saveDraft(rows, actions, nextFixes); // save after fix panel change
                             }} />
                         )}
                         {step === "review" && v?.fix_error && actions[r.line] !== "fix" && <p className="mt-1 text-xs text-bad">{v.fix_error}</p>}
