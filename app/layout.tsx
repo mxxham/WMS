@@ -21,7 +21,18 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
-      <body>{children}<Analytics /><SpeedInsights /></body>
+      <body>
+        {children}
+        {/* Both SDKs are self-injecting client components: an effect appends a <script> to <head> and
+            queues pageviews/vitals on window.va / window.si until it loads. They are not broken when no
+            tag is visible — on Vercel the build sets NEXT_PUBLIC_VERCEL_OBSERVABILITY_CLIENT_CONFIG, so
+            the injected src is a per-deployment hashed path (e.g. /20217b6609385b5c/script.js), never
+            the legacy /_vercel/<name>/script.js alias, and the served runtime no-ops when
+            navigator.webdriver is set. Verify collection by the beacons (POST .../view, POST .../vitals),
+            not by a script[src*="_vercel"] selector, and not from a CDP-driven browser. */}
+        <Analytics />
+        <SpeedInsights />
+      </body>
     </html>
   );
 }
