@@ -45,8 +45,8 @@ export function Sparkline({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       fill="none"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden
       className={cn("shrink-0", highlight ? "opacity-100" : "opacity-60")}
     >
