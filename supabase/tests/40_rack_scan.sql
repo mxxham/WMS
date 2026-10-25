@@ -202,9 +202,12 @@ set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select unpost_task((select p1 from b), 'Supervisor', 'salah posting') \g /dev/null
 select pg_temp.check('unpost clears the bin confirmation and its method',
   (select status = 'PLANNED' and scanned_code is null and scan_method is null from pick_tasks where id = (select p1 from b)));
-select pg_temp.check('pick_audit_line carries scan_method as its last column',
-  (select attname = 'scan_method' from pg_attribute where attrelid = 'public.pick_audit_line'::regclass and attnum > 0 and not attisdropped
-   order by attnum desc limit 1)
+-- 0091 appended items.volume_l after scan_method (append-only rule); the
+-- last column is now volume_l and scan_method is second-to-last.
+select pg_temp.check('pick_audit_line ends with scan_method then volume_l',
+  (select (a[1] = 'volume_l' and a[2] = 'scan_method') from (
+     select array_agg(attname order by attnum desc) as a from pg_attribute
+     where attrelid = 'public.pick_audit_line'::regclass and attnum > 0 and not attisdropped) t)
   and (select scan_method = 'ketik' from pick_audit_line where task_id = (select p2 from a)));
 
 reset role;

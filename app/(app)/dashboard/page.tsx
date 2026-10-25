@@ -10,6 +10,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
 import { Sparkline } from "@/components/dashboard/Sparkline";
+import { StackedBar } from "@/components/dashboard/StackedBar";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Table, Td, Th } from "@/components/ui/table";
 import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
@@ -32,7 +33,13 @@ const getFefoCompliance = unstable_cache(async () => {
     supabase.rpc("fefo_pick_count", { p_from: accSince, p_to: to }),
   ]);
   if (exc.error || picks.error) throw new Error(exc.error?.message ?? picks.error?.message);
-  return { bad: ((exc.data ?? []) as unknown[]).length, n: Number(picks.data ?? 0) };
+  const rows = (exc.data ?? []) as Array<{ zone: string | null }>;
+  const byZone: Record<string, number> = {};
+  for (const r of rows) {
+    const z = r.zone ?? "–";
+    byZone[z] = (byZone[z] ?? 0) + 1;
+  }
+  return { bad: rows.length, n: Number(picks.data ?? 0), byZone };
 }, ["dashboard-fefo-compliance"], { revalidate: 900 });
 
 export const dynamic = "force-dynamic";
@@ -133,7 +140,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const volSince = new Date(todayStart.getTime() - (VOL_DAYS - 1) * 86_400_000)
     .toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
-    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipmentsWaiting }, { data: policyRaw }, fefo, volRows] = await Promise.all([
+    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipReadyAudit }, { count: shipMismatch }, { count: shipReadyLoad }, { data: policyRaw }, fefo, volRows] = await Promise.all([
     fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
@@ -149,7 +156,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     supabase.from("receipts").select("id", { count: "exact", head: true }).in("status", ["OPEN", "CHECKED"]),
     supabase.from("stock_recon_summary").select("as_of, accuracy_pct, open_diffs").order("as_of", { ascending: false }).limit(1).maybeSingle(),
     fetchAll<{ result: string; audited_at: string | null }>((a, b) => supabase.from("pick_audit_first").select("result, audited_at").gte("audited_at", accSince).order("task_id").range(a, b)),
-    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).in("state", ["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD"]),
+    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "READY_AUDIT"),
+    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "HAS_MISMATCH"),
+    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "READY_LOAD"),
     supabase.rpc("inventory_policy"),
     // A slow or failing count must never take the dashboard down: the tile shows "–" instead.
     getFefoCompliance().catch(() => null),
@@ -228,6 +237,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const stagedQty = staged.reduce((s, r) => s + Number(r.quantity), 0);
   const oldestStaged = staged.map((r) => r.received_date).filter(Boolean).sort()[0] ?? null;
   const stagedDays = oldestStaged ? Math.floor((todayStart.getTime() - new Date(`${oldestStaged}T00:00:00+07:00`).getTime()) / 86_400_000) : null;
+  // Staging aging, weighted by quantity: <1 hari / 1-2 hari / 3+ hari from received_date.
+  const stagedAging = { "<1": 0, "1-2": 0, "3+": 0 };
+  for (const r of staged) {
+    const rd = r.received_date;
+    if (!rd) continue;
+    const days = Math.floor((todayStart.getTime() - new Date(`${rd}T00:00:00+07:00`).getTime()) / 86_400_000);
+    const q = Number(r.quantity);
+    if (days <= 0) stagedAging["<1"] += q;
+    else if (days <= 2) stagedAging["1-2"] += q;
+    else stagedAging["3+"] += q;
+  }
+  // True only when at least one staged row carries a received date: with no dates
+  // the bucket break-down would be an empty bar, so the UI gets a quiet note instead.
+  const stagedAgingKnown = stagedAging["<1"] + stagedAging["1-2"] + stagedAging["3+"] > 0;
 
   // ---- Accuracy (last 30 days) ---------------------------------------------
   const acc = (k: Audit["kind"]) => {
@@ -243,6 +266,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const pickPctAcc = pickAcc.n ? (pickAcc.ok / pickAcc.n) * 100 : null;
   const putPctAcc = putAcc.n ? (putAcc.ok / putAcc.n) * 100 : null;
   const fefoPct = fefo ? (fefoN ? (fefoOk / fefoN) * 100 : 100) : null;
+  // FEFO violations per zone (aisle): top 6 + "lainnya", share of all violations.
+  const fefoZoneEntries = Object.entries(fefo?.byZone ?? {}).sort((a, b) => b[1] - a[1]);
+  const fefoZoneTotal = fefoZoneEntries.reduce((s, [, c]) => s + c, 0);
+  const fefoZoneTop = fefoZoneEntries.slice(0, 6);
+  const fefoZoneLainnya = fefoZoneEntries.slice(6).reduce((s, [, c]) => s + c, 0);
+  const fefoZoneRows: [string, number][] = [...fefoZoneTop];
+  if (fefoZoneLainnya > 0) fefoZoneRows.push(["Lainnya", fefoZoneLainnya]);
   const pct = (x: { n: number; ok: number }) => (x.n ? `${Math.round((x.ok / x.n) * 1000) / 10}%` : "–");
   const recentPicks = recentTasks.filter((t) => t.task_type === "PICK");
   const deviated = recentPicks.filter((t) =>
@@ -346,6 +376,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     detail: `Tertua ${fmtDate(oldestStaged)} · ${stagedDays} hari belum masuk rak`,
     count: staged.length, unit: "baris",
   });
+  // shipmentsWaiting keeps the original total; per-state counts drive the stacked bar.
+  const shipmentsWaiting = (shipReadyAudit ?? 0) + (shipMismatch ?? 0) + (shipReadyLoad ?? 0);
   if (shipmentsWaiting) attention.push({
     key: "shipments", label: "Shipment menunggu audit / muat", tone: "wait", icon: Truck, href: "/audit/picking",
     detail: "Setiap baris harus lolos audit sebelum dimuat",
@@ -497,6 +529,62 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </li>
               ))}
             </ul>
+          )}
+          {/* Rincian antrean: per-state shipment, staging aging, dan FEFO per rak. */}
+          {(shipmentsWaiting > 0 || stagedQty > 0 || fefoZoneTotal > 0) && (
+            <div className="border-t border-steel-100 px-4 py-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-steel-500">Rincian antrean</h3>
+              <div className="mt-2 space-y-4">
+                {shipmentsWaiting > 0 && (
+                  <>
+                    <p className="text-xs text-steel-700">Shipment menunggu audit / muat menurut status</p>
+                    <StackedBar
+                      segments={[
+                        { label: "Siap audit", value: shipReadyAudit ?? 0, fill: "#2A6F97" },
+                        { label: "Ada selisih", value: shipMismatch ?? 0, fill: "#C0392B" },
+                        { label: "Siap muat", value: shipReadyLoad ?? 0, fill: "#468FAF" },
+                      ]}
+                      ariaLabel={`Shipment menunggu audit atau muat: ${fmtNum(shipReadyAudit ?? 0)} siap audit, ${fmtNum(shipMismatch ?? 0)} ada selisih, ${fmtNum(shipReadyLoad ?? 0)} siap muat`}
+                    />
+                  </>
+                )}
+                {stagedQty > 0 && (
+                  <>
+                    <p className="text-xs text-steel-700">Umur barang di staging (berdasarkan tanggal diterima)</p>
+                    {stagedAgingKnown ? (
+                      <StackedBar
+                        segments={[
+                          { label: "<1 hari", value: stagedAging["<1"], fill: "#2E7D4F" },
+                          { label: "1-2 hari", value: stagedAging["1-2"], fill: "#D9941A" },
+                          { label: "3+ hari", value: stagedAging["3+"], fill: "#C0392B" },
+                        ]}
+                        ariaLabel={`Barang di staging: ${fmtNum(stagedAging["<1"])} kurang dari 1 hari, ${fmtNum(stagedAging["1-2"])} 1-2 hari, ${fmtNum(stagedAging["3+"])} lebih dari 3 hari`}
+                      />
+                    ) : (
+                      <p className="text-xs text-steel-500">Belum ada data tanggal diterima pada baris staging.</p>
+                    )}
+                  </>
+                )}
+                {fefoZoneTotal > 0 && (
+                  <>
+                    <p className="text-xs text-steel-700">Pelanggaran FEFO menurut rak (aisle)</p>
+                    <div className="space-y-1">
+                      {fefoZoneRows.map(([zone, count]) => (
+                        <div key={zone} className="flex items-center gap-2">
+                          <span className="w-12 text-[11px] text-steel-600">{zone}</span>
+                          <div className="flex-1 h-6 bg-steel-100 rounded overflow-hidden">
+                            <div className="h-full" style={{ width: `${(count / fefoZoneTotal) * 100}%`, background: "#2A6F97" }} />
+                          </div>
+                          <span className="w-16 text-right text-[11px] tabular text-steel-800">
+                            {fmtNum(count)} ({((count / fefoZoneTotal) * 100).toFixed(0)}%)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           )}
           <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
             Panjang batang membandingkan jumlah di dalam panel ini, bukan target. Klik satu baris untuk membuka daftar kerjanya.

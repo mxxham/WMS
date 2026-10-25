@@ -85,7 +85,14 @@ select pg_temp.check('pick_audit_line volume_l = 208 for 550099999',
 -- The view groups by Asia/Jakarta date of movements.created_at.
 -- Verify the view exists, has correct grants, and its math matches
 -- a manual calculation on the movements table for the same day.
--- Use the specific day (2026-10-24) since all test movements land on today.
+-- The fixture's picks land on "the newest picking day", which this file
+-- derives from movements itself (posting stamps created_at = now(); a
+-- hardcoded date would fail whenever the suite runs on a later day).
+
+-- The latest day with posted picks in this scratch database.
+create or replace function pg_temp.vol_day() returns date language sql stable as $$
+  select (max(created_at) at time zone 'Asia/Jakarta')::date from public.movements where type = 'picking'
+$$;
 
 select pg_temp.check('volume_out_daily exists',
   exists (select 1 from information_schema.views where table_name = 'volume_out_daily'));
@@ -107,13 +114,13 @@ create or replace function pg_temp.manual_vol(p_day date) returns table(boxes nu
     and (m.created_at at time zone 'Asia/Jakarta')::date = p_day;
 $$;
 
--- Compare view output with manual calculation for today
-select pg_temp.check('volume_out_daily boxes matches manual calc for 2026-10-24',
-  (select boxes from volume_out_daily where day = '2026-10-24') = (select boxes from pg_temp.manual_vol('2026-10-24')));
-select pg_temp.check('volume_out_daily litres matches manual calc for 2026-10-24',
-  (select litres from volume_out_daily where day = '2026-10-24') = (select litres from pg_temp.manual_vol('2026-10-24')));
-select pg_temp.check('volume_out_daily picks matches manual calc for 2026-10-24',
-  (select picks from volume_out_daily where day = '2026-10-24') = (select picks from pg_temp.manual_vol('2026-10-24')));
+-- Compare view output with manual calculation for the fixture's day
+select pg_temp.check('volume_out_daily boxes matches manual calc',
+  (select boxes from volume_out_daily where day = pg_temp.vol_day()) = (select boxes from pg_temp.manual_vol(pg_temp.vol_day())));
+select pg_temp.check('volume_out_daily litres matches manual calc',
+  (select litres from volume_out_daily where day = pg_temp.vol_day()) = (select litres from pg_temp.manual_vol(pg_temp.vol_day())));
+select pg_temp.check('volume_out_daily picks matches manual calc',
+  (select picks from volume_out_daily where day = pg_temp.vol_day()) = (select picks from pg_temp.manual_vol(pg_temp.vol_day())));
 
 -- Per-line correctness via pick_audit_line: each line's picked_qty × volume_l
 select pg_temp.check('per-line litres: VOL1#1 = 10 × 20 = 200',
