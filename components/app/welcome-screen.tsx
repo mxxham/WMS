@@ -13,9 +13,9 @@ const TEXT = { name: ABOUT.name, welcome: ABOUT.welcome, credit: ABOUT.credit, a
  * focus stays inside while open (only its own button is focused, nothing behind it, so a scanner
  * never types into the page), Esc or Lanjut closes it, and focus returns to where it was.
  *
- * The warehouse is the screen: the same photo as the sign-in page, edge to edge, so the first thing
- * anyone sees is the floor they are about to work on — the forklift and the checker on either side of
- * one glass plate. The plate carries its own navy, so no word ever sits on bare photo.
+ * The warehouse is the screen: the owner's own floor photographed edge to edge — the CA/CB aisles with
+ * the forklift and its operator on the right, so the first thing anyone sees is the racks they are
+ * about to work against. The plate carries its own navy, so no word ever sits on bare photo.
  */
 export function WelcomeScreen() {
   const { open, close, restoreFocus } = useWelcomeOnce();
@@ -26,9 +26,11 @@ export function WelcomeScreen() {
         <D.Content aria-modal="true" onCloseAutoFocus={(e) => { e.preventDefault(); restoreFocus(); }}
           className="welcome-fade fixed inset-0 z-[60] overflow-y-auto overscroll-contain bg-jeir-navy text-white focus:outline-none">
 
-          {/* The floor, edge to edge. On a phone the crop narrows to the forklift crew instead of the
-              empty mast in the middle of the frame. Fixed, so a short screen scrolls the plate, not the photo. */}
-          <div aria-hidden="true" className="login-photo pointer-events-none fixed inset-0 bg-[url('/ckb-warehouse.webp')] bg-cover bg-[position:20%_44%] sm:bg-center" />
+          {/* The floor, edge to edge. On a phone the crop zooms and anchors bottom-right so the forklift
+              and its operator show in the band above the plate (plain cover leaves that band all
+              ceiling); from sm up the whole aisle line shows behind the centred plate. Fixed, so a
+              short screen scrolls the plate, not the photo. */}
+          <div aria-hidden="true" className="login-photo pointer-events-none fixed inset-0 bg-[url('/welcome.jpg')] bg-[length:auto_150%] bg-[position:100%_100%] sm:bg-cover sm:bg-center" />
           {/* One light sweep across it as the screen arrives (off with reduced motion). */}
           <div aria-hidden="true" className="home-shine pointer-events-none fixed inset-0 overflow-hidden" />
 
