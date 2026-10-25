@@ -14,11 +14,10 @@ import { Sparkline } from "@/components/dashboard/Sparkline";
 import { StackedBar } from "@/components/dashboard/StackedBar";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Table, Td, Th } from "@/components/ui/table";
-import { NEAR_EXPIRY_DAYS, OCCUPANCY_EXCLUDED_ZONES, expiryStatus } from "@/config/warehouse";
-import type { BinSummary } from "@/lib/warehouse-types";
+import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
-import { SHELF_BUCKETS, jakartaDate, locType, shelfBucket } from "@/lib/inventory-view";
+import { SHELF_BUCKETS, jakartaDate } from "@/lib/inventory-view";
 
 // fefo_exceptions timed out (over 8 s) before 0070 made it ~0.1 s; the counts
 // are still cached for 15 min so dashboard loads don't wait on it. A cached function may not read cookies
@@ -45,7 +44,30 @@ const getFefoCompliance = unstable_cache(async () => {
 
 export const dynamic = "force-dynamic";
 
-type Inv = { bin_code: string; zone: string; rack: string | null; sku: string; description: string; uom: string | null; upp: number | null; item_abc: string | null; batch_lot: string; quantity: number; expiry_date: string | null; received_date: string | null; days_remaining: number | null };
+/**
+ * Shape of `dashboard_summary()` (supabase/migrations/0098), which counts the bins and
+ * stock rows the page used to fetch in full: occupancy per aisle/level, ABC, shelf life,
+ * the expiry calendar, staging aging, top SKUs and the near-expiry table. Only what the
+ * page renders is returned.
+ */
+type Occ = { total: number; occ: number };
+type Summary = {
+  bins: { total: number; occupied: number; blocked: number; rack_total: number; rack_occupied: number };
+  levels: Array<Occ & { level: string }>;
+  zones: Array<Occ & { zone: string; cells: Array<Occ & { level: string }> }>;
+  abc: Array<{ k: string; qty: number; skus: number }>;
+  stock: { no_date_rows: number; no_date_qty: number };
+  risky: {
+    count: number; qty: number; expired_count: number; expired_qty: number;
+    near_count: number; near_qty: number; near_skus: number; near_min_days: number | null;
+    rows: Array<{ bin_code: string; sku: string; description: string; uom: string | null;
+                 batch_lot: string; quantity: number; expiry_date: string | null; days_remaining: number }>;
+  };
+  staging: { rows: number; qty: number; oldest_received_date: string | null; aging: { lt1: number; d1_2: number; d3p: number } };
+  shelf: Array<{ key: string; qty: number; rows: number; skus: number }>;
+  expiry: { expired_qty: number; later_qty: number; buckets: Array<{ ym: string; qty: number; skus: number }> };
+  top_skus: Array<{ sku: string; description: string; uom: string | null; qty: number; pallets: number; bins: number }>;
+};
 type Task = { status: string; task_type: string; quantity: number; actual_quantity: number | null; actual_from_bin: string | null; from_bin: string; actual_batch_lot: string | null; batch_lot: string; completed_at: string | null; planned_date: string };
 type Mv = { type: string; quantity: number; from_bin_id: string | null };
 type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH"; audited_at: string | null };
@@ -130,6 +152,14 @@ const TONE_RANK: Record<Tone, number> = { bad: 0, warn: 1, wait: 2, ok: 3 };
 
 type AttentionItem = { key: string; label: string; detail: string; count: number; unit: string; tone: Tone; href: string; icon: TablerIcon };
 const RISKY_ROWS = 25;
+/**
+ * Shelf-life bucket edges, read out of SHELF_BUCKETS rather than repeated:
+ * dashboard_summary() (0098) is handed the same finite maxima and keys, so the
+ * dashboard bar and the Inventory page buckets cannot drift apart. The last two
+ * keys are the catch-alls — "> 3 tahun" (more) and "tanpa tanggal" (none).
+ */
+const SHELF_MAX = SHELF_BUCKETS.filter((b) => Number.isFinite(b.max)).map((b) => b.max as number);
+const SHELF_KEYS = SHELF_BUCKETS.map((b) => b.key as string);
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ kalender?: string }> }) {
   await requireRole(["supervisor", "admin"]);
@@ -140,10 +170,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // Outbound-volume window: the last VOL_DAYS Jakarta calendar days (today included).
   const volSince = new Date(todayStart.getTime() - (VOL_DAYS - 1) * 86_400_000)
     .toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-  const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
+  // Expiry-calendar range: read before the fetches because the SQL counts the same buckets.
+  const calRaw = Number((await searchParams).kalender);
+  const calYears: CalRange = (CAL_RANGES as readonly number[]).includes(calRaw) ? (calRaw as CalRange) : 2;
+  const [summaryResult, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
     { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { data: auditCounts }, { data: policyRaw }, fefo, volRows, volInRows] = await Promise.all([
-    fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
-    fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
+    // One RPC instead of two full-table fetches (bin_summary ~2,970 rows, inventory_detail
+    // one row per stock identity) plus the in-JS aggregates: the same numbers, counted in SQL.
+    supabase.rpc("dashboard_summary", {
+      p_today: today,
+      p_near_expiry_days: NEAR_EXPIRY_DAYS,
+      p_cal_years: calYears,
+      p_risky_limit: RISKY_ROWS,
+      p_shelf_keys: SHELF_KEYS,
+      p_shelf_max: SHELF_MAX,
+    }),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("status", "COMPLETED").gte("completed_at", accSince).order("id").range(a, b)),
     fetchAll<Mv>((a, b) => supabase.from("movements").select("type, quantity, from_bin_id").in("type", ["inbound", "putaway", "picking"]).gte("created_at", todayStart.toISOString()).order("id").range(a, b)),
@@ -169,33 +210,40 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const cycleOk = cycleApplied.filter((c) => Number(c.variance_qty ?? 0) <= Number(c.tolerance)).length;
   const qtyIra = quantityAccuracy(cycleApplied);
 
-  const occupied = bins.filter((b) => Number(b.total_qty) > 0).length;
-  const blocked = bins.filter((b) => b.status === "blocked").length;
-  // CKB 3PL aisles (CG/CH) are not ours to fill — they stay out of occupancy.
-  const rackBins = bins.filter((b) => b.rack && !OCCUPANCY_EXCLUDED_ZONES.includes(b.zone));
+  if (summaryResult.error || !summaryResult.data) {
+    throw new Error(summaryResult.error?.message ?? "dashboard_summary mengembalikan kosong");
+  }
+  const summary = summaryResult.data as Summary;
+  const binTotal = Number(summary.bins.total);
+  const occupied = Number(summary.bins.occupied);
+  const blocked = Number(summary.bins.blocked);
+  const rackTotal = Number(summary.bins.rack_total);
+  const rackOccupied = Number(summary.bins.rack_occupied);
 
-  // Per-aisle occupancy: occupied positions / total positions (rack bins only).
-  const zones = [...new Set(rackBins.map((b) => b.zone))].sort().map((z) => {
-    const zb = rackBins.filter((b) => b.zone === z);
-    const occ = zb.filter((b) => Number(b.total_qty) > 0).length;
-    return { zone: z, total: zb.length, occ, pct: zb.length ? occ / zb.length : 0 };
-  });
+  /** Two counts from SQL → the occupancy cell the heat grid draws (probability, 0 when empty). */
+  const occCell = (occ: number, total: number) => ({ occ, total, pct: total ? occ / total : 0 });
 
-  // Stock by ABC class (quantity and number of SKUs).
-  const abc = ["A", "B", "C", "–"].map((k) => {
-    const rows = inv.filter((r) => (r.item_abc ?? "–") === k);
-    return { k, qty: rows.reduce((s, r) => s + Number(r.quantity), 0), skus: new Set(rows.map((r) => r.sku)).size };
-  });
+  // Per-aisle occupancy: occupied positions / total positions (rack bins only, CKB 3PL out).
+  const zones = summary.zones.map((z) => ({ zone: z.zone, cells: z.cells, ...occCell(Number(z.occ), Number(z.total)) }));
+
+  // Stock by ABC class (quantity and number of SKUs) — always A, B, C, tanpa kelas.
+  const abc = summary.abc.map((a) => ({ k: a.k, qty: Number(a.qty), skus: Number(a.skus) }));
   const totalQty = abc.reduce((s, a) => s + a.qty, 0);
 
-  const risky = inv
-    .filter((r) => r.days_remaining !== null && r.days_remaining <= NEAR_EXPIRY_DAYS)
-    .sort((a, b) => (a.days_remaining ?? 0) - (b.days_remaining ?? 0));
-  const expiredRows = risky.filter((r) => (r.days_remaining ?? 0) < 0);
-  const nearRows = risky.filter((r) => (r.days_remaining ?? 0) >= 0);
-  const noDate = inv.filter((r) => r.expiry_date === null).length;
-  const noDateQty = inv.filter((r) => r.expiry_date === null).reduce((s, r) => s + Number(r.quantity), 0);
-  const sumQty = (rows: Inv[]) => rows.reduce((s, r) => s + Number(r.quantity), 0);
+  // Near expiry: the counts the tiles use, plus the rows the table prints (already capped at
+  // RISKY_ROWS by the RPC, nearest first).
+  const riskyStats = summary.risky;
+  const riskyCount = Number(riskyStats.count);
+  const riskyQty = Number(riskyStats.qty);
+  const expiredRowsCount = Number(riskyStats.expired_count);
+  const expiredRowsQty = Number(riskyStats.expired_qty);
+  const nearRowsCount = Number(riskyStats.near_count);
+  const nearRowsQty = Number(riskyStats.near_qty);
+  const nearRowsSkus = Number(riskyStats.near_skus);
+  const nearRowsMinDays = Number(riskyStats.near_min_days ?? 0);
+  const riskyShown = riskyStats.rows;
+  const noDate = Number(summary.stock.no_date_rows);
+  const noDateQty = Number(summary.stock.no_date_qty);
 
   // ---- Today ---------------------------------------------------------------
   const picks = todayTasks.filter((t) => t.task_type === "PICK" && t.status !== "CANCELLED");
@@ -220,35 +268,29 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   }
 
   // ---- Occupancy: rack positions holding stock, per aisle x level ------------
-  const occCell = (zb: BinSummary[]) => {
-    const occ = zb.filter((b) => Number(b.total_qty) > 0).length;
-    return { occ, total: zb.length, pct: zb.length ? occ / zb.length : 0 };
-  };
-  const grid = zones.map((z) => ({
-    zone: z.zone,
-    cells: LEVELS.map((lv) => ({ level: lv, ...occCell(rackBins.filter((b) => b.zone === z.zone && b.level === lv)) })),
-    all: occCell(rackBins.filter((b) => b.zone === z.zone)),
-  }));
-  const levelTotals = LEVELS.map((lv) => occCell(rackBins.filter((b) => b.level === lv)));
-  const rackOcc = occCell(rackBins);
+  // occCell turns the two counts SQL already tallied into the cell the heat grid draws.
+  const grid = zones.map((z) => {
+    const byLevel = new Map(z.cells.map((c) => [c.level, c]));
+    return {
+      zone: z.zone,
+      cells: LEVELS.map((lv) => ({ level: lv, ...occCell(Number(byLevel.get(lv)?.occ ?? 0), Number(byLevel.get(lv)?.total ?? 0)) })),
+      all: occCell(z.occ, z.total),
+    };
+  });
+  const levelTotals = LEVELS.map((lv) => {
+    const c = summary.levels.find((x) => x.level === lv);
+    return occCell(Number(c?.occ ?? 0), Number(c?.total ?? 0));
+  });
+  const rackOcc = occCell(rackOccupied, rackTotal);
   const rackState = rackOcc.pct > 0.85 ? "sesak" : rackOcc.pct >= 0.8 ? "sehat" : "longgar";
 
   // ---- Staging (dock-to-stock stand-in) ------------------------------------
-  const staged = inv.filter((r) => locType(r) === "staging");
-  const stagedQty = staged.reduce((s, r) => s + Number(r.quantity), 0);
-  const oldestStaged = staged.map((r) => r.received_date).filter(Boolean).sort()[0] ?? null;
+  const stagedRows = Number(summary.staging.rows);
+  const stagedQty = Number(summary.staging.qty);
+  const oldestStaged = summary.staging.oldest_received_date;
   const stagedDays = oldestStaged ? Math.floor((todayStart.getTime() - new Date(`${oldestStaged}T00:00:00+07:00`).getTime()) / 86_400_000) : null;
   // Staging aging, weighted by quantity: <1 hari / 1-2 hari / 3+ hari from received_date.
-  const stagedAging = { "<1": 0, "1-2": 0, "3+": 0 };
-  for (const r of staged) {
-    const rd = r.received_date;
-    if (!rd) continue;
-    const days = Math.floor((todayStart.getTime() - new Date(`${rd}T00:00:00+07:00`).getTime()) / 86_400_000);
-    const q = Number(r.quantity);
-    if (days <= 0) stagedAging["<1"] += q;
-    else if (days <= 2) stagedAging["1-2"] += q;
-    else stagedAging["3+"] += q;
-  }
+  const stagedAging = { "<1": Number(summary.staging.aging.lt1), "1-2": Number(summary.staging.aging.d1_2), "3+": Number(summary.staging.aging.d3p) };
   // True only when at least one staged row carries a received date: with no dates
   // the bucket break-down would be an empty bar, so the UI gets a quiet note instead.
   const stagedAgingKnown = stagedAging["<1"] + stagedAging["1-2"] + stagedAging["3+"] > 0;
@@ -297,8 +339,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       || (t.actual_batch_lot !== null && t.actual_batch_lot !== t.batch_lot);
   }
 
-  const calRaw = Number((await searchParams).kalender);
-  const calYears: CalRange = (CAL_RANGES as readonly number[]).includes(calRaw) ? (calRaw as CalRange) : 2;
   const byQuarter = calYears > 2;
   const y0 = Number(today.slice(0, 4)), m0 = Number(today.slice(5, 7)) - 1;
   const bucketKey = (iso: string) => {
@@ -315,57 +355,53 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       label: byQuarter ? `Q${q}` : d.toLocaleDateString("id-ID", { month: "short", timeZone: "UTC" }),
       full: byQuarter ? `Q${q} ${d.getUTCFullYear()}` : d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "UTC" }),
       yearStart: byQuarter ? q === 1 : d.getUTCMonth() === 0,
-      year: d.getUTCFullYear(), qty: 0, skus: new Set<string>(),
+      year: d.getUTCFullYear(), qty: 0, skus: 0,
     };
   });
-  const monthIdx = new Map(months.map((m, i) => [m.ym, i]));
-  let expiredQty = 0, laterQty = 0;
-  for (const r of inv) {
-    const q = Number(r.quantity);
-    if (!r.expiry_date) continue;
-    if (r.expiry_date < today) { expiredQty += q; continue; }
-    const i = monthIdx.get(bucketKey(r.expiry_date));
-    if (i === undefined) laterQty += q;
-    else { months[i].qty += q; months[i].skus.add(r.sku); }
+  // The buckets are counted in SQL (same window, same keys); the labels stay here.
+  const calBuckets = new Map(summary.expiry.buckets.map((b) => [b.ym, b]));
+  for (const m of months) {
+    const b = calBuckets.get(m.ym);
+    m.qty = Number(b?.qty ?? 0);
+    m.skus = Number(b?.skus ?? 0);
   }
+  const expiredQty = Number(summary.expiry.expired_qty);
+  const laterQty = Number(summary.expiry.later_qty);
   const monthMax = Math.max(1, ...months.map((m) => m.qty));
   const nextCal = months.reduce((s, m) => s + m.qty, 0);
   const calPeak = months.reduce((best, m) => (m.qty > best.qty ? m : best), months[0]);
 
   // ---- Shelf life: every stock row in its horizon bucket ---------------------
-  const shelf = SHELF_BUCKETS.map((b) => ({ key: b.key as string, label: b.label as string, qty: 0, rows: 0, skus: new Set<string>() }));
-  const shelfIdx = new Map(SHELF_BUCKETS.map((b, i) => [b.key as string, i]));
-  for (const r of inv) {
-    const bucket = shelf[shelfIdx.get(shelfBucket(r.days_remaining))!]!;
-    bucket.qty += Number(r.quantity); bucket.rows++; bucket.skus.add(r.sku);
-  }
+  // SQL counts each SHELF_BUCKETS bucket (it was handed the same edges); labels and colours stay here.
+  const shelfByKey = new Map(summary.shelf.map((b) => [b.key, b]));
+  const shelf = SHELF_BUCKETS.map((b) => {
+    const s = shelfByKey.get(b.key);
+    return { key: b.key as string, label: b.label as string, qty: Number(s?.qty ?? 0), rows: Number(s?.rows ?? 0), skus: Number(s?.skus ?? 0) };
+  });
   const shelfTotal = Math.max(1, shelf.reduce((s, b) => s + b.qty, 0));
 
   // ---- Top SKUs by stock ------------------------------------------------------
-  const bySku = new Map<string, { sku: string; description: string; uom: string | null; qty: number; pallets: number; bins: Set<string> }>();
-  for (const r of inv) {
-    const e = bySku.get(r.sku) ?? { sku: r.sku, description: r.description, uom: r.uom, qty: 0, pallets: 0, bins: new Set<string>() };
-    e.qty += Number(r.quantity); e.pallets += r.upp ? Number(r.quantity) / Number(r.upp) : 0; e.bins.add(r.bin_code);
-    bySku.set(r.sku, e);
-  }
-  const topSkus = [...bySku.values()].sort((a, b) => b.qty - a.qty).slice(0, 10);
+  const topSkus = summary.top_skus.map((t) => ({
+    sku: t.sku, description: t.description, uom: t.uom,
+    qty: Number(t.qty), pallets: Number(t.pallets), bins: Number(t.bins),
+  }));
 
   // ---- What needs a hand right now -------------------------------------------
   const attention: AttentionItem[] = [];
-  if (expiredRows.length) attention.push({
+  if (expiredRowsCount) attention.push({
     key: "expired", label: "Stok sudah expired", tone: "bad", icon: IconCalendarX, href: "#risiko",
-    detail: `${fmtNum(sumQty(expiredRows))} karton · ${expiredRows.length} posisi · pisahkan sebelum picking`,
-    count: expiredRows.length, unit: "posisi",
+    detail: `${fmtNum(expiredRowsQty)} karton · ${expiredRowsCount} posisi · pisahkan sebelum picking`,
+    count: expiredRowsCount, unit: "posisi",
   });
   if (fefoBad) attention.push({
     key: "fefo", label: "Pick tidak mengikuti FEFO", tone: "bad", icon: IconRoute, href: "/inventory?tab=fefo",
     detail: `${fmtNum(fefoBad)} dari ${fmtNum(fefoN)} pick rak · ${fmtNum(dec1(fefoN ? (fefoBad / fefoN) * 100 : 0), 1)}% tidak FEFO`,
     count: fefoBad, unit: "pick",
   });
-  if (nearRows.length) attention.push({
+  if (nearRowsCount) attention.push({
     key: "near", label: `Expired dalam ${NEAR_EXPIRY_DAYS} hari`, tone: "warn", icon: IconCalendarTime, href: "#risiko",
-    detail: `${fmtNum(sumQty(nearRows))} karton · ${new Set(nearRows.map((r) => r.sku)).size} SKU · sisa umur terpendek ${fmtNum(Math.min(...nearRows.map((r) => r.days_remaining ?? 0)))} hari`,
-    count: nearRows.length, unit: "posisi",
+    detail: `${fmtNum(nearRowsQty)} karton · ${nearRowsSkus} SKU · sisa umur terpendek ${fmtNum(nearRowsMinDays)} hari`,
+    count: nearRowsCount, unit: "posisi",
   });
   if (activeHolds) attention.push({
     key: "hold", label: "Stok ditahan", tone: "warn", icon: IconLock, href: "/inventory?tab=hold",
@@ -375,7 +411,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   if (stagedDays !== null && stagedDays > 0) attention.push({
     key: "staging", label: "Barang mengendap di staging", tone: "warn", icon: IconBox, href: "/inventory?tab=inap",
     detail: `Tertua ${fmtDate(oldestStaged)} · ${stagedDays} hari belum masuk rak`,
-    count: staged.length, unit: "baris",
+    count: stagedRows, unit: "baris",
   });
   // shipmentsWaiting keeps the original total; per-state counts drive the stacked bar.
   const shipReadyAudit = auditCounts?.ready_audit ?? 0;
@@ -449,7 +485,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const netLitres = in14.l - out14.l;
   const avgOut = out14.l / VOL_DAYS;
   const avgOutOffset = Math.round(Math.sqrt(Math.max(0, avgOut) / flowMax) * 150);
-  const riskyShown = risky.slice(0, RISKY_ROWS);
 
   return (
     <main>
@@ -499,7 +534,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <div className="relative mt-4 grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
             <BandStat label="Karton masuk" value={fmtNum(todayFlow.masuk)} sub="terima + putaway" href={`/audit/putaway?date=${today}`} icon={IconArrowDownRight} />
             <BandStat label="Karton keluar" value={fmtNum(todayFlow.keluar)} sub="picking hari ini" href={`/waves?date=${today}`} icon={IconArrowUpRight} />
-            <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={staged.length ? `${fmtNum(staged.length)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={IconBox} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
+            <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={stagedRows ? `${fmtNum(stagedRows)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={IconBox} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
             <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState} · di luar CKB 3PL`} href="#okupansi" icon={IconBuildingWarehouse} tone={rackState === "sesak" ? "warn" : undefined} />
           </div>
         </section>
@@ -761,9 +796,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </div>
               <dl className="grid grid-cols-4 gap-px overflow-hidden rounded-lg bg-steel-100 text-center">
                 {[
-                  { k: "Bin", v: fmtNum(bins.length) },
+                  { k: "Bin", v: fmtNum(binTotal) },
                   { k: "Terisi", v: fmtNum(occupied) },
-                  { k: "Kosong", v: fmtNum(bins.length - occupied) },
+                  { k: "Kosong", v: fmtNum(binTotal - occupied) },
                   { k: "Diblokir", v: fmtNum(blocked) },
                 ].map((s) => (
                   <div key={s.k} className="bg-white px-1 py-2">
@@ -773,7 +808,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 ))}
               </dl>
               <p className="text-[11px] text-steel-500">
-                {fmtNum(rackBins.length)} posisi rak di grid; {fmtNum(bins.length - rackBins.length)} bin lantai/staging tidak dihitung.
+                {fmtNum(rackTotal)} posisi rak di grid; {fmtNum(binTotal - rackTotal)} bin lantai/staging tidak dihitung.
                 Sehat 80–85% terisi — di atas 85% gudang sesak, putaway dan picking melambat.
               </p>
             </div>
@@ -803,7 +838,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="flex h-3 overflow-hidden rounded-full ring-1 ring-inset ring-steel/10" role="img"
                   aria-label={`Sebaran umur simpan: ${shelf.map((b) => `${b.label} ${fmtNum(b.qty)} karton`).join(", ")}`}>
                   {shelf.map((b) => b.qty > 0 ? (
-                    <span key={b.key} title={`${b.label}: ${fmtNum(b.qty)} karton · ${fmtNum(b.rows)} baris · ${fmtNum(b.skus.size)} SKU`}
+                    <span key={b.key} title={`${b.label}: ${fmtNum(b.qty)} karton · ${fmtNum(b.rows)} baris · ${fmtNum(b.skus)} SKU`}
                       style={{ width: `${(b.qty / shelfTotal) * 100}%`, background: SHELF_FILL[b.key] }} />
                   ) : null)}
                 </div>
@@ -827,7 +862,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   aria-label={`Karton yang kedaluwarsa per ${byQuarter ? "kuartal" : "bulan"} dalam ${calYears} tahun ke depan`}>
                   {months.map((m) => (
                     <div key={m.ym} className="relative flex h-full flex-1 flex-col items-center justify-end"
-                      title={`${m.full}: ${fmtNum(m.qty)} karton, ${m.skus.size} SKU`}>
+                      title={`${m.full}: ${fmtNum(m.qty)} karton, ${m.skus} SKU`}>
                       {m.qty > 0
                         ? <span className={cn("mb-0.5 text-[9px] font-semibold tabular", m.ym === thisMonth ? "text-warn" : "text-steel-700")}>{fmtNum(m.qty)}</span>
                         : <span aria-hidden className="mb-0.5 h-0.5 w-2.5 rounded-full bg-steel-300" />}
@@ -974,7 +1009,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <tr key={t.sku} className="hover:bg-paper">
                   <Td><Link className="font-cond font-semibold text-ckb-dark underline decoration-steel-300 underline-offset-2 hover:decoration-ckb" href={`/inventory?q=${t.sku}`}>{t.sku}</Link></Td>
                   <Td className="text-steel-700">{t.description}</Td>
-                  <Td className="text-right font-semibold tabular">{fmtNum(t.qty)} {t.uom}</Td><Td className="text-right tabular">{fmtNum(t.pallets, 1)}</Td><Td className="text-right tabular">{t.bins.size}</Td>
+                  <Td className="text-right font-semibold tabular">{fmtNum(t.qty)} {t.uom}</Td><Td className="text-right tabular">{fmtNum(t.pallets, 1)}</Td><Td className="text-right tabular">{t.bins}</Td>
                 </tr>
               ))}</tbody>
             </Table>
@@ -988,7 +1023,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </span>
                 <span className="shrink-0 text-right">
                   <span className="block text-sm font-semibold tabular">{fmtNum(t.qty)} {t.uom}</span>
-                  <span className="block text-[11px] text-steel-500">{fmtNum(t.pallets, 1)} palet · {t.bins.size} bin</span>
+                  <span className="block text-[11px] text-steel-500">{fmtNum(t.pallets, 1)} palet · {t.bins} bin</span>
                 </span>
               </li>
             ))}
@@ -1005,11 +1040,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </div>
             </div>
             <span className="inline-flex items-center gap-2 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-steel-700 ring-1 ring-inset ring-steel-100">
-              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[risky.length ? (expiredRows.length ? "bad" : "warn") : "ok"])} />
-              {risky.length ? `${fmtNum(risky.length)} posisi · ${fmtNum(sumQty(risky))} karton` : "Tidak ada"}
+              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[riskyCount ? (expiredRowsCount ? "bad" : "warn") : "ok"])} />
+              {riskyCount ? `${fmtNum(riskyCount)} posisi · ${fmtNum(riskyQty)} karton` : "Tidak ada"}
             </span>
           </div>
-          {risky.length === 0 ? (
+          {riskyCount === 0 ? (
             <p className="flex items-center gap-2 border-t border-steel-100 px-4 py-4 text-sm text-steel-500">
               <IconCircleCheck aria-hidden className="h-4 w-4 text-ok" />Tidak ada stok yang expired atau expired dalam {NEAR_EXPIRY_DAYS} hari.
             </p>
@@ -1044,9 +1079,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   ))}</tbody>
                 </Table>
               </div>
-              {risky.length > RISKY_ROWS && (
+              {riskyCount > RISKY_ROWS && (
                 <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
-                  Menampilkan {RISKY_ROWS} dari {fmtNum(risky.length)} posisi.{" "}
+                  Menampilkan {RISKY_ROWS} dari {fmtNum(riskyCount)} posisi.{" "}
                   <Link className="underline" href="/inventory?tab=fefo">Buka daftar lengkap di Inventory</Link>.
                 </p>
               )}
