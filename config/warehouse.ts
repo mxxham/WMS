@@ -12,6 +12,13 @@ export const NEAR_EXPIRY_DAYS = 90;
 /** Bin code format found in the WMS sheet: Aisle(2) Rack(2) Level(1) Position(2), e.g. CA01C01. */
 export const RACK_BIN_REGEX = /^(C[A-Z])(\d{2})([A-E])(\d{2})$/;
 
+/**
+ * Aisles kept out of our rack-occupancy metric: the CKB 3PL area (physically
+ * confirmed 21 Oct 2026, reopened by 0086). Those bins are booked to the
+ * consignee, so filling them is not our warehouse filling up.
+ */
+export const OCCUPANCY_EXCLUDED_ZONES = ["CG", "CH"];
+
 /** Non-rack locations present in the sheet. They are imported as floor bins. */
 export const FLOOR_LOCATIONS: Record<string, { zone: string; status: "active" | "blocked" }> = {
   STAGING: { zone: "STAGING", status: "active" },
@@ -20,8 +27,9 @@ export const FLOOR_LOCATIONS: Record<string, { zone: string; status: "active" | 
 export const STAGING_LANE_REGEX = /^STG_(\d{2})$/;
 
 /**
- * Level colours for the rack-upright label, following the reference photo
- * (first cell = red ... last cell = blue). One cell per level.
+ * Level colours for the rack-upright label, following the reference photo of
+ * the physical rack signs (first cell = red ... last cell = blue). One cell
+ * per level. This is ALSO what the printed strips and their preview show.
  */
 export const LEVEL_COLORS: Record<string, { hex: string; name: string }> = {
   A: { hex: "#D7263D", name: "Merah" },
@@ -29,6 +37,19 @@ export const LEVEL_COLORS: Record<string, { hex: string; name: string }> = {
   C: { hex: "#F6E21B", name: "Kuning" },
   D: { hex: "#3FA34D", name: "Hijau" },
   E: { hex: "#3C8DDE", name: "Biru" },
+};
+
+/**
+ * Screen-only accent per level: the web look, spread over the Coastal Blues
+ * ramp (deep navy → pale aqua). Printed strips do NOT use this — they keep
+ * LEVEL_COLORS above so the paper matches what is already nailed to the racks.
+ */
+export const LEVEL_COLORS_WEB: Record<string, string> = {
+  A: "#012A4A",
+  B: "#01497C",
+  C: "#2C7DA0",
+  D: "#61A5C2",
+  E: "#A9D6E5",
 };
 
 /** Order of cells on an upright strip, top to bottom (as requested: A first, E last). */

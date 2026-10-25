@@ -14,7 +14,7 @@ import { Sparkline } from "@/components/dashboard/Sparkline";
 import { StackedBar } from "@/components/dashboard/StackedBar";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Table, Td, Th } from "@/components/ui/table";
-import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
+import { NEAR_EXPIRY_DAYS, OCCUPANCY_EXCLUDED_ZONES, expiryStatus } from "@/config/warehouse";
 import type { BinSummary } from "@/lib/warehouse-types";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
@@ -141,7 +141,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const volSince = new Date(todayStart.getTime() - (VOL_DAYS - 1) * 86_400_000)
     .toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const [bins, inv, todayTasks, recentTasks, moves, audits, { count: openCounts }, { data: todayWaves }, cycleApplied,
-    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { count: shipReadyAudit }, { count: shipMismatch }, { count: shipReadyLoad }, { data: policyRaw }, fefo, volRows, volInRows] = await Promise.all([
+    { count: pendingApprovals }, { count: activeHolds }, { count: openReceipts }, { data: lastRecon }, pickFirsts, { data: auditCounts }, { data: policyRaw }, fefo, volRows, volInRows] = await Promise.all([
     fetchAll<BinSummary>((a, b) => supabase.from("bin_summary").select("id, bin_code, zone, rack, level, total_qty, fill_ratio, status").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => supabase.from("inventory_detail").select("bin_code, zone, rack, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining").order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
@@ -157,9 +157,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     supabase.from("receipts").select("id", { count: "exact", head: true }).in("status", ["OPEN", "CHECKED"]),
     supabase.from("stock_recon_summary").select("as_of, accuracy_pct, open_diffs").order("as_of", { ascending: false }).limit(1).maybeSingle(),
     fetchAll<{ result: string; audited_at: string | null }>((a, b) => supabase.from("pick_audit_first").select("result, audited_at").gte("audited_at", accSince).order("task_id").range(a, b)),
-    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "READY_AUDIT"),
-    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "HAS_MISMATCH"),
-    supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).eq("state", "READY_LOAD"),
+    supabase.rpc("pick_audit_counts"),
     supabase.rpc("inventory_policy"),
     // A slow or failing count must never take the dashboard down: the tile shows "–" instead.
     getFefoCompliance().catch(() => null),
@@ -173,8 +171,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   const occupied = bins.filter((b) => Number(b.total_qty) > 0).length;
   const blocked = bins.filter((b) => b.status === "blocked").length;
-  // CG is not in the warehouse mapping table — exclude it from occupancy.
-  const rackBins = bins.filter((b) => b.rack && b.zone !== "CG");
+  // CKB 3PL aisles (CG/CH) are not ours to fill — they stay out of occupancy.
+  const rackBins = bins.filter((b) => b.rack && !OCCUPANCY_EXCLUDED_ZONES.includes(b.zone));
 
   // Per-aisle occupancy: occupied positions / total positions (rack bins only).
   const zones = [...new Set(rackBins.map((b) => b.zone))].sort().map((z) => {
@@ -380,7 +378,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     count: staged.length, unit: "baris",
   });
   // shipmentsWaiting keeps the original total; per-state counts drive the stacked bar.
-  const shipmentsWaiting = (shipReadyAudit ?? 0) + (shipMismatch ?? 0) + (shipReadyLoad ?? 0);
+  const shipReadyAudit = auditCounts?.ready_audit ?? 0;
+  const shipMismatch = auditCounts?.has_mismatch ?? 0;
+  const shipReadyLoad = auditCounts?.ready_load ?? 0;
+  const shipmentsWaiting = shipReadyAudit + shipMismatch + shipReadyLoad;
   if (shipmentsWaiting) attention.push({
     key: "shipments", label: "Shipment menunggu audit / muat", tone: "wait", icon: IconTruck, href: "/audit/picking",
     detail: "Setiap baris harus lolos audit sebelum dimuat",
@@ -452,7 +453,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <main>
-      <PageHeader title="Dashboard gudang" live={["pick_tasks", "movements", "audits", "count_tasks", "stock_holds", "adjustment_requests", "receipts", "pick_audits", "shipment_loads"]} liveDebounceMs={5000} />
+      <PageHeader title="Dashboard gudang" live={["audits", "count_tasks", "stock_holds", "adjustment_requests", "receipts", "pick_audits", "shipment_loads"]} liveDebounceMs={5000} />
       <div className="space-y-5 p-4 lg:p-8">
 
         {/* ---- Today: the plan, the flow, what is waiting on the dock ------------- */}
@@ -499,7 +500,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <BandStat label="Karton masuk" value={fmtNum(todayFlow.masuk)} sub="terima + putaway" href={`/audit/putaway?date=${today}`} icon={IconArrowDownRight} />
             <BandStat label="Karton keluar" value={fmtNum(todayFlow.keluar)} sub="picking hari ini" href={`/waves?date=${today}`} icon={IconArrowUpRight} />
             <BandStat label="Di staging" value={fmtNum(stagedQty)} sub={staged.length ? `${fmtNum(staged.length)} baris${stagedDays !== null ? ` · ${stagedDays} hari` : ""}` : "kosong"} href="/inventory?tab=inap" icon={IconBox} tone={stagedDays !== null && stagedDays > 0 ? "warn" : undefined} />
-            <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState}`} href="#okupansi" icon={IconBuildingWarehouse} tone={rackState === "sesak" ? "warn" : undefined} />
+            <BandStat label="Rak terisi" value={`${Math.round(rackOcc.pct * 100)}%`} sub={`${fmtNum(rackOcc.occ)}/${fmtNum(rackOcc.total)} posisi · ${rackState} · di luar CKB 3PL`} href="#okupansi" icon={IconBuildingWarehouse} tone={rackState === "sesak" ? "warn" : undefined} />
           </div>
         </section>
 
