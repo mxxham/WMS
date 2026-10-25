@@ -445,7 +445,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const flowBarH = (litres: number) => (litres > 0 ? Math.max(8, Math.round(Math.sqrt(litres / flowMax) * 150)) : 0);
   const in14 = flowSeries.reduce((s, v) => ({ l: s.l + v.inL, b: s.b + v.inB }), { l: 0, b: 0 });
   const out14 = flowSeries.reduce((s, v) => ({ l: s.l + v.outL, b: s.b + v.outB }), { l: 0, b: 0 });
-  const net14 = in14.b - out14.b;
+  const netLitres = in14.l - out14.l;
   const avgOut = out14.l / VOL_DAYS;
   const avgOutOffset = Math.round(Math.sqrt(Math.max(0, avgOut) / flowMax) * 150);
   const riskyShown = risky.slice(0, RISKY_ROWS);
@@ -526,8 +526,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 {fmtNum(flowToday.outB)} karton keluar · masuk {fmtNum(flowToday.inL, 1)} liter ({fmtNum(flowToday.inB)} karton)
               </p>
               <p className="mt-1 text-xs text-steel-600">
-                {VOL_DAYS} hari: masuk {fmtNum(in14.b)} ktn · keluar {fmtNum(out14.b)} ktn · net{" "}
-                {net14 === 0 ? "imbang" : `${net14 > 0 ? "+" : "−"}${fmtNum(Math.abs(net14))} karton (${net14 > 0 ? "stok bertambah" : "stok berkurang"})`}
+                {VOL_DAYS} hari: masuk {fmtNum(in14.l, 1)} liter · keluar {fmtNum(out14.l, 1)} liter · net{" "}
+                {netLitres === 0 ? "imbang" : `${netLitres > 0 ? "+" : "−"}${fmtNum(Math.abs(netLitres), 1)} liter (${netLitres > 0 ? "stok bertambah" : "stok berkurang"})`}
               </p>
             </div>
             <div className="min-w-0 flex-1">
