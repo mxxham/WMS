@@ -9,6 +9,7 @@ import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
+import { Sparkline } from "@/components/dashboard/Sparkline";
 import { ExpiryBadge } from "@/components/ui/badge";
 import { Table, Td, Th } from "@/components/ui/table";
 import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
@@ -39,7 +40,7 @@ export const dynamic = "force-dynamic";
 type Inv = { bin_code: string; zone: string; rack: string | null; sku: string; description: string; uom: string | null; upp: number | null; item_abc: string | null; batch_lot: string; quantity: number; expiry_date: string | null; received_date: string | null; days_remaining: number | null };
 type Task = { status: string; task_type: string; quantity: number; actual_quantity: number | null; actual_from_bin: string | null; from_bin: string; actual_batch_lot: string | null; batch_lot: string; completed_at: string | null; planned_date: string };
 type Mv = { type: string; quantity: number; from_bin_id: string | null };
-type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH" };
+type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH"; audited_at: string | null };
 type Vol = { day: string; boxes: number | null; litres: number | null; picks: number | null };
 /** Outbound-volume window (today included). One strip, every day rendered. */
 const VOL_DAYS = 14;
@@ -57,6 +58,46 @@ const OCC_STEPS = [
 const occStep = (p: number) => [...OCC_STEPS].reverse().find((s) => p >= s.min)!;
 /** One decimal, rounded (7,27% reads as 7,3% — the old page rounded, floor looked like a drop). */
 const dec1 = (x: number) => Math.round(x * 10) / 10;
+
+/** Jakarta calendar date (YYYY-MM-DD) of an ISO timestamp. */
+function jDay(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+}
+
+/** Bucket index 0 (oldest) .. 4 (newest) over the last 30 Jakarta days; null = outside window / no date. */
+function weekBucket(todayStart: Date, iso: string | null): number | null {
+  const jd = jDay(iso);
+  if (!jd) return null;
+  const daysAgo = Math.floor((todayStart.getTime() - new Date(`${jd}T00:00:00+07:00`).getTime()) / 86_400_000);
+  if (daysAgo < 0 || daysAgo >= 30) return null;
+  return 4 - Math.floor(daysAgo / 6);
+}
+
+/** Mean of a per-row 0/1 value per week bucket, expressed as a percentage. null bucket = no data (a gap). */
+function rateByWeek<T>(todayStart: Date, rows: T[], date: (r: T) => string | null, value: (r: T) => number): (number | null)[] {
+  const buckets: (number | null)[] = Array(5).fill(null);
+  const n = Array(5).fill(0), s = Array(5).fill(0);
+  for (const r of rows) {
+    const b = weekBucket(todayStart, date(r));
+    if (b === null) continue;
+    n[b]++; s[b] += value(r);
+  }
+  return buckets.map((_, i) => (n[i] ? (s[i] / n[i]) * 100 : null));
+}
+
+/** Delta between the newest and previous known bucket, in percentage points. */
+function deltaPt(series: (number | null)[]): number | null {
+  let prev: number | null = null;
+  for (let i = series.length - 2; i >= 0; i--) {
+    if (series[i] != null) { prev = series[i]; break; }
+  }
+  const last = series[series.length - 1];
+  if (last == null || prev == null) return null;
+  return last - prev;
+}
+
 const LEVELS = ["A", "B", "C", "D", "E"];
 const ACCURACY_DAYS = 30;
 // Expiry calendar ranges: up to 2 years per month, longer ranges per quarter
@@ -98,16 +139,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("status", "COMPLETED").gte("completed_at", accSince).order("id").range(a, b)),
     fetchAll<Mv>((a, b) => supabase.from("movements").select("type, quantity, from_bin_id").in("type", ["inbound", "putaway", "picking"]).gte("created_at", todayStart.toISOString()).order("id").range(a, b)),
-    fetchAll<Audit>((a, b) => supabase.from("audits").select("kind, result").gte("audited_at", accSince).order("id").range(a, b)),
+    fetchAll<Audit>((a, b) => supabase.from("audits").select("kind, result, audited_at").gte("audited_at", accSince).order("id").range(a, b)),
     supabase.from("count_tasks").select("id", { count: "exact", head: true }).in("status", ["OPEN", "COUNTED", "RECOUNT"]),
     supabase.from("waves").select("status").eq("planned_date", today),
-    fetchAll<{ system_qty: number | null; variance_qty: number | null; tolerance: number }>((a, b) =>
-      supabase.from("count_accuracy").select("system_qty, variance_qty, tolerance").gte("closed_at", accSince).order("id").range(a, b)),
+    fetchAll<{ system_qty: number | null; variance_qty: number | null; tolerance: number; closed_at: string | null }>((a, b) =>
+      supabase.from("count_accuracy").select("system_qty, variance_qty, tolerance, closed_at").gte("closed_at", accSince).order("id").range(a, b)),
     supabase.from("adjustment_requests").select("id", { count: "exact", head: true }).eq("status", "PENDING"),
     supabase.from("stock_holds").select("id", { count: "exact", head: true }).eq("status", "ACTIVE"),
     supabase.from("receipts").select("id", { count: "exact", head: true }).in("status", ["OPEN", "CHECKED"]),
     supabase.from("stock_recon_summary").select("as_of, accuracy_pct, open_diffs").order("as_of", { ascending: false }).limit(1).maybeSingle(),
-    fetchAll<{ result: string }>((a, b) => supabase.from("pick_audit_first").select("result").gte("audited_at", accSince).order("task_id").range(a, b)),
+    fetchAll<{ result: string; audited_at: string | null }>((a, b) => supabase.from("pick_audit_first").select("result, audited_at").gte("audited_at", accSince).order("task_id").range(a, b)),
     supabase.from("pick_audit_shipment").select("wave_id", { count: "exact", head: true }).in("state", ["READY_AUDIT", "HAS_MISMATCH", "READY_LOAD"]),
     supabase.rpc("inventory_policy"),
     // A slow or failing count must never take the dashboard down: the tile shows "–" instead.
@@ -210,7 +251,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     || (t.actual_batch_lot !== null && t.actual_batch_lot !== t.batch_lot)).length;
   const devPct = recentPicks.length ? (deviated / recentPicks.length) * 100 : null;
 
-  // ---- Expiry calendar: cartons expiring per month (<= 2 years) or quarter -------
+  // ---- Weekly trends (last 30 days, 4-5 buckets) for the Mutu & kendali sparklines ----
+  // FEFO and SAP reconciliation are skipped: both come from a single cached snapshot
+  // (fefo_exceptions RPC / last stock_recon row) with no per-week series, and deriving
+  // a weekly FEFO series would require re-running the exceptions lookup per week.
+  const pickTrend = rateByWeek(todayStart, pickFirsts, (r) => r.audited_at, (r) => (r.result === "OK" ? 1 : 0));
+  const putTrend = rateByWeek(todayStart, audits.filter((a) => a.kind === "PUTAWAY"), (a) => a.audited_at, (a) => (a.result === "OK" ? 1 : 0));
+  const devTrend = rateByWeek(todayStart, recentPicks, (r) => r.completed_at, (r) => Number(deviatedPick(r)) ? 1 : 0);
+  const cycleTrend = rateByWeek(todayStart, cycleApplied, (c) => c.closed_at, (c) => Math.abs(Number(c.variance_qty ?? 0)) <= Number(c.tolerance ?? 0) ? 1 : 0);
+
+  function deviatedPick(t: Task): boolean {
+    return (t.actual_quantity !== null && Number(t.actual_quantity) !== Number(t.quantity))
+      || (t.actual_from_bin && t.actual_from_bin !== t.from_bin)
+      || (t.actual_batch_lot !== null && t.actual_batch_lot !== t.batch_lot);
+  }
+
   const calRaw = Number((await searchParams).kalender);
   const calYears: CalRange = (CAL_RANGES as readonly number[]).includes(calRaw) ? (calRaw as CalRange) : 2;
   const byQuarter = calYears > 2;
@@ -699,19 +754,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <div className="grid gap-x-2 p-2 sm:grid-cols-2">
               <Metric label="Akurasi picking (audit)" value={pct(pickAcc)} pct={pickPctAcc} target={pickTarget}
                 note={`${fmtNum(pickAcc.ok)} OK dari ${fmtNum(pickAcc.n)} percobaan pertama · target ≥ ${fmtNum(pickTarget, 1)}%`}
-                tone={pickPctAcc === null ? undefined : pickPctAcc >= pickTarget ? "ok" : "warn"} href="/audit/picking?tab=akurasi" />
+                tone={pickPctAcc === null ? undefined : pickPctAcc >= pickTarget ? "ok" : "warn"} href="/audit/picking?tab=akurasi"
+                trend={pickTrend} trendBetter="up" />
               <Metric label="Akurasi putaway (audit)" value={pct(putAcc)} pct={putPctAcc} target={99.5}
                 note={putAcc.n ? `${fmtNum(putAcc.ok)} OK dari ${fmtNum(putAcc.n)} diaudit · target ≥ 99,5%` : "Belum ada audit putaway 30 hari · target ≥ 99,5%"}
-                tone={putPctAcc === null ? undefined : putPctAcc >= 99.5 ? "ok" : "warn"} href="/audit/putaway" />
+                tone={putPctAcc === null ? undefined : putPctAcc >= 99.5 ? "ok" : "warn"} href="/audit/putaway"
+                trend={putTrend} trendBetter="up" />
               <Metric label="FEFO compliance" value={fefoPct === null ? "–" : `${fmtNum(dec1(fefoPct), 1)}%`} pct={fefoPct} target={100}
                 note={!fefo ? "Tidak terbaca, coba muat ulang" : fefoN ? `${fmtNum(fefoBad)} pelanggaran dari ${fmtNum(fefoN)} pick rak · wajib 100%` : "Belum ada pick rak 30 hari"}
                 tone={fefoPct === null ? undefined : fefoPct >= 100 ? "ok" : "bad"} href="/inventory?tab=fefo" />
               <Metric label="Picker lapor beda" value={devPct === null ? "–" : `${fmtNum(dec1(devPct), 1)}%`} pct={devPct}
                 note={recentPicks.length ? `${fmtNum(deviated)} dari ${fmtNum(recentPicks.length)} pick selesai · makin kecil makin baik` : "Belum ada pick selesai 30 hari"}
-                tone={devPct === null ? undefined : "warn"} href="/audit/picking" />
+                tone={devPct === null ? undefined : "warn"} href="/audit/picking"
+                trend={devTrend} trendBetter="down" />
               <Metric label="Akurasi stok (cycle count)" value={qtyIra === null ? "–" : `${qtyIra.toFixed(1)}%`} pct={qtyIra} target={98}
                 note={`${fmtNum(cycleOk)} dari ${fmtNum(cycleApplied.length)} bin tepat · ${fmtNum(openCounts ?? 0)} tugas terbuka · target ≥ 98%`}
-                tone={qtyIra === null ? undefined : qtyIra >= 98 ? "ok" : "warn"} href="/inventory?tab=akurasi" />
+                tone={qtyIra === null ? undefined : qtyIra >= 98 ? "ok" : "warn"} href="/inventory?tab=akurasi"
+                trend={cycleTrend} trendBetter="up" />
               <Metric label="Rekonsiliasi SAP terakhir" value={lastRecon?.accuracy_pct != null ? `${fmtNum(Number(lastRecon.accuracy_pct), 1)}%` : "–"}
                 pct={lastRecon?.accuracy_pct != null ? Number(lastRecon.accuracy_pct) : null}
                 note={lastRecon ? `${fmtDate(lastRecon.as_of)} · ${fmtNum(lastRecon.open_diffs)} selisih belum dijelaskan` : "Belum ada rekonsiliasi"}
@@ -898,16 +957,30 @@ function BandStat({ label, value, sub, href, icon: Icon, tone }: { label: string
 }
 
 /** A metric against its target: the fill is the achievement, the tick is the goal. */
-function Metric({ label, value, note, pct, target, tone, href }: {
+function Metric({ label, value, note, pct, target, tone, href, trend, trendBetter = "up" }: {
   label: string; value: string; note: string; pct: number | null; target?: number;
   tone?: "bad" | "warn" | "ok"; href: string;
+  trend?: (number | null)[]; trendBetter?: "up" | "down";
 }) {
+  const delta = trend ? deltaPt(trend) : null;
+  const deltaDir = delta == null ? "neutral" : trendBetter === "up"
+    ? (delta > 0 ? "up" : delta < 0 ? "down" : "flat")
+    : (delta < 0 ? "up" : delta > 0 ? "down" : "flat");
+  const deltaTone = deltaDir === "up" ? "ok" : deltaDir === "down" ? "bad" : "neutral";
+  const deltaText = delta == null ? null : `${delta >= 0 ? "+" : ""}${fmtNum(Math.abs(delta), 1)} pt`;
+
   return (
     <Link href={href} className="block rounded-lg px-2.5 py-2 transition-colors hover:bg-paper">
       <span className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-medium text-steel-700">{label}</span>
         <span className={cn("font-cond text-xl font-semibold leading-none tabular", tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : tone === "ok" ? "text-ok" : "text-steel")}>{value}</span>
       </span>
+      {trend && (
+        <span className="mt-1 flex items-center gap-1.5">
+          <Sparkline values={trend} />
+          {deltaText && <span className={cn("text-[11px] leading-none shrink-0", deltaTone === "ok" ? "text-ok" : deltaTone === "bad" ? "text-bad" : "text-steel-500")}>{deltaText}</span>}
+        </span>
+      )}
       {pct !== null && (
         <span aria-hidden className="relative mt-1.5 block h-1.5 rounded-full bg-steel-300/45">
           <span className={cn("block h-full rounded-full", tone === "ok" ? "bg-ok" : tone === "bad" ? "bg-bad" : tone === "warn" ? "bg-warn" : "bg-ckb")}
