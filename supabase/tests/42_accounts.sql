@@ -1,4 +1,4 @@
--- Personal accounts (0071): usernames, active flag, admin-only role/status changes, username lookup.
+-- Personal accounts (0071): usernames, active flag, admin-only role/status changes (via set_user_job since 0109), username lookup.
 -- Runs in a transaction and rolls back. Every line prints PASS/FAIL.
 \set ON_ERROR_STOP on
 \pset tuples_only on
@@ -50,7 +50,7 @@ select pg_temp.check('capitals are refused by the format check',
 set role authenticated;
 select pg_temp.as_user('a2222222-2222-2222-2222-222222222222');
 select pg_temp.check('an operator cannot change roles',
-  pg_temp.fails($q$select set_user_role('a3333333-3333-3333-3333-333333333333', 'supervisor')$q$, 'Hanya admin%'));
+  pg_temp.fails($q$select set_user_job('a3333333-3333-3333-3333-333333333333', 'leader')$q$, 'Hanya admin%'));
 select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
 -- Refused by grant on a fresh Supabase project, or (where table rights are granted, as test 01 does
 -- locally) silently a no-op: RLS is on and no update policy is left.
@@ -61,8 +61,8 @@ select pg_temp.check('no direct update of profiles any more, not even by an admi
   (select role from profiles where id = 'a2222222-2222-2222-2222-222222222222') = 'operator'
   and not exists (select 1 from pg_policy where polrelid = 'public.profiles'::regclass and polcmd in ('w', '*')));
 select pg_temp.check('an admin cannot change their own role',
-  pg_temp.fails($q$select set_user_role('a1111111-1111-1111-1111-111111111111', 'operator')$q$, 'Tidak bisa mengubah akun Anda sendiri%'));
-select set_user_role('a3333333-3333-3333-3333-333333333333', 'supervisor');
+  pg_temp.fails($q$select set_user_job('a1111111-1111-1111-1111-111111111111', 'operator')$q$, 'Tidak bisa mengubah akun Anda sendiri%'));
+select set_user_job('a3333333-3333-3333-3333-333333333333', 'leader');
 select pg_temp.check('an admin changes another account''s role',
   (select role from profiles where id = 'a3333333-3333-3333-3333-333333333333') = 'supervisor');
 select pg_temp.check('an admin cannot deactivate themselves',
@@ -82,7 +82,7 @@ select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
 select pg_temp.check('an active account and the server (no account) pass the pre-request check',
   not pg_temp.fails('select public.check_request()', '%'));
 select pg_temp.as_user('a1111111-1111-1111-1111-111111111111');
-select set_user_role('a4444444-4444-4444-4444-444444444444', 'operator');
+select set_user_job('a4444444-4444-4444-4444-444444444444', 'operator');
 select pg_temp.check('an admin demotes another admin; the acting admin stays admin',
   (select role from profiles where id = 'a4444444-4444-4444-4444-444444444444') = 'operator'
   and (select role = 'admin' and active from profiles where id = 'a1111111-1111-1111-1111-111111111111'));
