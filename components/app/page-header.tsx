@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LiveRefresh, type LiveTable } from "@/components/app/live-refresh";
 import { BRAND } from "@/config/brand";
 import { AccountButton } from "./account";
+import { Clock } from "./clock";
 
 /** `live`: tables whose changes re-render this page (see LiveRefresh). */
 export function PageHeader({ title, live, liveDebounceMs, children }: {
@@ -19,8 +20,12 @@ export function PageHeader({ title, live, liveDebounceMs, children }: {
         {live && <LiveRefresh tables={live} debounceMs={liveDebounceMs} />}
       </div>
       {children}
-      {/* Phones: who is signed in, and Keluar (the sidebar shows it on a desktop). */}
-      <AccountButton />
+      {/* The clock and the account join into one right cluster; ml-auto keeps them pinned to the
+          right edge even when the pair wraps onto its own row on a narrow phone. */}
+      <div className="ml-auto flex items-center gap-3">
+        <Clock />
+        <AccountButton />
+      </div>
     </header>
   );
 }
