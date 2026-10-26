@@ -12,3 +12,8 @@ out-baseline/
 .omo
 .superpowers
 backups
+
+# Local build cache (566 MB webpack cache from a local prod build)
+tmp/
+.next
+node_modules
