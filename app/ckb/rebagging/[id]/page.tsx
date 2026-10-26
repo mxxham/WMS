@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requireCkb } from "@/lib/ckb/auth";
 import { createClient } from "@/lib/supabase/server";
 import { RebaggingWorkspaceClient } from "./workspace-client";
 
@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 
 /** Rebagging job detail page — server component fetches job + related data. */
 export default async function RebaggingJobPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"], "ckb_3pl");
   const { id } = await params;
+  const user = await requireCkb(`/ckb/rebagging/${id}`);
   const supabase = await createClient();
 
   // Fetch job with item join
@@ -51,7 +51,7 @@ export default async function RebaggingJobPage({ params }: { params: Promise<{ i
   return (
     <main>
       <RebaggingWorkspaceClient
-        userRole={user.role}
+        userRole={user.ckbRole as "operator" | "supervisor" | "admin"}
         userName={user.name}
         userShared={user.shared}
         job={job}

@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/app/confirm-button";
-import { LEVEL_COLORS } from "@/config/warehouse";
+import { LEVEL_COLORS_WEB } from "@/config/warehouse";
 import { cn, fmtNum } from "@/lib/utils";
 import { binToBinRows, picklistsFromTasks, type OutboundRow, type StockNow, type TaskRow, type WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import { ImpactNote } from "./impact-note";
@@ -179,9 +179,10 @@ export function StatusTag({ status }: { status: string }) {
   return <span className={cn("inline-block rounded px-2 py-0.5 text-xs font-semibold", STATUS_TONE[status])}>{STATUS_LABEL[status] ?? status}</span>;
 }
 
-/** Bin code set like the yellow location plate, with the level colour strip. */
+/** Bin code set like the location plate, with the web level-colour strip
+ *  (colors.ts LEVEL_COLORS_WEB — screens are the app palette; prints stay physical). */
 export function BinChip({ code, size = "lg" }: { code: string; size?: "lg" | "md" }) {
-  const color = LEVEL_COLORS[code.charAt(4)]?.hex;
+  const color = LEVEL_COLORS_WEB[code.charAt(4)];
   return (
     <span className={cn("inline-block overflow-hidden rounded-plate bg-plate font-cond font-bold leading-none text-steel", size === "lg" ? "text-2xl" : "text-lg")}>
       {color && <span className="block h-1" style={{ background: color }} aria-hidden />}

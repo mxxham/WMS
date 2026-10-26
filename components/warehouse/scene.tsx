@@ -124,7 +124,7 @@ function Uprights({ bins, layout }: { bins: BinSummary[]; layout: Layout }) {
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, posts.length]} raycast={() => null}>
       <boxGeometry args={[0.08, 1, 0.08]} />
-      <meshStandardMaterial color="#F07C1B" />
+      <meshStandardMaterial color="#01497C" />
     </instancedMesh>
   );
 }

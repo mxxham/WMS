@@ -1,20 +1,25 @@
 import type { Config } from "tailwindcss";
 
-// JE-IR WMS palette, taken from the Home banner: deep navy (#032741) with a teal
-// accent, plus the Shell yellow (#F9CF54) of the rack location plates. Token names
-// stay `ckb` / `steel` so every page follows from here. Neutrals are navy-tinted
-// greys; the three expiry signal colours stay as they were.
+// JE-IR WMS palette — "Coastal Blues" (colorhunt 10-stop ramp, 012a4a → a9d6e5),
+// on the screen: ckb = primary water blue, plate/pale surfaces from the same
+// stops. Level chips follow the web ramp in config/warehouse.ts; printed strips
+// match the physical rack signs instead. jeir navy + gradients stay matched to
+// the Home banner image. Neutrals are navy-tinted greys; the three expiry
+// signal colours stay as they were.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        ckb: { DEFAULT: "#0B8384", dark: "#097172", light: "#0E8E8C", tint: "#E2F2F3" },
+        ckb: { DEFAULT: "#2A6F97", dark: "#01497C", light: "#468FAF", tint: "#A9D6E5" },
         steel: { DEFAULT: "#102331", 700: "#283D4C", 500: "#546675", 300: "#A3B2BE", 100: "#E0E7ED" },
         paper: "#F3F6F9",
         // The mark itself (logo, Home banner, active nav item). Teal only on navy: too light on white.
-        jeir: { navy: "#032741", teal: { DEFAULT: "#18C3C1", dark: "#12A9A7" } },
-        plate: { DEFAULT: "#F9CF54", dark: "#E5B532" },
+        /** `panel` is the banner image's own right field, pixel-sampled (base #033346–#06364A with
+         *  teal band pockets): the strip under the image starts here and eases into jeir-navy, so
+         *  image and strip merge instead of clashing with the sidebar. */
+        jeir: { navy: "#032741", panel: "#04404E", teal: { DEFAULT: "#61A5C2", dark: "#468FAF" } },
+        plate: { DEFAULT: "#89C2D9", dark: "#01497C" },
         ok: "#2E7D4F",
         warn: "#D9941A",
         bad: "#C0392B",

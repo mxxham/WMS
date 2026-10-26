@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 // Type-only: the ~400 kB reader bundle loads lazily at the first file pick.
 import type * as XLSX from "xlsx";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
@@ -29,6 +30,7 @@ const tone: Record<RowStatus, string> = { ok: "", warning: "bg-warn/10", error: 
 
 /** Upload -> choose sheet & map columns -> validate & preview -> upsert. */
 export function ImportClient() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState("");
   const [wb, setWb] = useState<XLSX.WorkBook | null>(null);
@@ -97,8 +99,10 @@ export function ImportClient() {
     });
     setBusy(false);
     if (error) { setError(error.message); return error.message; }
-    setResult(`${mode === "replace" ? "Stok diganti dengan isi file" : "Stok diperbarui"}: ${fmtNum(res.rows)} baris diproses, ${fmtNum(res.movements)} mutasi penyesuaian dibuat. ${counts.error} baris error tidak diimpor.`);
+    setResult(`${mode === "replace" ? "Stok diganti dengan isi file" : "Stok diperbarui"}: ${fmtNum(res.rows)} baris diproses, ${fmtNum(res.movements)} mutasi penyesuaian dibuat. ${counts.error} baris error tidak diimpor.`
+      + (res.held ? ` ${fmtNum(res.held)} baris tidak dinolkan karena terakhir dipindah atau dihitung di sistem: cek di Ditahan impor di atas.` : ""));
     setStep("done");
+    router.refresh();
     return null;
   }
 
@@ -184,7 +188,7 @@ export function ImportClient() {
               <fieldset className="grid gap-2 sm:grid-cols-2">
                 <legend className="mb-2 text-sm font-medium">Cara impor</legend>
                 {([
-                  ["replace", "Ganti seluruh stok", "Isi database diganti dengan file ini. Stok di sistem yang tidak ada di file dinolkan."],
+                  ["replace", "Ganti seluruh stok", "Isi database diganti dengan file ini. Stok di sistem yang tidak ada di file dinolkan, kecuali yang terakhir dipindah atau dihitung di sistem: itu ditahan untuk dicek."],
                   ["update", "Perbarui saja", "Hanya baris yang ada di file yang diubah. Stok lain di sistem tetap."],
                 ] as const).map(([k, l, d]) => (
                   <label key={k} className={cn("flex cursor-pointer gap-2 rounded-lg border bg-white p-3 text-sm", mode === k ? "border-ckb ring-2 ring-ckb" : "border-steel-300")}>
@@ -198,7 +202,7 @@ export function ImportClient() {
                 <Button variant="outline" onClick={() => setStep("map")}>Ubah pemetaan</Button>
                 {mode === "replace" ? (
                   <ConfirmButton variant="danger" disabled={busy || importCount === 0} title="Ganti seluruh stok?"
-                    summary={`Stok di database akan disamakan dengan ${fileName}: ${fmtNum(importCount)} baris diimpor, dan semua stok lain yang tidak ada di file dinolkan${keptBins > 0 ? ` (kecuali ${fmtNum(keptBins)} bin dengan baris error)` : ""}.`}
+                    summary={`Stok di database akan disamakan dengan ${fileName}: ${fmtNum(importCount)} baris diimpor, dan stok lain yang tidak ada di file dinolkan (yang terakhir dipindah atau dihitung di sistem ditahan untuk dicek)${keptBins > 0 ? ` (kecuali ${fmtNum(keptBins)} bin dengan baris error)` : ""}.`}
                     confirmLabel="Ganti stok" onConfirm={commit}>
                     <Upload className="h-4 w-4" />{busy ? "Mengimpor…" : `Ganti stok dengan ${fmtNum(importCount)} baris`}
                   </ConfirmButton>

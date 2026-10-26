@@ -1,4 +1,4 @@
-import { LEVEL_COLORS } from "@/config/warehouse";
+import { LEVEL_COLORS_WEB } from "@/config/warehouse";
 import type { Bin } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +10,7 @@ export function BinPlate({ bin, compact = false }: { bin: Bin; compact?: boolean
   const parts = bin.rack
     ? [["Aisle", bin.zone], ["Rak", bin.rack], ["Level", bin.level], ["Posisi", bin.position]]
     : [["Area", bin.zone], ["Lajur", bin.position ?? "–"]];
-  const levelColor = bin.level ? LEVEL_COLORS[bin.level]?.hex : undefined;
+  const levelColor = bin.level ? LEVEL_COLORS_WEB[bin.level] : undefined;
   return (
     <div className="overflow-hidden rounded-plate bg-plate text-steel">
       {levelColor && <div className="h-2" style={{ background: levelColor }} aria-hidden />}

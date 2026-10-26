@@ -68,7 +68,6 @@ const STATUS_LABELS: Record<RebagStatus, string> = Object.fromEntries(
   REBAG_STATUSES.map((s) => [s.key, s.label])
 ) as Record<RebagStatus, string>;
 
-const CUSTOMERS = ["Freeport", "CGP", "SIP", "MNE", "Boiler", "SSB"] as const;
 const WAREHOUSES = ["Gudang A", "Gudang B"] as const;
 const SHIFTS = ["Pagi", "Siang", "Malam"] as const;
 
@@ -96,7 +95,10 @@ function OperationBadge({ type }: { type: RebaggingJobSummary["operation_type"] 
   return <Badge className="bg-ckb/10 text-ckb">{OPERATION_LABELS[type]}</Badge>;
 }
 
-export function RebaggingList({ jobs, role }: { jobs: RebaggingJobSummary[]; role: "operator" | "supervisor" | "admin" }) {
+/** `customers`: names from ckb_customers (the job keeps the name; 0106 links it to the customer). */
+export function RebaggingList({ jobs, role, customers, startOpen = false }: {
+  jobs: RebaggingJobSummary[]; role: "operator" | "supervisor" | "admin"; customers: string[]; startOpen?: boolean;
+}) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [operationFilter, setOperationFilter] = useState<string>("all");
@@ -430,7 +432,7 @@ export function RebaggingList({ jobs, role }: { jobs: RebaggingJobSummary[]; rol
       </Card>
 
       {/* Create Dialog */}
-      <CreateJobDialog role={role} />
+      <CreateJobDialog role={role} customers={customers} startOpen={startOpen} />
     </div>
   );
 }
@@ -488,9 +490,9 @@ function DeleteJobButton({ job }: { job: RebaggingJobSummary }) {
 /* Create Job Dialog                                                    */
 /* ------------------------------------------------------------------ */
 
-function CreateJobDialog({ role }: { role: "operator" | "supervisor" | "admin" }) {
+function CreateJobDialog({ role, customers, startOpen }: { role: "operator" | "supervisor" | "admin"; customers: string[]; startOpen: boolean }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -579,7 +581,7 @@ function CreateJobDialog({ role }: { role: "operator" | "supervisor" | "admin" }
               <Label>Pelanggan (aliran)</Label>
               <Select value={customer} onChange={(e) => setCustomer(e.target.value)}>
                 <option value="">— Pilih aliran —</option>
-                {CUSTOMERS.map((c) => (
+                {customers.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </Select>

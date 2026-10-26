@@ -273,6 +273,24 @@ emoji.
 Migration and test numbers are named in the message when relevant — several migration headers record
 the real floor incident that motivated them, and that context is the point.
 
+## CKB 3PL (`/ckb`)
+
+Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touching anything under
+`app/ckb`, `lib/ckb`, `components/ckb` or migrations `0099`–`0107`.
+
+- **App access, CKB role and customer scope are three things** (`profiles.apps`, `ckb_user_roles`,
+  `ckb_customer_members`). A Shell role grants nothing in CKB; `has_role()` (Shell) now also needs
+  the `shell_wms` app, and `is_active()` refuses customer-only accounts (0105).
+- **CKB code never touches Shell stock tables or RPCs** (`tests/ckb-isolation.test.ts` enforces it).
+  The one exception is the pre-existing rebagging module, which posts to `movements` on aisles CG/CH
+  — an open decision, not a pattern to copy.
+- **Pages gate with `requireCkb(path)`, routes with `checkCkb(roles)`**; RLS and the RPCs are the
+  real authorization. CKB policies use `(select public.account_active())`, not `is_active()`.
+- Counts, snapshots, export lines, audit events and evidence are append-only by trigger. A
+  correction is a new row (recount, re-export, withdraw), never an edit.
+- SAP import mapping and SAP export format are **unverified** until real CKB files exist: keep the
+  warnings, never mark them verified in code.
+
 ## Gotchas
 
 - **Working tree is dirty.** `lib/allocator/config.ts` (phantom-rack `blockedBins`: full CE33 row,

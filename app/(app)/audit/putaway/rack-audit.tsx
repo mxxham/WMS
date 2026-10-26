@@ -12,6 +12,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { CountBinHero } from "@/components/audit/count-bin-hero";
 import { RACK_STATE_LABEL, RACK_STATE_TONE, type RackSummary } from "../picking/rack-data";
 import type { PutawayRow } from "./rack-data";
 
@@ -43,10 +44,18 @@ export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false
   const [checker, setChecker] = usePersonName();
   const [open, setOpen] = useState<{ row: PutawayRow; flash?: string; correct?: boolean } | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
+  // The putaway the audit walk is standing on: the table marks it and reopening
+  // "Audit satu per satu" resumes there instead of restarting at the first.
+  const [cursor, setCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const needs = (r: PutawayRow) => (!r.audit || r.audit.result === "MISMATCH") && !saved.has(r.movement_id);
   const todo = rows.filter(needs);
+  /** Position of a putaway in the still-to-audit list, "Putaway i dari N" — null outside a walk. */
+  const walkProgress = (r: PutawayRow) => {
+    const i = todo.findIndex((x) => x.movement_id === r.movement_id);
+    return i < 0 ? null : `Putaway ${fmtNum(i + 1)} dari ${fmtNum(todo.length)}`;
+  };
 
   /** ✓ Sesuai: SKU, batch and qty in the bin are as put away. */
   async function confirm(r: PutawayRow) {
@@ -90,7 +99,11 @@ export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false
           <div className="flex flex-wrap items-end gap-3">
             <PersonNameField value={checker} onChange={setChecker} label="Nama checker (bukan yang putaway)" id="rack-checker" />
             {todo.length > 0 && (
-              <Button size="lg" variant="outline" onClick={() => setOpen({ row: todo[0] })}><ClipboardCheck className="h-5 w-5" />Audit satu per satu ({fmtNum(todo.length)})</Button>
+              <Button size="lg" variant="outline" onClick={() => {
+                // Resume from the walk cursor when that putaway is still to audit.
+                const row = todo.find((t) => t.movement_id === cursor) ?? todo[0];
+                setCursor(row.movement_id); setOpen({ row });
+              }}><ClipboardCheck className="h-5 w-5" />Audit satu per satu ({fmtNum(todo.length)})</Button>
             )}
           </div>
         </CardContent>
@@ -103,17 +116,22 @@ export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false
             <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Batch / exp</Th><Th>Qty</Th><Th>Putaway</Th><Th>Status</Th><Th>Audit terakhir</Th><Th /></tr></thead>
             <tbody>{rows.map((r, i) => {
               const state = r.audit?.result ?? "TODO";
+              const active = cursor === r.movement_id;
               return (
                 <Fragment key={r.movement_id}>
                 {rackOf(r.to_bin) !== rackOf(rows[i - 1]?.to_bin ?? "") && (
                   <tr className="bg-steel-100"><td colSpan={8} className="px-3 py-1.5 font-cond text-base font-semibold">
                     {rackOf(r.to_bin)} · {rows.filter((x) => rackOf(x.to_bin) === rackOf(r.to_bin)).length} putaway</td></tr>
                 )}
-                <tr className={cn(state === "MISMATCH" && "bg-bad/5")}>
-                  <Td className="font-cond text-lg font-semibold">{r.to_bin}</Td>
+                <tr className={cn(state === "MISMATCH" && "bg-bad/5", active && "bg-ckb-tint/40")}>
+                  <Td className="font-cond text-xl font-semibold">
+                    <span className="flex items-center gap-1.5">{r.to_bin}
+                      {active && <span className="rounded bg-ckb px-1.5 py-0.5 text-xs font-semibold text-white">diaudit sekarang</span>}
+                    </span>
+                  </Td>
                   <Td><span className="font-semibold">{r.sku}</span><br /><span className="text-xs text-steel-500">{r.description}</span></Td>
                   <Td className="text-xs">{r.batch_lot || "–"}<br /><span className="text-steel-500">{fmtDate(r.expiry_date)}</span></Td>
-                  <Td className="tabular">{fmtNum(r.quantity)} {r.uom ?? ""}</Td>
+                  <Td className="text-lg tabular font-semibold">{fmtNum(r.quantity)} {r.uom ?? ""}</Td>
                   <Td className="text-xs">{r.type === "inbound" ? "Terima baru" : `dari ${r.from_bin ?? "–"}`}<br />
                     <span className="text-steel-500">{r.by ?? "(tidak tercatat)"} · {fmtDateTime(r.created_at)}</span></Td>
                   <Td><span className={cn("rounded px-2 py-0.5 text-xs font-semibold", STATE[state][1])}>{STATE[state][0]}</span></Td>
@@ -129,7 +147,7 @@ export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false
                   <Td className="text-right">
                     {needs(r) && (
                       <div className="flex flex-wrap justify-end gap-1">
-                        <Button size="sm" variant="outline" className="border-bad text-bad" onClick={() => setOpen({ row: r })}>✗ Salah</Button>
+                        <Button size="sm" variant="outline" className="border-bad text-bad" onClick={() => { setCursor(r.movement_id); setOpen({ row: r }); }}>✗ Salah</Button>
                         <Button size="sm" disabled={busy === r.movement_id} onClick={() => confirm(r)}>{busy === r.movement_id ? "…" : "✓ Sesuai"}</Button>
                       </div>
                     )}
@@ -148,17 +166,25 @@ export function PutawayRackAudit({ zone, date, rows, summary, canCorrect = false
       </Card>
       {open && <AuditDialog key={`${open.row.movement_id}|${open.correct ? "ubah" : ""}`} row={open.row} flash={open.flash}
         correct={!!open.correct} next={open.correct ? () => null : next}
-        onOpen={(row, flash) => setOpen({ row, flash })} onClose={() => setOpen(null)} />}
+        progressText={open.correct ? null : walkProgress(open.row)}
+        onOpen={(row, flash) => { setCursor(row.movement_id); setOpen({ row, flash }); }}
+        onFinish={open.correct ? undefined : () => setCursor(null)}
+        onClose={() => setOpen(null)} />
+      }
     </div>
   );
 }
 
-function AuditDialog({ row, flash, correct, next, onOpen, onClose }: {
+function AuditDialog({ row, flash, correct, next, onOpen, onClose, progressText, onFinish }: {
   row: PutawayRow; flash?: string;
   /** Ubah: audit an already audited putaway again; the reason goes in the note, the old result stays in history */
   correct: boolean;
   next: (from: PutawayRow) => { row: PutawayRow; left: number } | null;
   onOpen: (row: PutawayRow, flash: string) => void; onClose: () => void;
+  /** "Putaway i dari N" while this row is part of a walk; null on Ubah / counted views */
+  progressText?: string | null;
+  /** The walk finished: no putaway follows and the checker closes from the result screen */
+  onFinish?: () => void;
 }) {
   const router = useRouter();
   const [checker, setChecker] = usePersonName();
@@ -204,10 +230,12 @@ function AuditDialog({ row, flash, correct, next, onOpen, onClose }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={`${correct ? "Ubah audit · " : ""}${row.to_bin} · ${row.sku}`}
-        description={`${row.description} · batch ${row.batch_lot || "–"} · ${fmtNum(row.quantity)} ${row.uom ?? ""}`}>
+      <DialogContent title={correct ? "Ubah audit" : "Audit putaway"} description={`${row.sku} · batch ${row.batch_lot || "–"} · ${fmtNum(row.quantity)} ${row.uom ?? ""}`}>
         {saved ? (
           <div className="space-y-4">
+            <CountBinHero binCode={row.to_bin} compact>
+              <p className="text-xs font-semibold">{row.sku} · batch {row.batch_lot || "–"}</p>
+            </CountBinHero>
             <p className={cn("rounded-md p-3 text-base font-semibold", saved.result === "OK" ? "bg-ok/10 text-ok" : "bg-bad/10 text-bad")}>
               {saved.result === "OK" ? "Sesuai. Putaway lolos audit." : "Ada selisih."}
             </p>
@@ -223,10 +251,15 @@ function AuditDialog({ row, flash, correct, next, onOpen, onClose }: {
               <p className="text-sm">Perbaiki di rak (pindahkan / tukar / hitung ulang), lalu audit ulang. Koreksi stok lewat Adjust stok bila memang berbeda.</p>
             )}
             {upNext && <Button size="lg" className="w-full" onClick={() => onOpen(upNext.row, "")}>Lanjut: {upNext.row.to_bin} {upNext.row.sku}</Button>}
-            <Button size="lg" variant={upNext ? "outline" : "default"} className="w-full" onClick={onClose}>Tutup</Button>
+            <Button size="lg" variant={upNext ? "outline" : "default"} className="w-full" onClick={() => { if (upNext === null && onFinish) onFinish(); onClose(); }}>Tutup</Button>
           </div>
         ) : (
           <form onSubmit={save} className="space-y-4">
+            <CountBinHero binCode={row.to_bin} progressText={progressText}
+              amount={{ label: "Harusnya di bin", value: fmtNum(row.quantity), unit: row.uom }}>
+              <div className="font-semibold">{row.sku} · batch {row.batch_lot || "–"}</div>
+              <p className="text-xs text-steel-700">{row.description} · exp {fmtDate(row.expiry_date)}</p>
+            </CountBinHero>
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             {correct && (
               <p className="rounded-md bg-warn/10 p-2 text-sm">Audit sebelumnya tetap tersimpan sebagai riwayat. Isi yang benar dan alasan ubah.

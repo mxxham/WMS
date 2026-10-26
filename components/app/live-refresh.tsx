@@ -8,8 +8,10 @@ import { cn } from "@/lib/utils";
 export type LiveTable = "waves" | "pick_tasks" | "outbound" | "movements" | "count_tasks" | "execution_events" | "audits" | "pickfaces"
   | "stock_holds" | "adjustment_requests" | "receipts" | "receipt_actuals" | "stock_recons" | "stock_recon_lines" | "settings" | "items"
   | "pick_audits" | "shipment_loads" | "sheet_pick_lines" | "sheet_pick_audits"
-  | "pick_line_requests"
-  | "ckb_rebagging_jobs" | "ckb_rebagging_sources" | "ckb_rebagging_outputs" | "ckb_rebagging_evidence" | "ckb_rebagging_events";
+  | "pick_line_requests" | "import_holds"
+  | "ckb_rebagging_jobs" | "ckb_rebagging_sources" | "ckb_rebagging_outputs" | "ckb_rebagging_evidence" | "ckb_rebagging_events"
+  | "ckb_stocktakes" | "ckb_counts" | "ckb_adjustments" | "ckb_inspections" | "ckb_evidence" | "ckb_sap_imports" | "ckb_sap_exports"
+  | "ckb_customers";
 export type LiveStatus = "connecting" | "live" | "offline";
 
 /**

@@ -59,6 +59,12 @@ update profiles
 set apps = array_append(apps, 'ckb_3pl'), active = true
 where id in (current_setting('t.op')::uuid, current_setting('t.sup')::uuid, current_setting('t.adm')::uuid)
   and not ('ckb_3pl' = any(apps));
+-- Since 0099 a CKB action needs a CKB role, not only the app: the same role as the profile,
+-- exactly what 0099's backfill gives existing CKB members.
+insert into ckb_user_roles (user_id, role)
+select id, role::text::ckb_role from profiles
+where id in (current_setting('t.op')::uuid, current_setting('t.sup')::uuid, current_setting('t.adm')::uuid)
+on conflict (user_id) do update set role = excluded.role;
 
 set role authenticated;
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { ConfirmButton } from "@/components/app/confirm-button";
-import { PageHeader } from "@/components/app/page-header";
+import { CkbHeader } from "@/components/ckb/ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -222,7 +222,7 @@ function WorkspaceInner({ userRole, userShared, job, sources, outputs, evidence,
 
   return (
     <div className="space-y-4">
-      <PageHeader title={`Rebag ${job.job_no}`} live={["ckb_rebagging_jobs", "ckb_rebagging_sources", "ckb_rebagging_outputs", "ckb_rebagging_evidence", "ckb_rebagging_events"]} />
+      <CkbHeader title={`Rebag ${job.job_no}`} back={{ href: "/ckb/rebagging", label: "Rebagging" }} live={["ckb_rebagging_jobs", "ckb_rebagging_sources", "ckb_rebagging_outputs", "ckb_rebagging_evidence", "ckb_rebagging_events"]} />
 
       <JobCard job={job} opMeta={opMeta?.label ?? job.operation_type} />
       <VarianceBanner job={job} />

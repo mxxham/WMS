@@ -18,7 +18,9 @@
   /* Every form control, everywhere: light regardless of the device theme. */
   input, select, textarea, button { color-scheme: only light; }
   select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { background-color: #fff; color: #102331; }
-  body { @apply bg-paper text-steel font-sans antialiased; }
+  /* The canvas is the same pale sea-glass wash as Home (ckb-tint at 25% over white); `paper` stays
+     a surface-and-hover tone inside white cards. */
+  body { @apply bg-ckb-tint/25 text-steel font-sans antialiased; }
   :focus-visible { @apply outline outline-2 outline-offset-2 outline-ckb; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 }
@@ -30,23 +32,80 @@
 @keyframes welcome-fade { from { opacity: 0; } to { opacity: 1; } }
 .welcome-fade { animation: welcome-fade 400ms ease-out both; }
 
-/* Home banner (components/home/home-page.tsx). Every animation runs once except the soft glow on the
-   main button; all of it is off with reduced motion above, and the end state is the plain layout. */
-.home-hero { container-type: inline-size; }
-/* The open navy under "Warehouse Management System" in public/home-banner.jpg (1600 x 900), left of the dot grid. */
-.home-actions { position: absolute; left: 56.3%; top: 70.5%; }
-.home-cta { height: auto; min-height: 36px; padding: 0.8cqw 1.9cqw; font-size: clamp(12px, 1.5cqw, 17px); }
+/* Home banner (components/home/home-page.tsx): the image runs edge to edge, and the navy strip under
+   it continues the image's own right panel. Every animation runs once; all of it is off with reduced
+   motion above, and the end state is the plain layout. */
 @keyframes home-banner-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
 .home-banner-in { animation: home-banner-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @keyframes home-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .home-rise { animation: home-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
-/* One teal light sweep across the banner, like the light bands in it. */
+/* One light-aqua sweep across banner and strip, like the light bands in the image. */
 .home-shine::after { content: ""; position: absolute; inset: 0; pointer-events: none; transform: translateX(-100%);
-  background: linear-gradient(105deg, transparent 35%, rgb(24 195 193 / 0.16) 50%, transparent 65%);
+  background: linear-gradient(105deg, transparent 35%, rgb(169 214 229 / 0.16) 50%, transparent 65%);
   animation: home-shine 1800ms ease-in-out 700ms 1 both; }
 @keyframes home-shine { to { transform: translateX(100%); } }
-@keyframes home-glow { 0%, 100% { box-shadow: 0 0 0 0 rgb(24 195 193 / 0.5); } 50% { box-shadow: 0 0 0 8px rgb(24 195 193 / 0); } }
-.home-glow { animation: home-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms) both, home-glow 2.8s ease-in-out 1.6s infinite; }
+/* The strip under the banner: darkest at the sidebar's edge, brightening into the banner's teal band
+   pocket (pixel-sampled #075360), settling at the panel tone before the CTAs. 100° matches the tilt
+   of the diagonal bands in the image itself. */
+.home-strip { background-image: linear-gradient(100deg, #032741 0%, #06464A 40%, #075360 60%, #04404E 100%); }
+/* Ghost echo of the banner's dot-grid motif: faint deep-water-blue dots dissolving down-left,
+   tucked into the top-right of the modules section. Static, so reduced motion needs no exception. */
+.home-dots { background-image: radial-gradient(circle, rgb(42 111 151 / 0.22) 1.5px, transparent 1.6px);
+  background-size: 13px 13px;
+  mask-image: radial-gradient(ellipse 80% 80% at 78% 18%, black 40%, transparent 82%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 78% 18%, black 40%, transparent 82%); }
+
+/* The sidebar scrolls on a navy gradient: give its scrollbar the same water tone instead of the
+   browser's white default. Chromium prefers scrollbar-color over the WebKit pseudos, so the two
+   engines are split: standard property only under Firefox, full WebKit styling elsewhere. */
+@supports (-moz-appearance: none) {
+  .sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgb(97 165 194 / 0.45) transparent; }
+}
+.sidebar-scroll::-webkit-scrollbar { width: 10px; background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-button { display: none; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: rgb(97 165 194 / 0.4); border-radius: 9999px; border: 3px solid transparent; background-clip: content-box; }
+.sidebar-scroll::-webkit-scrollbar-thumb:hover { background-color: rgb(97 165 194 / 0.65); }
 
 /* A page with a bar pinned above the bottom navigation (the phone Wave screen): keep the footer clear of it. */
 body:has([data-pinned-bar]) .site-footer { padding-bottom: 6rem; }
+
+/* Login page animations: one load sequence — the photo resolves, content rises, form fields
+   stagger up. All of it is off with prefers-reduced-motion in the base layer above. */
+@keyframes login-photo {
+  from { opacity: 0; transform: scale(1.045); }
+  to { opacity: 1; transform: none; }
+}
+.login-photo { animation: login-photo 1100ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.login-rise { animation: login-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+
+@keyframes login-field {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.login-field { animation: login-field 500ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.animate-fade-in { animation: fade-in 300ms ease-out both; }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(6px); }
+}
+.animate-shake { animation: shake 400ms ease-in-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-photo, .login-rise, .login-field, .animate-fade-in, .animate-shake {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -21,7 +21,7 @@ export function BinPageClient({ detail, role, openTasks }: { detail: BinDetail; 
     <main className="mx-auto max-w-4xl p-4 lg:p-8">
       <div className="mb-2 flex justify-end"><LiveRefresh tables={["movements", "pick_tasks", "waves"]} /></div>
       {openTasks.length > 0 && (
-        <section className="mb-4 rounded-lg border-2 border-plate bg-white p-4" aria-label="Tugas terencana">
+        <section className="mb-4 rounded-lg border-2 border-ckb/25 bg-white p-4" aria-label="Tugas terencana">
           <h2 className="flex items-center gap-2 font-cond text-lg font-semibold"><ListChecks className="h-5 w-5" />{openTasks.length} tugas terencana di bin ini</h2>
           <ul className="mt-2 space-y-1 text-sm">
             {openTasks.map((t) => {

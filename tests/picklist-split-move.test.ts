@@ -65,11 +65,29 @@ test('posted two-source line: the CC07A01 piece carries no Bin To Bin', () => {
   assert.equal(s.get('n')?.sisa, 33);
 });
 test('posted two-source line: the reprint lists the Bin To Bin once, on the pick, as the wave page pairs it', () => {
-  assert.deepEqual(moveRows(picklistsFromTasks(waves, twoSource, [], twoSourceStock)), ['CC06A01:13:26>CC06A02']);
+  // The posted pick carries what was taken (10), not the planned 13: the other 3 are line n.
+  assert.deepEqual(moveRows(picklistsFromTasks(waves, twoSource, [], twoSourceStock)), ['CC06A01:10:26>CC06A02']);
   assert.deepEqual(shape(pairMoves(twoSource)), ['p+m', 'n']);
 });
 test('the wave page rest notes treat only the pick as owning the move', () => {
   assert.equal(restNotesFromTasks(waves, twoSource).has('p'), false);
+});
+
+// 26 Oct 2026: an IBC planned at CC33A02 was taken from CB01A01. The downloaded sheet is booked
+// against bins in the daily Excel, so a posted line must name the bin that was picked.
+test('a posted line reprints the bin, batch, expiry and quantity actually picked', () => {
+  const moved = [task('x', 1, { ...posted, from_bin: 'CC33A02', quantity: 1, actual_quantity: 1,
+    actual_from_bin: 'CB01A01', actual_batch_lot: 'P13', actual_expiry_date: '2030-02-07' })];
+  const [l] = picklistsFromTasks(waves, moved, []).flatMap((pl) => pl.lines);
+  assert.equal(l.location, 'CB01A01');
+  assert.equal(l.batch, 'P13');
+  assert.equal(l.expiryDate.toISOString().slice(0, 10), '2030-02-07');
+  assert.equal(l.qtyPick, 1);
+});
+test('a planned line still prints the plan', () => {
+  const [l] = picklistsFromTasks(waves, [task('y', 1, { quantity: 5, actual_from_bin: 'CB01A01' })], []).flatMap((pl) => pl.lines);
+  assert.equal(l.location, 'CC06A01');
+  assert.equal(l.qtyPick, 5);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

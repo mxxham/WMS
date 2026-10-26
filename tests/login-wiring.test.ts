@@ -121,17 +121,18 @@ test('app/ckb/layout.tsx exists, checks ckb_3pl, and does NOT contain WaveAlerts
   assert.ok(!l.includes('SessionProvider'), 'ckb layout must not include SessionProvider');
   assert.ok(!l.includes('from "@/components/app/nav"'), 'ckb layout must not import Shell nav');
   assert.ok(l.includes('CKB 3PL'), 'ckb layout missing CKB 3PL header text');
-  assert.ok(l.includes('action="/keluar"') && l.includes('method="post"'), 'ckb layout Keluar form not a plain POST');
+  // The CKB navigation (its own, not Shell's) carries Keluar as a plain POST form.
+  const nav = src('components/ckb/nav.tsx');
+  assert.ok(l.includes('CkbNav') && nav.includes('action="/keluar"') && nav.includes('method="post"'), 'ckb Keluar form not a plain POST');
 });
 
-test('app/ckb/page.tsx is a holding screen with the six streams and no Shell links', () => {
+test('app/ckb/page.tsx is the CKB dashboard: real counts from the database, no Shell links', () => {
   const p = src('app/ckb/page.tsx');
-  assert.ok(p.includes('CKB 3PL'), 'page missing CKB 3PL title');
-  assert.ok(p.includes('Aplikasi ini sedang disiapkan untuk CKB Warehouse 5'), 'page missing Indonesian holding paragraph');
-  for (const s of ['Freeport', 'CGP', 'SIP', 'MNE', 'Boiler', 'SSB']) {
-    assert.ok(p.includes(s), `page missing stream: ${s}`);
-  }
-  assert.ok(!p.includes('/scan') && !p.includes('/dashboard') && !p.includes('/waves'), 'page must not link to Shell routes');
+  // The holding screen of 2026-10-20 became the dashboard: its numbers come from ckb_dashboard()
+  // (0107) and RLS reads, never from Shell tables or fixed figures.
+  assert.ok(p.includes('rpc("ckb_dashboard"'), 'dashboard does not read ckb_dashboard()');
+  assert.ok(!/from\("(movements|inventory|waves|pick_tasks|bins|items)"\)/.test(p), 'dashboard reads a Shell table');
+  assert.ok(!p.includes('"/scan"') && !p.includes('"/dashboard"') && !p.includes('"/waves"'), 'page must not link to Shell routes');
 });
 
 test('app/akses/page.tsx redirects authorized user to app home and has Keluar form', () => {

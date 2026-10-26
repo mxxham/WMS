@@ -1,0 +1,59 @@
+-- Shared accounts and helpers for the CKB 3PL SQL tests (65-70). Included with \ir; not a test itself
+-- (scripts/sql-test.sh only runs NN_*.sql). Must be included inside the test's own transaction.
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+
+create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
+begin raise notice '% %', case when coalesce(ok, false) then 'PASS' else 'FAIL' end, label; end $$;
+create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
+begin execute p_sql; return false; exception when others then
+  if sqlerrm not like p_like then raise notice 'got: %', sqlerrm; end if;
+  return sqlerrm like p_like; end $$;
+create or replace function pg_temp.as_user(p uuid) returns void language plpgsql as $$
+begin perform set_config('request.jwt.claim.sub', coalesce(p::text, ''), true); end $$;
+create or replace function pg_temp.u(k text) returns uuid language sql immutable as $$
+  select (case k
+    when 'adm'    then 'cc000000-0000-0000-0000-0000000000a1' -- CKB admin (both apps)
+    when 'sup'    then 'cc000000-0000-0000-0000-0000000000a2' -- CKB supervisor (CKB only)
+    when 'op'     then 'cc000000-0000-0000-0000-0000000000a3' -- CKB operator (CKB only)
+    when 'op2'    then 'cc000000-0000-0000-0000-0000000000a4' -- second CKB operator
+    when 'sup2'   then 'cc000000-0000-0000-0000-0000000000a5' -- second CKB supervisor
+    when 'repfp'  then 'cc000000-0000-0000-0000-0000000000b1' -- representative of Freeport
+    when 'repcgp' then 'cc000000-0000-0000-0000-0000000000b2' -- representative of CGP
+    when 'shell'  then 'cc000000-0000-0000-0000-0000000000c1' -- Shell supervisor, no CKB
+    when 'noapp'  then 'cc000000-0000-0000-0000-0000000000d1' -- no application at all
+    when 'shared' then 'cc000000-0000-0000-0000-0000000000e1' -- the shared site account
+    when 'norole' then 'cc000000-0000-0000-0000-0000000000f1' -- CKB app, no CKB role yet
+  end)::uuid $$;
+
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data) values
+  (pg_temp.u('adm'),    'ckb.adm@t',  '{"name":"Ayu Admin"}',        '{"username":"t_ckb_adm"}'),
+  (pg_temp.u('sup'),    'ckb.sup@t',  '{"name":"Sari Supervisor"}',  '{"username":"t_ckb_sup"}'),
+  (pg_temp.u('op'),     'ckb.op@t',   '{"name":"Oki Operator"}',     '{"username":"t_ckb_op"}'),
+  (pg_temp.u('op2'),    'ckb.op2@t',  '{"name":"Odi Operator"}',     '{"username":"t_ckb_op2"}'),
+  (pg_temp.u('sup2'),   'ckb.sup2@t', '{"name":"Sinta Supervisor"}', '{"username":"t_ckb_sup2"}'),
+  (pg_temp.u('repfp'),  'rep.fp@t',   '{"name":"Rina Freeport"}',    '{"username":"t_rep_fp"}'),
+  (pg_temp.u('repcgp'), 'rep.cgp@t',  '{"name":"Rudi CGP"}',         '{"username":"t_rep_cgp"}'),
+  (pg_temp.u('shell'),  'shell@t',    '{"name":"Sigit Shell"}',      '{"username":"t_shell"}'),
+  (pg_temp.u('noapp'),  'noapp@t',    '{"name":"Nadia Noapp"}',      '{"username":"t_noapp"}'),
+  (pg_temp.u('shared'), 'gudang@t',   '{"name":"Gudang"}',           '{"username":"t_gudang","shared":true}'),
+  (pg_temp.u('norole'), 'norole@t',   '{"name":"Nora Norole"}',      '{"username":"t_norole"}');
+
+update profiles set role = 'admin',      apps = array['shell_wms','ckb_3pl'], default_app = 'ckb_3pl' where id = pg_temp.u('adm');
+update profiles set role = 'operator',   apps = array['ckb_3pl'], default_app = 'ckb_3pl' where id in (pg_temp.u('sup'), pg_temp.u('op'), pg_temp.u('op2'), pg_temp.u('sup2'), pg_temp.u('repfp'), pg_temp.u('repcgp'), pg_temp.u('norole'));
+update profiles set role = 'supervisor', apps = array['shell_wms'], default_app = 'shell_wms' where id = pg_temp.u('shell');
+update profiles set role = 'operator',   apps = array[]::text[], default_app = null where id = pg_temp.u('noapp');
+update profiles set role = 'admin',      apps = array['shell_wms','ckb_3pl'], default_app = 'shell_wms' where id = pg_temp.u('shared');
+
+insert into ckb_user_roles (user_id, role) values
+  (pg_temp.u('adm'), 'admin'), (pg_temp.u('sup'), 'supervisor'), (pg_temp.u('sup2'), 'supervisor'),
+  (pg_temp.u('op'), 'operator'), (pg_temp.u('op2'), 'operator'),
+  (pg_temp.u('repfp'), 'customer'), (pg_temp.u('repcgp'), 'customer')
+on conflict (user_id) do update set role = excluded.role;
+insert into ckb_customer_members (user_id, customer_id)
+  select pg_temp.u('repfp'), id from ckb_customers where code = 'FREEPORT';
+insert into ckb_customer_members (user_id, customer_id)
+  select pg_temp.u('repcgp'), id from ckb_customers where code = 'CGP';
+
+select id as c_fp from ckb_customers where code = 'FREEPORT' \gset
+select id as c_cgp from ckb_customers where code = 'CGP' \gset

@@ -184,7 +184,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
           size="sm" variant="outline"
           disabled={!canRun}
           title={!canRun ? "Isi nama petugas di atas" : undefined}
-          onClick={() => { setProgress({ done: 0, total: targetBins.length, running: true }); setResults(null); setOpen(true); }}
+          onClick={() => { setProgress({ done: 0, total: targetBins.length, running: false }); setResults(null); setOpen(true); }}
         >
           Buat tugas hitung ({targetBins.length} bin)
         </Button>
@@ -197,6 +197,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
           progress={progress} results={results}
           canRun={canRun}
           onConfirm={async () => {
+            setProgress((p) => ({ ...p, running: true }));
             const errors: string[] = [];
             let ok = 0;
             for (let idx = 0; idx < targetBins.length; idx++) {
@@ -246,7 +247,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
           size="sm"
           disabled={!canRun}
           title={!canRun ? "Isi nama petugas di atas" : undefined}
-          onClick={() => { setProgress({ done: 0, total: autoRows.length, running: true }); setResults(null); setOpen(true); }}
+          onClick={() => { setProgress({ done: 0, total: autoRows.length, running: false }); setResults(null); setOpen(true); }}
         >
           Perbaiki semua otomatis ({autoRows.length} baris)
         </Button>
@@ -260,6 +261,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
           progress={progress} results={results}
           canRun={canRun}
           onConfirm={async () => {
+            setProgress((p) => ({ ...p, running: true }));
             const errors: string[] = [];
             let ok = 0;
             for (let idx = 0; idx < autoRows.length; idx++) {
@@ -303,7 +305,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
             size="sm"
             disabled={!canRun}
             title={!canRun ? "Isi nama petugas di atas" : undefined}
-            onClick={() => { setProgress({ done: 0, total: expiredAutoRows.length, running: true }); setResults(null); setOpen(true); }}
+            onClick={() => { setProgress({ done: 0, total: expiredAutoRows.length, running: false }); setResults(null); setOpen(true); }}
           >
             Isi dari kode batch ({expiredAutoRows.length} baris)
           </Button>
@@ -316,6 +318,7 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
             progress={progress} results={results}
             canRun={canRun}
             onConfirm={async () => {
+            setProgress((p) => ({ ...p, running: true }));
               const errors: string[] = [];
               let ok = 0;
               let skipped = 0;
@@ -394,7 +397,7 @@ function BulkExpirySame({ kind, list, counting, person }: { kind: IssueKind; lis
           size="sm"
           disabled={!canRun}
           title={!canRun ? "Isi nama petugas, expired, dan alasan di atas" : undefined}
-          onClick={() => { setProgress({ done: 0, total: list.length, running: true }); setResults(null); setOpen(true); }}
+          onClick={() => { setProgress({ done: 0, total: list.length, running: false }); setResults(null); setOpen(true); }}
         >
           Terapkan sama ke semua ({list.length} baris)
         </Button>
@@ -408,6 +411,7 @@ function BulkExpirySame({ kind, list, counting, person }: { kind: IssueKind; lis
         progress={progress} results={results}
         canRun={canRun}
         onConfirm={async () => {
+            setProgress((p) => ({ ...p, running: true }));
           const errors: string[] = [];
           let ok = 0;
           for (let idx = 0; idx < list.length; idx++) {

@@ -7,7 +7,6 @@
 --    was a full task-history scan (0004 only indexes wave/from/to).
 -- https://trailing-k.com/wave/0167 (a supervisor's dashboard froze while a
 -- large audit backlog accumulated — every tab re-read the whole task table.)
-\set ON_ERROR_STOP on
 
 create index if not exists pick_tasks_completed_idx
   on public.pick_tasks (completed_at)

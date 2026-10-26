@@ -161,6 +161,17 @@ export function sisaFromTasks(waves: WaveRow[], tasks: TaskRow[], stockNow: Stoc
  * Cancelled tasks are left off the sheet. `stockNow` (physical stock of the
  * bins the tasks touch) gives the Sisa; without it Sisa is 0.
  */
+/** Bin, batch, expiry and quantity of a task: the posted actuals once COMPLETED, else the plan. */
+function actualOf(t: TaskRow): { bin: string; batch: string; expiry: string; qty: number } {
+  if (t.status !== 'COMPLETED') return { bin: t.from_bin, batch: t.batch_lot, expiry: t.expiry_date, qty: Number(t.quantity) };
+  return {
+    bin: t.actual_from_bin ?? t.from_bin,
+    batch: t.actual_batch_lot ?? t.batch_lot,
+    expiry: t.actual_expiry_date ?? t.expiry_date,
+    qty: Number(t.actual_quantity ?? t.quantity),
+  };
+}
+
 export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound: OutboundRow[], stockNow: StockNow[] = [], allWaves: WaveRow[] = waves): Picklist[] {
   const sisa = sisaFromTasks(allWaves, tasks, stockNow);
   const out: Picklist[] = [];
@@ -175,17 +186,21 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
       const orderNos = [...new Set(outbound
         .filter((o) => o.wave_id === w.id && o.shipment_number === shipment)
         .flatMap((o) => o.order_nos))].sort();
-      const lines: AllocationLine[] = mine.map((t, i) => ({
+      const lines: AllocationLine[] = mine.map((t, i) => {
+        // A posted line shows what the picker actually took, like its Sisa does: the
+        // downloaded sheet is booked against bins, and the planned bin was not touched.
+        const a = actualOf(t);
+        return {
         shipmentNumber: shipment,
         waveNo: w.wave_no,
         orderNos,
         sku: t.sku,
         description: t.description,
-        location: t.from_bin,
-        binId: `${t.from_bin}|${t.sku}|${t.batch_lot || 'NOBATCH'}`,
-        batch: t.batch_lot || null,
-        expiryDate: new Date(`${t.expiry_date}T00:00:00Z`),
-        qtyPick: Number(t.quantity),
+        location: a.bin,
+        binId: `${a.bin}|${t.sku}|${a.batch || 'NOBATCH'}`,
+        batch: a.batch || null,
+        expiryDate: new Date(`${a.expiry}T00:00:00Z`),
+        qtyPick: a.qty,
         pickType: t.pick_type ?? 'CASE',
         upp: Number(t.upp) || 1,
         uom: lookupUom(t.sku) || t.uom,
@@ -197,7 +212,8 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
         breaksPallet: t.breaks_pallet,
         slotTime: w.planned_slot,
         restNote: sisa.get(t.id)?.restNote ?? null,
-      }));
+      };
+      });
       const hasPallet = lines.some((l) => l.pickType === 'PALLET');
       const hasCase = lines.some((l) => l.pickType === 'CASE');
       out.push({

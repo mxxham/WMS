@@ -6,7 +6,6 @@
 -- both the anon and authenticated right), then grant explicitly to the two
 -- server roles. check_request is the PostgREST pre-request hook and must stay
 -- unauthenticated-callable — it is the gate itself, not a leak.
-\set ON_ERROR_STOP on
 
 do $$
 declare

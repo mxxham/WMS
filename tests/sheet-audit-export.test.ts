@@ -11,7 +11,7 @@ console.log('\nPicking audit export');
 
 const line = (o: Partial<ExportLine>): ExportLine => ({
   id: 'l1', shipment_number: 'S1', wave_no: '1', picklist: 'PL-S1', seq: 1, bin_code: 'CA01A01', sku: '550024919', description: 'Rimula',
-  uom: 'CAR', batch: 'C1', expiry: '2031-07-07', qty: 2, bin_remaining: 4, line_state: 'OK', ...o,
+  uom: 'CAR', batch: 'C1', expiry: '2031-07-07', qty: 2, bin_remaining: 4, line_state: 'OK', volume_l: 20, ...o,
 });
 const att = (o: Partial<ExportAttempt>): ExportAttempt => ({
   line_id: 'l1', attempt_no: 1, checker_name: 'Sari', method: 'RACK', result: 'OK', errors: [], counted_qty: 2, found_sku: '550024919',
