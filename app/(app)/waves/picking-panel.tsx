@@ -67,7 +67,12 @@ export function PickingPanel({ wave: w, tasks, orders, onClose }: {
   function posted(key: string) {
     router.refresh();
     const next = lines.find((l) => !l.posted && l.key !== key);
-    if (next) setTimeout(() => document.getElementById(`line-${next.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 400);
+    if (next) setTimeout(() => {
+      const el = document.getElementById(`line-${next.key}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Keep the scanner working: the next line's scan field takes focus without a tap.
+      el?.querySelector<HTMLInputElement>("[data-rack-input]")?.focus();
+    }, 400);
   }
 
   async function close(): Promise<string | null> {
