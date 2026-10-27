@@ -6,26 +6,34 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { ROLES } from "@/lib/username";
-import { createUser, resetPassword, setActive, setRole, setUserApps } from "./actions";
+import { JOBS, JOB_LABEL, type Job } from "@/lib/jobs";
+import { createUser, resetPassword, setActive, setJob, setUserApps } from "./actions";
 import { APP_LABEL, type AppId } from "@/lib/apps";
 
-export type UserRow = { id: string; name: string; username: string; role: string; active: boolean; apps: AppId[]; default_app: AppId | null };
-const ROLE: Record<string, string> = { operator: "Operator", supervisor: "Supervisor", admin: "Admin" };
+export type UserRow = { id: string; name: string; username: string; job: Job; active: boolean; apps: AppId[]; default_app: AppId | null };
 
 export function UsersClient({ rows, me, shared, locked }: { rows: UserRow[]; me: string; shared: string[]; locked: boolean }) {
   const tag = (u: UserRow) => `${u.id === me ? " (Anda)" : ""}${shared.includes(u.id) ? " (akun bersama)" : ""}`;
   const lockedShared = (u: UserRow) => locked && shared.includes(u.id);
+  const [filter, setFilter] = useState<Job | "">("");
+  const list = filter ? rows.filter((u) => u.job === filter) : rows;
   return (
     <div className="space-y-4">
       <AddUser />
+      <div className="max-w-xs">
+        <Label htmlFor="job-filter">Filter peran</Label>
+        <Select id="job-filter" value={filter} onChange={(e) => setFilter(e.target.value as Job | "")}>
+          <option value="">Semua peran</option>
+          {JOBS.map((j) => <option key={j} value={j}>{JOB_LABEL[j]}</option>)}
+        </Select>
+      </div>
       {/* Phone: cards. Desktop: a table. */}
       <ul className="space-y-2 md:hidden">
-        {rows.map((u) => (
+        {list.map((u) => (
           <li key={u.id} className={cn("flex items-center gap-3 rounded-lg bg-white p-3", !u.active && "opacity-60")}>
             <span className="min-w-0 flex-1">
               <span className="block font-medium">{u.name}{tag(u)}</span>
-              <span className="block text-sm text-steel-500">{u.username} · {ROLE[u.role]} · {u.active ? "Aktif" : "Nonaktif"}</span>
+              <span className="block text-sm text-steel-500">{u.username} · {JOB_LABEL[u.job]} · {u.active ? "Aktif" : "Nonaktif"}</span>
             </span>
             <UserMenu u={u} self={u.id === me} lockedShared={lockedShared(u)} />
           </li>
@@ -34,9 +42,9 @@ export function UsersClient({ rows, me, shared, locked }: { rows: UserRow[]; me:
       <div className="hidden rounded-lg bg-white md:block">
         <Table>
           <thead><tr><Th>Nama</Th><Th>Nama pengguna</Th><Th>Peran</Th><Th>Status</Th><Th /></tr></thead>
-          <tbody>{rows.map((u) => (
+          <tbody>{list.map((u) => (
             <tr key={u.id} className={cn(!u.active && "text-steel-500")}>
-              <Td>{u.name}{tag(u)}</Td><Td>{u.username}</Td><Td>{ROLE[u.role]}</Td>
+              <Td>{u.name}{tag(u)}</Td><Td>{u.username}</Td><Td>{JOB_LABEL[u.job]}</Td>
               <Td>{u.active ? "Aktif" : "Nonaktif"}</Td>
               <Td className="text-right"><UserMenu u={u} self={u.id === me} lockedShared={lockedShared(u)} /></Td>
             </tr>
@@ -48,23 +56,23 @@ export function UsersClient({ rows, me, shared, locked }: { rows: UserRow[]; me:
 }
 
 function AddUser() {
-  const [f, setF] = useState({ name: "", username: "", password: "", role: "operator" });
+  const [f, setF] = useState({ name: "", username: "", password: "", job: "operator" as Job });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   return (
     <ConfirmButton title="Tambah pengguna" confirmLabel="Buat akun"
-      summary={`Buat akun ${f.name || "baru"} (${f.username.trim().toLowerCase() || "nama pengguna"}) sebagai ${ROLE[f.role]}. Berikan nama pengguna dan kata sandi awal kepada orangnya.`}
+      summary={`Buat akun ${f.name || "baru"} (${f.username.trim().toLowerCase() || "nama pengguna"}) sebagai ${JOB_LABEL[f.job]}. Berikan nama pengguna dan kata sandi awal kepada orangnya.`}
       extra={
         <div className="space-y-3">
           <div><Label htmlFor="nu-name">Nama</Label><Input id="nu-name" value={f.name} onChange={set("name")} /></div>
           <div><Label htmlFor="nu-user">Nama pengguna</Label><Input id="nu-user" value={f.username} onChange={set("username")} autoCapitalize="none" spellCheck={false} placeholder="mis. ani" /></div>
           <div><Label htmlFor="nu-pass">Kata sandi awal (min. 8)</Label><Input id="nu-pass" value={f.password} onChange={set("password")} autoComplete="new-password" /></div>
-          <div><Label htmlFor="nu-role">Peran</Label>
-            <Select id="nu-role" value={f.role} onChange={set("role")}>{ROLES.map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}</Select></div>
+          <div><Label htmlFor="nu-job">Peran</Label>
+            <Select id="nu-job" value={f.job} onChange={set("job")}>{JOBS.map((j) => <option key={j} value={j}>{JOB_LABEL[j]}</option>)}</Select></div>
         </div>
       }
       onConfirm={async () => {
         const err = await createUser(f);
-        if (!err) setF({ name: "", username: "", password: "", role: "operator" });
+        if (!err) setF({ name: "", username: "", password: "", job: "operator" as Job });
         return err;
       }}>
       <UserPlus className="h-4 w-4" />Tambah pengguna
@@ -73,7 +81,7 @@ function AddUser() {
 }
 
 function UserMenu({ u, self, lockedShared }: { u: UserRow; self: boolean; lockedShared: boolean }) {
-  const [role, setR] = useState(u.role);
+  const [job, setJ] = useState<Job>(u.job);
   const [pw, setPw] = useState("");
   const [apps, setApps] = useState<AppId[]>(u.apps ?? []);
   const [defaultApp, setDefaultApp] = useState<AppId | null>(u.default_app);
@@ -110,10 +118,10 @@ function UserMenu({ u, self, lockedShared }: { u: UserRow; self: boolean; locked
       <MenuSection>
         {!self && (
           <div><ConfirmButton size="sm" variant="outline" title={`Ubah peran ${u.name}`} confirmLabel="Simpan peran"
-            summary={`${u.name} menjadi ${ROLE[role]}. Menu dan izin mengikuti peran baru saat halaman dimuat ulang.`}
-            extra={<div><Label htmlFor={`role-${u.id}`}>Peran</Label>
-              <Select id={`role-${u.id}`} value={role} onChange={(e) => setR(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}</Select></div>}
-            onConfirm={() => setRole(u.id, role)}>Ubah peran</ConfirmButton></div>
+            summary={`${u.name} menjadi ${JOB_LABEL[job]}. Menu dan izin mengikuti peran baru saat halaman dimuat ulang.`}
+            extra={<div><Label htmlFor={`job-${u.id}`}>Peran</Label>
+              <Select id={`job-${u.id}`} value={job} onChange={(e) => setJ(e.target.value as Job)}>{JOBS.map((j) => <option key={j} value={j}>{JOB_LABEL[j]}</option>)}</Select></div>}
+            onConfirm={() => setJob(u.id, job)}>Ubah peran</ConfirmButton></div>
         )}
         <div><ConfirmButton size="sm" variant="outline" title={`Reset kata sandi ${u.name}`} confirmLabel="Simpan kata sandi"
           summary={`Kata sandi ${u.username} diganti. Sesi yang sedang masuk tetap berjalan sampai Keluar.`}

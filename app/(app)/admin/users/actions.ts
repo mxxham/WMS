@@ -4,10 +4,11 @@ import { checkRole } from "@/lib/auth";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { PASSWORD_MIN, internalEmail, newUserError, normalizeUsername } from "@/lib/username";
 import { loginRequired } from "@/lib/auth-route";
+import type { Job } from "@/lib/jobs";
 
 // Pengguna (spec §3). Passwords live in Supabase Auth, so creating accounts and setting passwords
-// use the Auth admin API (service role) after an admin check; role and status go through the
-// 0071 RPCs as the admin, which enforce "not yourself" and "one active admin".
+// use the Auth admin API (service role) after an admin check; job and status go through the
+// 0071/0109 RPCs as the admin, which enforce "not yourself" and "one active admin".
 const BAN = "876000h"; // ~100 years: Supabase's way to block sign-in
 const VALID_APPS = ["shell_wms", "ckb_3pl"] as const;
 
@@ -32,7 +33,7 @@ async function sharedGuard(id: string): Promise<string | null> {
   return "Ini akun bersama yang dipakai semua perangkat selama login belum diwajibkan. Peran, status dan kata sandinya baru bisa diubah setelah LOGIN_REQUIRED aktif.";
 }
 
-export async function createUser(i: { name: string; username: string; password: string; role: string }): Promise<string | null> {
+export async function createUser(i: { name: string; username: string; password: string; job: Job }): Promise<string | null> {
   try {
     await admin();
     const bad = newUserError(i);
@@ -47,20 +48,20 @@ export async function createUser(i: { name: string; username: string; password: 
       user_metadata: { name: i.name.trim() }, app_metadata: { username },
     });
     if (error || !data.user) return error?.message ?? "Akun tidak bisa dibuat.";
-    if (i.role !== "operator") {
-      const { error: e2 } = await db.rpc("set_user_role", { p_user: data.user.id, p_role: i.role });
+    if (i.job !== "operator") {
+      const { error: e2 } = await db.rpc("set_user_job", { p_user: data.user.id, p_job: i.job });
       if (e2) return `Akun dibuat sebagai operator; peran tidak bisa diubah: ${e2.message}`;
     }
     return done();
   } catch (e) { return (e as Error).message; }
 }
 
-export async function setRole(id: string, role: string): Promise<string | null> {
+export async function setJob(id: string, job: Job): Promise<string | null> {
   try {
     await admin();
     const shared = await sharedGuard(id);
     if (shared) return shared;
-    const { error } = await (await createClient()).rpc("set_user_role", { p_user: id, p_role: role });
+    const { error } = await (await createClient()).rpc("set_user_job", { p_user: id, p_job: job });
     return error ? error.message : done();
   } catch (e) { return (e as Error).message; }
 }

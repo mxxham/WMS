@@ -1,3 +1,5 @@
+import { JOBS } from "./jobs";
+
 /**
  * Usernames (spec 2026-10-12 login §1): people sign in with a username, Supabase Auth with an email.
  * New accounts get a hidden internal email; sign-in resolves a username to whatever email the
@@ -22,14 +24,13 @@ export function internalEmail(u: string): string {
 }
 
 export const PASSWORD_MIN = 8;
-export const ROLES = ["operator", "supervisor", "admin"] as const;
 
 /** Tambah pengguna: the first problem with the form, or null. */
-export function newUserError(i: { name: string; username: string; password: string; role: string }): string | null {
+export function newUserError(i: { name: string; username: string; password: string; job: string }): string | null {
   if (i.name.trim().length < 2) return "Nama wajib diisi.";
   const u = usernameError(normalizeUsername(i.username));
   if (u) return u;
   if (i.password.length < PASSWORD_MIN) return `Kata sandi minimal ${PASSWORD_MIN} karakter.`;
-  if (!(ROLES as readonly string[]).includes(i.role)) return "Peran tidak dikenal.";
+  if (!(JOBS as readonly string[]).includes(i.job)) return "Peran tidak dikenal.";
   return null;
 }

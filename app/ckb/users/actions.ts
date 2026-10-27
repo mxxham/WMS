@@ -23,7 +23,7 @@ export async function createCkbUser(i: { name: string; username: string; passwor
   try {
     await ckbAdmin();
     if (!isCkbRole(i.role)) return "Peran CKB tidak dikenal.";
-    const bad = newUserError({ ...i, role: "operator" });
+    const bad = newUserError({ ...i, job: "operator" });
     if (bad) return bad;
     if (i.role === "customer" && i.customers.length === 0) return "Perwakilan customer harus ditugaskan ke minimal satu customer.";
     const username = normalizeUsername(i.username);

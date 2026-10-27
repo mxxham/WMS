@@ -80,7 +80,7 @@ test('the shared account is marked in its sign-in data, and the middleware passe
 });
 test('while login is not required, Pengguna refuses to deactivate, re-role or reset the shared account', () => {
   const a = src('app/(app)/admin/users/actions.ts');
-  for (const fn of ['setRole', 'setActive', 'resetPassword']) {
+  for (const fn of ['setJob', 'setActive', 'resetPassword']) {
     const body = a.slice(a.indexOf(`export async function ${fn}`), a.indexOf('\n}', a.indexOf(`export async function ${fn}`)));
     assert.ok(body.includes('sharedGuard('), `${fn} does not guard the shared account`);
   }
