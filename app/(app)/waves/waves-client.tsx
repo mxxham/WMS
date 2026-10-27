@@ -52,9 +52,11 @@ const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSh
  * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
  * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = false, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
+export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = false, waves, tasks, dayWaves = waves, dayTasks = tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
   date: string; prevDate: string | null; nextDate: string | null;
   role: Role; /** operator view: only their assigned shipments are passed in */ assignedOnly?: boolean; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
+  /** the whole day's waves and tasks, for every replay (Sisa, rest notes, print order); default = waves / tasks */
+  dayWaves?: WaveRow[]; dayTasks?: TaskRow[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
   /** audit / loading state per `${wave_id}|${shipment}` (0024) */
@@ -138,7 +140,7 @@ export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = fal
 
   const model: WaveModel = {
     date, prevDate, nextDate, waves, tasks, outbound, supervisor, rpc, onDone: () => router.refresh(),
-    assignedOnly, short, waits, audit, rest: restNotesFromTasks(waves, tasks), dos,
+    assignedOnly, short, waits, audit, rest: restNotesFromTasks(dayWaves, dayTasks), dos,
     // 0073: picks whose pallet's relokasi is already posted (posted alone to unblock another
     // wave) may not be cancelled: the moved cartons stay moved and the pickface keeps the rest.
     postedMoveOf: new Map([...movesOfPicks([...tasks].sort((a, b) => a.seq - b.seq), { anyState: true })]
@@ -166,16 +168,16 @@ export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = fal
         <MenuSection>
           {supervisor && <div><AddOrder date={date} /></div>}
           {supervisor && untouched.length > 0 && short.size === 0 && <div>{replanButton("outline")}</div>}
-          <div><Button variant="outline" size="sm" onClick={() => printPicklists(waves, waves, tasks, outbound, `picklist_${date}.pdf`)}>
+          <div><Button variant="outline" size="sm" onClick={() => printPicklists(waves, dayWaves, dayTasks, outbound, `picklist_${date}.pdf`)}>
             <FileText className="h-4 w-4" />PDF semua picklist</Button></div>
           <div><Button variant="outline" size="sm" onClick={() => printBinToBin(waves, tasks, `bintobin_${date}.pdf`)}>
             <FileText className="h-4 w-4" />PDF Bin To Bin</Button></div>
-          <div><Button variant="outline" size="sm" onClick={() => printExcel(waves, waves, tasks, outbound, `picklist_${date}.xlsx`)}>
+          <div><Button variant="outline" size="sm" onClick={() => printExcel(waves, dayWaves, dayTasks, outbound, `picklist_${date}.xlsx`)}>
             <FileSpreadsheet className="h-4 w-4" />Excel picklist</Button></div>
         </MenuSection>
       </ActionMenu>
     ),
-    printWave: (w) => printPicklists([w], waves, tasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`),
+    printWave: (w) => printPicklists([w], dayWaves, dayTasks, outbound, `picklist_NO${w.wave_no}_${w.planned_date}.pdf`),
   };
 
   if (phone) return <WavesPhone model={model} openWave={openWave} picking={params.get("pick") === "1"} />;

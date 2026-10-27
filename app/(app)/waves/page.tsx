@@ -1,7 +1,7 @@
 import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
-import { assignedDates, filterToAssigned, keepWaveIds, neighbourDates } from "@/lib/assigned-waves";
+import { assignedDates, inventoryWork, keepWaveIds, neighbourDates, scopeToAssigned } from "@/lib/assigned-waves";
 import { PageHeader } from "@/components/app/page-header";
 import type { OutboundRow, TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import type { ShipmentState } from "@/lib/pick-audit";
@@ -56,9 +56,10 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     // The nearest planned day after this one, for the day arrows.
     supabase.from("waves").select("planned_date").gt("planned_date", date).order("planned_date").limit(1),
   ]);
-  const waves = assignedOnly ? filterToAssigned((wavesAll ?? []) as WaveRow[], assignedToday) : wavesAll;
-  const keep = new Set((waves ?? []).map((w) => w.id));
-  const tasks = assignedOnly ? keepWaveIds(keep, tasksAll) : tasksAll;
+  // Displayed: the operator's shipments. Replayed (Sisa, rest notes, print order): the whole day, so an
+  // assignment never changes a Sisa (AGENTS.md: Sisa is one replay of the day in one fixed order).
+  const { waves, tasks, dayWaves, dayTasks } = scopeToAssigned((wavesAll ?? []) as WaveRow[], tasksAll, assignedOnly ? assignedToday : null);
+  const keep = new Set(waves.map((w) => w.id));
   const outbound = assignedOnly ? keepWaveIds(keep, (outboundAll ?? []) as { wave_id: string | null }[]) : outboundAll;
   const requests = assignedOnly ? keepWaveIds(keep, (requestsAll ?? []) as { wave_id: string | null }[]) : requestsAll;
   const keepTask = new Set(tasks.map((t) => t.id));
@@ -88,7 +89,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
   );
 
   // Fetch manual DO numbers for this date's waves (0079).
-  const waveIds = (waves ?? []).map((w) => w.id);
+  const waveIds = waves.map((w) => w.id);
   const { data: dosRows } = waveIds.length > 0
     ? await supabase.from("shipment_do_no").select("wave_id, shipment_number, do_nos").in("wave_id", waveIds)
     : { data: null };
@@ -106,15 +107,17 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           nextDate={nextDate}
           role={user.role}
           assignedOnly={assignedOnly}
-          waves={(waves ?? []) as WaveRow[]}
+          waves={waves}
           tasks={tasks}
+          dayWaves={dayWaves}
+          dayTasks={dayTasks}
           outbound={(outbound ?? []) as (OutboundRow & OutboundDetail)[]}
           shortfalls={shortfalls}
           waits={waits}
           audit={audit}
-          counts={(counts ?? []) as OpenCount[]}
+          counts={inventoryWork(assignedOnly, counts as OpenCount[] | null)}
           lastImport={(lastImport?.[0]?.created_at as string | undefined) ?? null}
-          corrections={(corrections ?? []) as PicklistCorrection[]}
+          corrections={inventoryWork(assignedOnly, corrections as PicklistCorrection[] | null)}
           requests={(requests ?? []) as LineRequest[]}
           dos={dos}
         />
