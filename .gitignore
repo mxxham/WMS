@@ -45,3 +45,6 @@ backups/
 
 # Deepwork task state
 .slim/deepwork/
+
+# Local build cache (opencode prodbuild) — never commit
+tmp/
