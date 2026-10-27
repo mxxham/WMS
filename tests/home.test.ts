@@ -13,9 +13,8 @@ console.log('\nHome page and nav list');
 
 const hrefs = (job: Job) => sectionsFor(job).flatMap((s) => s.links.map((l) => l.href));
 
-// /assign (Penugasan) is added to the nav in this task; its page arrives with the assignment screen.
 test('every module card is a real page', () => {
-  for (const href of hrefs('admin').filter((h) => h !== '/assign')) assert.ok(existsSync(`app/(app)${href}/page.tsx`), `${href} has no page`);
+  for (const href of hrefs('admin')) assert.ok(existsSync(`app/(app)${href}/page.tsx`), `${href} has no page`);
 });
 test('operators see only their modules (no Dashboard, Alokasi, Import…)', () => {
   const op = hrefs('operator');
