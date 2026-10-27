@@ -10,6 +10,12 @@ grant select, insert, update, delete on all tables in schema public to authentic
 
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.avail(p_date date, p_bin text) returns numeric language sql as $$
   select coalesce(sum(quantity), 0) from planning_stock(p_date) where bin_code = p_bin and sku = '550044709' and batch_lot = 'R1' $$;
 
@@ -28,6 +34,7 @@ select save_plan('2026-10-01', '{
     {"wave_no":"2","shipment_number":"A2","task_type":"PICK","sku":"550044709","from_bin":"CF40A01","batch_lot":"R1","expiry_date":"2031-03-03","quantity":25,"seq":1}],
   "outbound":[{"wave_no":"1","shipment_number":"A1","sku":"550044709","quantity_requested":30,"quantity_allocated":30},
               {"wave_no":"2","shipment_number":"A2","sku":"550044709","quantity_requested":25,"quantity_allocated":25}]}'::jsonb);
+select pg_temp.assign_day('2026-10-01', '11111111-1111-1111-1111-111111111111');
 
 -- 1. Reservation: another date sees stock net of open tasks (incl. incoming replenish).
 select pg_temp.check('reserve bin CF40C01 fully promised (48 - 30 - 18 = 0)', pg_temp.avail('2026-10-02', 'CF40C01') = 0);
@@ -91,6 +98,7 @@ select pg_temp.check('re-plan replaces wave 2 only',
     "outbound":[{"wave_no":"2","shipment_number":"A2","sku":"550044709","quantity_requested":25,"quantity_allocated":25}]}'::jsonb)
    @> '{"replaced":1,"kept":1,"tasks":2}'::jsonb)
   and (select count(*) from waves where planned_date='2026-10-01') = 2);
+select pg_temp.assign_day('2026-10-01', '11111111-1111-1111-1111-111111111111');
 select pg_temp.check('no shortfalls after re-plan', not exists (select 1 from task_shortfalls where planned_date='2026-10-01'));
 
 -- Picker takes from a different bin than planned (with reason): ledger uses the real bin.

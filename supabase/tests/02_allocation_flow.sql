@@ -8,6 +8,12 @@ update profiles set role='admin' where id='33333333-3333-3333-3333-333333333333'
 
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 
 -- Fixture: CB01A01 gets 20 of batch T1 exp 2031-01-01; CB02B01 gets 48 of T1 exp 2031-01-01
 -- and 5 of the SAME batch with a later expiry (two physical rows, one batch).
@@ -40,6 +46,7 @@ select pg_temp.check('supervisor saves plan', (save_plan('2026-09-24', '{
     {"wave_no":"1","shipment_number":"S1","task_type":"PICK","sku":"550070612","from_bin":"CB01A01","batch_lot":"T1","expiry_date":"2031-01-01","quantity":25,"pick_type":"CASE","seq":2}],
   "outbound":[{"wave_no":"1","shipment_number":"S1","sku":"550070612","order_nos":["O1"],"quantity_requested":30,"quantity_allocated":25,"shortage_reason":"NO_STOCK"}]
 }'::jsonb)->>'tasks')::int = 2);
+select pg_temp.assign_day('2026-09-24', '11111111-1111-1111-1111-111111111111');
 
 select pg_temp.check('planning moved no stock',
   (select quantity from inventory_detail where bin_code='CB01A01' and batch_lot='T1') = 20);
@@ -80,6 +87,7 @@ select save_plan('2026-09-25', '{
   "waves":[{"wave_no":"7","shipment_numbers":["S2"]}],
   "tasks":[{"wave_no":"7","shipment_number":"S2","task_type":"PICK","sku":"550070612","from_bin":"CB02B01","batch_lot":"T1","expiry_date":"2031-01-01","quantity":10,"seq":1},
            {"wave_no":"7","shipment_number":"S2","task_type":"PICK","sku":"550070612","from_bin":"CB01A01","batch_lot":"T1","expiry_date":"2031-01-01","quantity":999,"seq":2}]}'::jsonb);
+select pg_temp.assign_day('2026-09-25', '11111111-1111-1111-1111-111111111111');
 do $$ begin
   perform complete_wave((select id from waves where wave_no='7'));
   perform pg_temp.check('short wave rejected', false);

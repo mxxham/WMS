@@ -9,6 +9,12 @@ update profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111
 update profiles set role = 'operator' where id = '22222222-2222-2222-2222-222222222222';
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.qty(p_bin text, p_sku text) returns numeric language sql as $$
   select coalesce(sum(v.quantity), 0) from inventory v join bins b on b.id = v.bin_id join items i on i.id = v.item_id
   where b.bin_code = p_bin and i.sku = p_sku $$;
@@ -47,6 +53,7 @@ select save_plan('2026-11-02', '{
    {"wave_no":"1","shipment_number":"SH1","task_type":"PICK","sku":"550070614","from_bin":"CB33E01","batch_lot":"P11","expiry_date":"2030-09-11","quantity":5,"pick_type":"CASE","seq":8}]}'::jsonb) \g /dev/null
 -- Ids before posting: splits renumber the tasks.
 create temp table ids as select pg_temp.t(1) p1, pg_temp.t(2) p2, pg_temp.t(3) m3, pg_temp.t(4) p4, pg_temp.t(5) p5, pg_temp.t(6) p6, pg_temp.t(7) p7, pg_temp.t(8) p8;
+select pg_temp.assign_day('2026-11-02', '22222222-2222-2222-2222-222222222222');
 
 -- From here on: the operator.
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
@@ -191,6 +198,7 @@ create temp table ids2 as select
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-03' and t.seq = 1) p,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-03' and t.seq = 2) m,
   (select id from waves where planned_date = '2026-11-03') w;
+select pg_temp.assign_day('2026-11-03', '22222222-2222-2222-2222-222222222222');
 -- Budi posts the move first (Posting Bin To Bin saja), leaving 6 in the pallet for the pick.
 select post_task((select m from ids2), 30, null, null, null, null) \g /dev/null
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
@@ -224,6 +232,7 @@ create temp table ids3 as select
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-04' and t.seq = 2) m,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-04' and t.seq = 3) b,
   (select id from waves where planned_date = '2026-11-04') w;
+select pg_temp.assign_day('2026-11-04', '22222222-2222-2222-2222-222222222222');
 select post_task((select m from ids3), 30, null, null, null, null) \g /dev/null
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 
@@ -292,6 +301,7 @@ select save_plan('2026-11-05', '{
 create temp table ids4 as select
   (select id from waves where planned_date = '2026-11-05') w,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-05' and t.seq = 2) mo;
+select pg_temp.assign_day('2026-11-05', '22222222-2222-2222-2222-222222222222');
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 
 create temp table req_mo as select pg_temp.requests() n;
@@ -333,6 +343,7 @@ select save_plan('2026-11-09', '{
 create temp table ids9 as select (select id from waves where planned_date = '2026-11-09') w,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-09' and t.seq = 1) p,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-09' and t.seq = 2) m;
+select pg_temp.assign_day('2026-11-09', '22222222-2222-2222-2222-222222222222');
 create or replace function pg_temp.batches(p_bin text) returns text language sql as $$
   select string_agg(v.batch_lot || ':' || v.quantity, ',' order by v.batch_lot) from inventory v join bins b on b.id = v.bin_id
   join items i on i.id = v.item_id where b.bin_code = p_bin and i.sku = '550070614' $$;
@@ -401,6 +412,7 @@ select save_plan('2026-11-10', '{
 create temp table ids10 as select (select id from waves where planned_date = '2026-11-10') w,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-10' and t.seq = 1) p,
   (select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-11-10' and t.seq = 2) m;
+select pg_temp.assign_day('2026-11-10', '22222222-2222-2222-2222-222222222222');
 create or replace function pg_temp.layout10() returns text language sql as $$
   select string_agg(t.task_type || '@' || t.seq || ':' || coalesce(ab.bin_code, fb.bin_code), ',' order by t.seq)
   from pick_tasks t join bins fb on fb.id = t.from_bin_id left join bins ab on ab.id = t.actual_from_bin_id

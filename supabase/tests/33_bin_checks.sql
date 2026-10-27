@@ -7,6 +7,12 @@ insert into auth.users values ('11111111-1111-1111-1111-111111111111','op@x','{"
 update profiles set role = 'operator' where id = '11111111-1111-1111-1111-111111111111';
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
 begin execute p_sql; return false; exception when others then
   if sqlerrm not like p_like then raise notice 'got: %', sqlerrm; end if;
@@ -26,6 +32,7 @@ select save_plan('2026-10-28', '{
   "outbound":[]}'::jsonb) \g /dev/null
 create or replace function pg_temp.t(p_seq int) returns pick_tasks language sql as $$
   select t.* from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-10-28' and t.seq = p_seq $$;
+select pg_temp.assign_day('2026-10-28', '11111111-1111-1111-1111-111111111111');
 reset role; update profiles set role = 'operator' where id = '11111111-1111-1111-1111-111111111111'; set role authenticated;
 
 select pg_temp.check('nothing to ask before the task is posted', not (bin_left_after((pg_temp.t(1)).id)->>'ask')::boolean);

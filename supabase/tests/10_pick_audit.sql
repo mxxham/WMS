@@ -10,6 +10,12 @@ update profiles set role='supervisor' where id='22222222-2222-2222-2222-22222222
 
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
 begin execute p_sql; return false; exception when others then
   if sqlerrm not like p_like then raise notice 'got: %', sqlerrm; end if;
@@ -54,6 +60,7 @@ select save_plan('2026-10-06', '{
     {"wave_no":"1","shipment_number":"PA4","sku":"550024919","quantity_requested":2,"quantity_allocated":2},
     {"wave_no":"1","shipment_number":"PA5","sku":"550024919","quantity_requested":2,"quantity_allocated":2},
     {"wave_no":"2","shipment_number":"PA3","sku":"550044709","quantity_requested":4,"quantity_allocated":4}]}'::jsonb);
+select pg_temp.assign_day('2026-10-06', '11111111-1111-1111-1111-111111111111');
 
 -- ---- A. Error rule, who picked, views ------------------------------------
 select pg_temp.check('errors: batch compare ignores case and spaces',
@@ -275,6 +282,7 @@ reset role; drop table if exists pg_temp._replace, pg_temp._wave_ids; set role a
 select save_plan('2026-09-01', '{"waves":[{"wave_no":"1","shipment_numbers":["LG1"]}],
   "tasks":[{"wave_no":"1","shipment_number":"LG1","task_type":"PICK","sku":"550024919","from_bin":"CF37C01","batch_lot":"C1","expiry_date":"2031-07-07","quantity":1,"seq":1}],
   "outbound":[{"wave_no":"1","shipment_number":"LG1","sku":"550024919","quantity_requested":1,"quantity_allocated":1}]}'::jsonb);
+select pg_temp.assign_day('2026-09-01', '11111111-1111-1111-1111-111111111111');
 select set_config('app.by_name', '', true);
 select post_task((select t.id from pick_tasks t join waves w on w.id = t.wave_id where w.planned_date = '2026-09-01'));
 reset role;

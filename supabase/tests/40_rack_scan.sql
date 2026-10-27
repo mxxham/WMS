@@ -10,6 +10,12 @@ update profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111
 update profiles set role = 'operator' where id = '22222222-2222-2222-2222-222222222222';
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
 begin execute p_sql; return false; exception when others then
   if sqlerrm not like p_like then raise notice 'got: %', sqlerrm; end if;
@@ -53,6 +59,7 @@ select save_plan('2026-11-20', '{
    {"wave_no":"1","task_type":"REPLENISH","sku":"550044709","from_bin":"CF36E01","to_bin":"CF36E02","batch_lot":"H1","expiry_date":"2030-08-18","quantity":8,"pick_type":"CASE","seq":6}]}'::jsonb) \g /dev/null
 -- save_plan's temp tables, once per transaction.
 reset role; drop table if exists _replace, _wave_ids; set role authenticated;
+select pg_temp.assign_day('2026-11-20', '22222222-2222-2222-2222-222222222222');
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select save_plan('2026-11-21', '{
   "waves":[{"wave_no":"1","shipment_numbers":["RS2"],"planned_slot":"08:00"}],
@@ -65,6 +72,7 @@ select save_plan('2026-11-21', '{
    {"wave_no":"1","task_type":"REPLENISH","sku":"550044709","from_bin":"CF35E02","to_bin":"CF35A02","batch_lot":"H1","expiry_date":"2030-08-18","quantity":5,"pick_type":"CASE","seq":6}]}'::jsonb) \g /dev/null
 create temp table a as select pg_temp.wave('2026-11-20') w, pg_temp.t('2026-11-20', 1) p1, pg_temp.t('2026-11-20', 2) p2,
   pg_temp.t('2026-11-20', 3) p3, pg_temp.t('2026-11-20', 4) p4, pg_temp.t('2026-11-20', 5) p5, pg_temp.t('2026-11-20', 6) m6;
+select pg_temp.assign_day('2026-11-21', '22222222-2222-2222-2222-222222222222');
 create temp table b as select pg_temp.wave('2026-11-21') w, pg_temp.t('2026-11-21', 1) p1, pg_temp.t('2026-11-21', 2) p2,
   pg_temp.t('2026-11-21', 3) p3, pg_temp.t('2026-11-21', 4) m4, pg_temp.t('2026-11-21', 5) p5, pg_temp.t('2026-11-21', 6) m6;
 grant select on a, b to authenticated;

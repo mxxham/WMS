@@ -11,6 +11,12 @@ update profiles set role='supervisor' where id='22222222-2222-2222-2222-22222222
 
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when ok then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
 begin execute p_sql; return false; exception when others then
   if sqlerrm not like p_like then raise notice 'got: %', sqlerrm; end if;
@@ -56,6 +62,7 @@ select save_plan('2026-10-06', '{
   "outbound":[
     {"wave_no":"1","shipment_number":"PA1","sku":"550044709","quantity_requested":10,"quantity_allocated":10},
     {"wave_no":"2","shipment_number":"PA2","sku":"550044709","quantity_requested":12,"quantity_allocated":12}]}'::jsonb);
+select pg_temp.assign_day('2026-10-06', '11111111-1111-1111-1111-111111111111');
 
 -- Post the replenish tasks (operator)
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';

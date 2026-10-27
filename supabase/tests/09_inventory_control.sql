@@ -12,6 +12,12 @@ update profiles set role='admin' where id='33333333-3333-3333-3333-333333333333'
 
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when coalesce(ok, false) then 'PASS' else 'FAIL' end, label; end $$;
+-- 0110: an operator posts only the shipments assigned to them; the fixture operator holds the day's shipments.
+create or replace function pg_temp.assign_day(p_date date, p_user uuid) returns void language sql security definer as $$
+  insert into public.shipment_assignments (planned_date, shipment_number, user_id, assigned_by_name)
+  select w.planned_date, s, p_user, 'fixture' from public.waves w, unnest(w.shipment_numbers) s where w.planned_date = p_date
+  on conflict do nothing $$;
+grant execute on function pg_temp.assign_day(date, uuid) to authenticated;
 create or replace function pg_temp.fails(p_sql text, p_like text) returns boolean language plpgsql as $$
 begin execute p_sql; return false; exception when others then
   if sqlerrm not like p_like then raise notice '   got: %', sqlerrm; end if;
@@ -129,6 +135,7 @@ select save_plan('2026-12-02', '{
   "waves":[{"wave_no":"1","shipment_numbers":["HX1"]}],
   "tasks":[{"wave_no":"1","shipment_number":"HX1","task_type":"PICK","sku":"550058593","from_bin":"CG11C01","batch_lot":"R7","expiry_date":"2031-05-05","quantity":6,"seq":1}],
   "outbound":[{"wave_no":"1","shipment_number":"HX1","sku":"550058593","quantity_requested":6,"quantity_allocated":6}]}'::jsonb);
+select pg_temp.assign_day('2026-12-02', '11111111-1111-1111-1111-111111111111');
 select pg_temp.check('a wave task on held stock cannot be posted',
   pg_temp.fails($q$select post_task((select id from pick_tasks where shipment_number='HX1'))$q$, '%ditahan (RECALL)%'));
 select pg_temp.check('release needs a reason',
@@ -320,6 +327,7 @@ select save_plan('2026-12-03', '{
   "waves":[{"wave_no":"1","shipment_numbers":["SC1"]}],
   "tasks":[{"wave_no":"1","shipment_number":"SC1","task_type":"PICK","sku":"550044709","from_bin":"CG12C01","batch_lot":"14H26JJ","expiry_date":"2030-08-14","quantity":4,"seq":1}],
   "outbound":[{"wave_no":"1","shipment_number":"SC1","sku":"550044709","quantity_requested":4,"quantity_allocated":4}]}'::jsonb);
+select pg_temp.assign_day('2026-12-03', '11111111-1111-1111-1111-111111111111');
 select pg_temp.as_user('op');
 select pg_temp.check('the picker''s name is required',
   pg_temp.fails($q$select post_task_by((select id from pick_tasks where shipment_number='SC1'), p_scanned => 'CG12C01')$q$, 'Nama picker wajib%'));
