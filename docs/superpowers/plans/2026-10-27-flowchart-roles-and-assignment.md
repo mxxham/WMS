@@ -365,3 +365,39 @@ tsx standalone tests, psql SQL tests.
 - [ ] **Step 3: Commit** `docs(readme): flowchart jobs and Penugasan`
 - [ ] **Step 4: Hand-off note for the user** — live needs `supabase db push` (0109, 0110) and a
   deploy, run by the user; the live placeholder accounts get their jobs from 0109 automatically.
+
+---
+
+### Task 9: `Remain Qty` in the picking audit download (added 27 Oct 2026 at the user's request)
+
+Separate from roles. The user: "yes thats exactly it". `Audit picking <date>.xlsx` built from the system's
+pick tasks (`app/(app)/audit/picking/download-pick-audit.tsx`) passes `bin_remaining: null`, so `Sisa sistem`
+is empty unless a rack count happened.
+
+**Files:**
+- Modify: `lib/sheet-audit-export.ts`, `app/(app)/audit/picking/download-pick-audit.tsx`
+- Test: `tests/sheet-audit-export.test.ts`
+
+**Decided:** `Remain Qty` = the bin's stock of that SKU at the end of the audit date, summed over batch + expiry —
+the `remain` column of `wms_day_report(p_date)` (0055), the same number as `Remain` in `Laporan WMS harian`.
+Column `Remain Qty` goes right after `Qty pick` on the per-bin sheet and on the per-line sheet (per line: the
+remain of that line's bin + SKU). The TOTAL row leaves it empty. Lines whose bin + SKU has no report row get `0`
+when the report ran, empty when it could not be read. The WMS-file download (`sisaLabel = "Sisa di file"`) keeps its
+own `Sisa di file` column and also gets `Remain Qty` only if the system download path passes the map — the file
+path passes nothing, so the column is omitted there (keep its current columns unchanged).
+
+**Interfaces:**
+- `auditWorkbookRows(lines, attempts, sisaLabel?, remain?: Map<string, number>)` — key `${bin_code}|${sku}`;
+  when `remain` is undefined, no `Remain Qty` column is produced.
+
+- [ ] **Step 1: Failing tests** in `tests/sheet-audit-export.test.ts`: with `remain = new Map([['CA01A01|550024919', 7]])`
+  the bins row and the line row have `"Remain Qty": 7`, placed right after `"Qty pick"` (assert key order);
+  a line whose key is missing gets `0`; without the map neither sheet has a `Remain Qty` key; TOTAL row has
+  `"Remain Qty": null` when the map is given.
+- [ ] **Step 2: Run** `npx tsx tests/sheet-audit-export.test.ts` — FAIL.
+- [ ] **Step 3: Implement** in `lib/sheet-audit-export.ts`; in `download-pick-audit.tsx` call
+  `supabase.rpc("wms_day_report", { p_date: date })` (paginate like other `fetchAll` uses if it can exceed 1,000
+  rows), sum `remain` per bin + SKU, pass the map. If the RPC errors, download without the column and show the
+  existing error style note `Remain Qty tidak bisa dibaca: <message>`.
+- [ ] **Step 4: Run** the test file, `npm run typecheck`, `npm run lint`.
+- [ ] **Step 5: Commit** `feat(audit): Remain Qty in the picking audit download`
