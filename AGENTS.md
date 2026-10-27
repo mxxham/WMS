@@ -35,7 +35,7 @@ npm run dev          # http://localhost:3000
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint, next/core-web-vitals
 npm run build        # next build
-npm test             # whole TypeScript suite, 31 files
+npm test             # whole TypeScript suite, 68 files
 ```
 
 Phone cameras need HTTPS or localhost. `npx next dev --experimental-https` for device testing.
@@ -58,7 +58,7 @@ psql -f supabase/tests/01_rls_and_stock_rules.sql
 roll back, so they are safe on local Supabase. `00_local_auth_stub.sql` is a stub, not real Supabase
 Auth — passing locally does not prove Auth behaviour.
 
-`supabase db push` applies migrations `0001_schema.sql`–`0048_add_wave_items.sql`. Two that are
+`supabase db push` applies migrations `0001_schema.sql`–`0110_shipment_assignments.sql`. Two that are
 easy to miss: `0005` adds the explicit `authenticated` grants without which *every query fails with
 "permission denied"* on new projects, and `0015_realtime.sql` powers the `Live` dot and page refresh
 (pages work without it, they just never update).
@@ -71,9 +71,9 @@ app/api/                 route handlers
 components/<area>/       bin, scan, warehouse, app/nav.tsx (role-gated nav)
 lib/allocator/           FEFO engine — pure functions, zero I/O
 lib/*.ts                 feature logic: labels, import, audit, SAP, batch codes
-supabase/migrations/     48 files; the real index of what exists
+supabase/migrations/     110 files; the real index of what exists
 supabase/seed.sql        2,970 bins / 106 SKUs / 1,790 stock rows
-tests/*.test.ts          31 standalone tsx files
+tests/*.test.ts          68 standalone tsx files
 ```
 
 ### The allocator engine
@@ -170,9 +170,18 @@ equipment mid-run. `splitPalletAndCaseTasks: false` combines them.
 - **The Excel reader stops at the last non-empty cell.** The WMS sheet declares a range to row
   1,048,563; reading only what exists cut import from ~21s to ~2s.
 
-Roles: `operator` (Scan, Penerimaan, Wave, Inventory, Gudang 3D, Cycle count, audits) ·
-`supervisor` (adds Dashboard, Alokasi, Putaway, Pickface, Adjust stok, Mutasi, Kualitas data,
-Lacak batch, Label, Master item) · `admin` (adds Import, Pengaturan).
+Jobs (0109): each account has one of seven jobs in `profiles.job` — `Admin Inbound`, `Admin Outbound`,
+`Checker`, `Inventory`, `Operator / Picker`, `Leader`, `Admin`. The role level (`operator` /
+`supervisor` / `admin`) is derived from the job by trigger, so every `has_role()` check keeps its
+meaning; change a job only through `set_user_job` (admin, `Pengguna`). Pages are gated per job on the
+server (`requirePage` / `checkPage`) from the one page table in `components/app/nav-config.ts`; the
+job-by-page matrix is in `docs/superpowers/specs/2026-10-26-flowchart-roles-and-assignment-design.md`
+— do not copy it elsewhere.
+
+Shipment assignment (0110): an `Operator / Picker` sees and posts only shipments assigned to them
+(`shipment_assignments`, keyed on day + shipment number, one operator per shipment). `Inventory`,
+`Leader` and `Admin` assign on `Penugasan` (`/assign`) through `assign_shipment` / `unassign_shipment`;
+the posting guard is in the database, not the UI.
 
 ## Conventions
 
@@ -196,7 +205,7 @@ Lacak batch, Label, Master item) · `admin` (adds Import, Pengaturan).
 
 ## Tests
 
-31 standalone files in `tests/`, run by `tsx`. **No jest, no vitest, no test runner.** Each file
+68 standalone files in `tests/`, run by `tsx`. **No jest, no vitest, no test runner.** Each file
 declares its own `test()` helper and its own `passed`/`failed` counters on `node:assert`'s `strict`:
 
 ```ts
@@ -211,13 +220,13 @@ function test(name: string, fn: () => void) {
 ```
 
 Follow that shape exactly — inline helpers, no shared framework, and the process must exit non-zero
-when `failed > 0`. `npm test` chains all 31 files with `&&`, so one failure stops the rest.
+when `failed > 0`. `npm test` chains all 68 files with `&&`, so one failure stops the rest.
 
 Most tests construct `StockBin`/`DemandLine` fixtures inline against `withConfig({ asOf })` and run
 the real engine against real workbooks in `data/`. When you add a test for an allocator rule, assert
 on quantities, pallet openings and FEFO order — not just "it didn't throw".
 
-7 of the 31 files are prefixed `TZ=Asia/Jakarta` in the `npm test` chain —
+7 of the 68 files are prefixed `TZ=Asia/Jakarta` in the `npm test` chain —
 `excel-date`, `picklist-sisa-replay`, `b2b-sisa-consistency`, `picklist-stress`,
 `picklist-stress-dedicated`, `putaway-sheet`, `sheet-picklist`. They assert on dates at day
 boundaries (Excel serial parsing, `asOf` comparisons), so they would pass or fail depending on the
@@ -241,8 +250,9 @@ Regression guards worth knowing: `one-bin-per-line.test.ts` (FEFO at every pick)
 | `SITE_ACCOUNT_EMAIL` | shared site account (an admin in Supabase Auth), used while login is not required |
 | `SITE_ACCOUNT_PASSWORD` | |
 
-**Accounts (0071, spec `docs/superpowers/specs/2026-10-12-login-and-accounts-design.md`).** Login is
-built but **not required yet**: with `LOGIN_REQUIRED` unset every visitor without a session is signed
+**Accounts (0071, spec `docs/superpowers/specs/2026-10-12-login-and-accounts-design.md`).** Login has been
+**required on ckb-wms-v2 since 26 Oct 2026** (`LOGIN_REQUIRED=true`; static images bypass the sign-in
+check in `middleware`, so the login photo shows). The text below describes the switch: with `LOGIN_REQUIRED` unset every visitor without a session is signed
 in as the shared site account (as before), and `/login` is optional — anyone can sign in as their own
 account; `Keluar` returns to the shared one. Until the switch is on, personal accounts protect
 nothing: anyone can be the shared admin. With `LOGIN_REQUIRED=true` every page needs a sign-in.
