@@ -8,6 +8,8 @@ import { loginRequired } from "@/lib/auth-route";
  * Sign in (spec §1). Outside the app layout: no nav, no footer, no welcome screen.
  * Split 70/30: left — the warehouse, photo first, one quiet brand block; right — the working form
  * on the app's own paper background, so sign-in flows into the app without a change of scene.
+ * Below `lg` the panel becomes a band above the form (the floor signs in on a phone): same photo,
+ * same scrim, same mark, compact — the form keeps the paper and the height it needs.
  */
 export default async function LoginPage({
   searchParams,
@@ -18,9 +20,28 @@ export default async function LoginPage({
   const facts = ["2.970 bin", "106 SKU", "FEFO ketat"];
 
   return (
-    <main className="flex min-h-screen">
+    <main className="flex min-h-screen flex-col lg:flex-row">
+      {/* BELOW lg · the same scene as a band: photo, scrim, one compact brand line. `shrink-0` and a
+          clamped height keep the form below reachable with the phone keyboard open. */}
+      <div className="relative h-[26vh] min-h-[136px] max-h-[216px] shrink-0 overflow-hidden bg-jeir-navy lg:hidden">
+        <div className="login-photo absolute inset-0 bg-[url('/ckb-warehouse.webp')] bg-cover bg-center" aria-hidden="true" />
+        {/* The wide panel's scrim, unchanged: darkest exactly where the words sit. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-jeir-navy/95 via-jeir-navy/35 to-jeir-navy/10" aria-hidden="true" />
+
+        <div className="absolute inset-x-0 bottom-0 p-6">
+          <div className="login-rise flex items-center gap-3" style={{ "--d": "80ms" } as React.CSSProperties}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={BRAND.logo} alt="" width={40} height={40} className="h-10 w-10 rounded-md" />
+            <div>
+              <h1 className="font-cond text-lg font-bold leading-tight text-white">{ABOUT.name}</h1>
+              <p className="text-xs text-white/70">{BRAND.site}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* LEFT · 70% — the photo is the hero; words sit on a scrim at the bottom-left and nowhere else. */}
-      <aside className="relative hidden lg:block lg:w-[70%] overflow-hidden bg-jeir-navy">
+      <aside className="relative hidden lg:block lg:w-[70%] lg:min-h-screen overflow-hidden bg-jeir-navy">
         <div className="login-photo absolute inset-0 bg-[url('/ckb-warehouse.webp')] bg-cover bg-center" aria-hidden="true" />
         {/* Bottom-heavy scrim, only where the brand block reads. */}
         <div className="absolute inset-0 bg-gradient-to-t from-jeir-navy/95 via-jeir-navy/35 to-jeir-navy/10" aria-hidden="true" />
@@ -54,18 +75,9 @@ export default async function LoginPage({
       </aside>
 
       {/* RIGHT · 30% — the app's own paper: the form is a tool, not a pitch. */}
-      <div className="relative flex w-full flex-col bg-paper lg:w-[30%] lg:h-screen">
-        <div className="flex w-full max-w-md flex-1 flex-col justify-center px-6 py-10 sm:px-10 lg:px-12">
-          {/* Mobile brand mark (the left panel is hidden here). */}
-          <div className="login-rise mb-8 flex items-center gap-3 lg:hidden" style={{ "--d": "80ms" } as React.CSSProperties}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={BRAND.logo} alt="" width={44} height={44} className="h-11 w-11 rounded-md" />
-            <div>
-              <p className="font-cond text-lg font-bold leading-tight text-steel">{ABOUT.name}</p>
-              <p className="text-xs text-steel-500">{BRAND.site}</p>
-            </div>
-          </div>
-
+      <div className="relative flex w-full flex-1 flex-col bg-paper lg:w-[30%] lg:h-screen lg:flex-none">
+        <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-8 sm:px-10 sm:py-10 lg:mx-0 lg:px-12">
+          {/* The brand mark lives in the band above on a phone and in the panel on a desktop: once. */}
           <header className="login-rise" style={{ "--d": "60ms" } as React.CSSProperties}>
             <h2 className="font-cond text-3xl font-bold tracking-tight text-steel">Masuk</h2>
             <p className="mt-2 text-sm text-steel-500">Masuk dengan akun yang dibuat admin gudang.</p>
@@ -90,7 +102,7 @@ export default async function LoginPage({
           </div>
         </div>
 
-        <footer className="px-6 pb-6 sm:px-10 lg:px-12">
+        <footer className="mx-auto w-full max-w-md px-6 pb-6 sm:px-10 lg:mx-0 lg:max-w-none lg:px-12">
           <p className="text-xs text-steel-500">
             {ABOUT.copyright} · {ABOUT.internal}
           </p>
