@@ -158,12 +158,19 @@ test('app/ckb/** files do not import SessionProvider or Shell nav', () => {
   }
 });
 
-test('the middleware matcher skips static images and fonts, so the login photo is not sent to /login', () => {
+test('the middleware matcher skips root-level static images and fonts, and guards every other path', () => {
   const m = src('middleware.ts');
-  const matcher = /matcher:\s*\[(.*)\]/.exec(m);
-  assert.ok(matcher, 'middleware has no matcher line');
-  for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'woff', 'woff2']) {
-    assert.ok(matcher[1]!.includes(ext), `matcher does not exclude .${ext}`);
+  const lit = /matcher:\s*\[\s*("(?:[^"\\]|\\.)*")/.exec(m);
+  assert.ok(lit, 'middleware has no matcher string');
+  // The literal only uses `\\` escapes, which JSON decodes to `\`, so `\\.` becomes the regex `\.`.
+  // A plain RegExp is an approximation of Next's path-to-regexp; it is enough for these paths.
+  const pattern = JSON.parse(lit[1]!) as string;
+  const matches = new RegExp('^' + pattern + '$');
+  for (const p of ['/ckb-warehouse.webp', '/welcome.jpg', '/je-ir-logo.png', '/x.woff2']) {
+    assert.ok(!matches.test(p), `${p} must skip the sign-in check`);
+  }
+  for (const p of ['/home', '/bin/CC01C01.png', '/api/bin/CC01C01.jpg', '/waves']) {
+    assert.ok(matches.test(p), `${p} must go through the sign-in check`);
   }
 });
 
