@@ -47,10 +47,10 @@ update profiles set job = 'admin'     where id = 'c6666666-6666-6666-6666-666666
 
 -- Stock: one pallet bin per wave (SKU 550044709, batch Z72).
 delete from inventory where bin_id in (select id from bins where bin_code in
-  ('CF38C01','CF37C01','CF36C01','CF36C02','CF35C01','CF34C01','CF33C01','CF32C01'));
+  ('CF38C01','CF37C01','CF36C01','CF36C02','CF35C01','CF34C01','CF33C01','CF32C01','CF31C01','CF30C01','CF39C01'));
 insert into movements (type, item_id, batch_lot, quantity, to_bin_id, expiry_date, note)
 select 'adjustment', (select id from items where sku = '550044709'), 'Z72', 44, (select id from bins where bin_code = b), '2030-08-18', 'fixture'
-from unnest(array['CF38C01','CF37C01','CF36C01','CF35C01','CF34C01','CF33C01','CF32C01']) b;
+from unnest(array['CF38C01','CF37C01','CF36C01','CF35C01','CF34C01','CF33C01','CF32C01','CF31C01','CF30C01','CF39C01']) b;
 
 -- Plan: wave 1 = S1 (HP + FL), 2 = S2 (pick + Bin To Bin), 3 = S3, 4 = S4, 5 = two shipments S5A + S5B.
 set role authenticated;
@@ -60,7 +60,10 @@ select save_plan('2026-11-20', '{
            {"wave_no":"2","shipment_numbers":["S2"]},
            {"wave_no":"3","shipment_numbers":["S3"]},
            {"wave_no":"4","shipment_numbers":["S4"]},
-           {"wave_no":"5","shipment_numbers":["S5A","S5B"]}],
+           {"wave_no":"5","shipment_numbers":["S5A","S5B"]},
+           {"wave_no":"6","shipment_numbers":["S6"]},
+           {"wave_no":"7","shipment_numbers":["S7"]},
+           {"wave_no":"8","shipment_numbers":["S8"]}],
   "tasks":[
     {"wave_no":"1","shipment_number":"S1","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF38C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":10,"seq":1},
     {"wave_no":"1","shipment_number":"S1","task_type":"PICK","pick_type":"PALLET","sku":"550044709","from_bin":"CF37C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":44,"seq":2},
@@ -69,7 +72,11 @@ select save_plan('2026-11-20', '{
     {"wave_no":"3","shipment_number":"S3","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF35C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":3,"seq":5},
     {"wave_no":"4","shipment_number":"S4","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF34C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":4,"seq":6},
     {"wave_no":"5","shipment_number":"S5A","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF33C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":7},
-    {"wave_no":"5","shipment_number":"S5B","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF32C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":8}],
+    {"wave_no":"5","shipment_number":"S5B","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF32C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":8},
+    {"wave_no":"6","shipment_number":"S6","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF31C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":9},
+    {"wave_no":"7","shipment_number":"S7","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF30C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":10},
+    {"wave_no":"8","shipment_number":"S8","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF39C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":11},
+    {"wave_no":"8","shipment_number":"S8","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF39C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":2,"seq":12}],
   "outbound":[]}'::jsonb);
 select pg_temp.drop_plan_temps();
 
@@ -112,7 +119,7 @@ select pg_temp.check('board: S1 Belum, assignee name, 1 FL + 1 HP line',
 select pg_temp.check('board: S2 Belum, nobody assigned',
   pg_temp.board('S2') = 'Belum|-|FL 0|HP 1');
 select pg_temp.check('board: one row per shipment, also for a two-shipment wave',
-  (select count(*) from assignment_board('2026-11-20')) = 6
+  (select count(*) from assignment_board('2026-11-20')) = 9
   and (select wave_no = '1' and truck = 'L 1234 AB' and planned_slot = '08:00' and wave_id = pg_temp.w('1')
        from assignment_board('2026-11-20') where shipment_number = 'S1'));
 select pg_temp.check('assignable_operators lists active operators with their open count',
@@ -141,7 +148,7 @@ select pg_temp.as_user('c3333333-3333-3333-3333-333333333333');
 -- point is that the call fails and leaves both tasks open.
 select pg_temp.check('pick + Bin To Bin of another, unassigned wave is refused',
   pg_temp.fails(format($q$select post_pick_with_move(%L, %L, 10, 2, null, 'Op Satu', 'CF38C01')$q$,
-                       pg_temp.t('1', 1), pg_temp.t('2', 4)), '%'));
+                       pg_temp.t('1', 1), pg_temp.t('2', 4)), 'Tugas ini bukan pasangan pick + pindah sisa palet%'));
 select pg_temp.check('... and the pick is still PLANNED, the move too',
   pg_temp.st('1', 1) = 'PLANNED' and pg_temp.st('2', 4) = 'PLANNED');
 -- Atomic: complete_wave on a two-shipment wave where only S5A is op1's posts nothing.
@@ -179,12 +186,51 @@ select pg_temp.check('a loaded shipment cannot be assigned',
   pg_temp.fails($q$select assign_shipment('2026-11-20', 'S2', 'c3333333-3333-3333-3333-333333333333', 'Inv')$q$,
                 'Shipment S2 sudah dimuat%'));
 
+-- ---- carried-over shipment: the old day's assignment is not open, not on the new day ----
+select pg_temp.as_user('c1111111-1111-1111-1111-111111111111');
+select assign_shipment('2026-11-20', 'S6', 'c4444444-4444-4444-4444-444444444444', 'Inv');
+select pg_temp.check('op2 holds S6: open count 1',
+  (select open_count from assignable_operators() where id = 'c4444444-4444-4444-4444-444444444444') = 1);
+select pg_temp.as_user('c6666666-6666-6666-6666-666666666666');
+create temp table _w6 as select pg_temp.w('6') as id;
+select set_wave_status((select id from _w6), 'RESCHEDULED', 'truk tidak datang');
+select carry_over_wave((select id from _w6), '2026-11-21', '{}', 'jadwal ulang');
+select pg_temp.check('after carry-over the stale assignment is not counted open',
+  (select open_count from assignable_operators() where id = 'c4444444-4444-4444-4444-444444444444') = 0);
+select pg_temp.check('... and the shipment is not assigned on the new day',
+  (select user_id is null from assignment_board('2026-11-21') where shipment_number = 'S6'));
+select pg_temp.as_user('c4444444-4444-4444-4444-444444444444');
+select pg_temp.check('... and op2 cannot post it there', not shipment_assigned_to_me((select id from _w6), 'S6'));
+
+-- ---- a RESCHEDULED task keeps the shipment open --------------------------------------
+select pg_temp.as_user('c6666666-6666-6666-6666-666666666666');
+select post_task_by(pg_temp.t('8', 11), p_by_name => 'Adm', p_scanned => 'CF39C01');
+reset role;
+update pick_tasks set status = 'RESCHEDULED' where id = pg_temp.t('8', 12);
+set role authenticated;
+select pg_temp.check('board: S8 with its last task RESCHEDULED is Dipicking, not Selesai',
+  (select status from assignment_board('2026-11-20') where shipment_number = 'S8') = 'Dipicking');
+select pg_temp.as_user('c1111111-1111-1111-1111-111111111111');
+select assign_shipment('2026-11-20', 'S8', 'c4444444-4444-4444-4444-444444444444', 'Inv');
+select assign_shipment('2026-11-20', 'S7', 'c4444444-4444-4444-4444-444444444444', 'Inv');
+select pg_temp.check('... and it can still be assigned', pg_temp.assignee('S8') = 'c4444444-4444-4444-4444-444444444444');
+
+-- ---- a legacy direct role write that moves the job also releases -----------------------
+reset role;
+update profiles set role = 'supervisor' where id = 'c4444444-4444-4444-4444-444444444444';
+set role authenticated;
+select pg_temp.check('role write operator -> supervisor: open S7 and S8 released with RELEASE rows',
+  pg_temp.assignee('S7') is null and pg_temp.assignee('S8') is null
+  and pg_temp.logs('S7', 'RELEASE') = 1 and pg_temp.logs('S8', 'RELEASE') = 1);
+
 -- ---- Review Focus 3: re-running Alokasi keeps the assignment --------------------
 select pg_temp.as_user('c6666666-6666-6666-6666-666666666666');
 create temp table _old_w3 as select pg_temp.w('3') as id;
 select save_plan('2026-11-20', '{
-  "waves":[{"wave_no":"3","shipment_numbers":["S3"]}],
-  "tasks":[{"wave_no":"3","shipment_number":"S3","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF35C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":2,"seq":5}],
+  "waves":[{"wave_no":"3","shipment_numbers":["S3"]},{"wave_no":"5","shipment_numbers":["S5A","S5B"]}],
+  "tasks":[{"wave_no":"3","shipment_number":"S3","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF35C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":2,"seq":5},
+    {"wave_no":"5","shipment_number":"S5A","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF33C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":7},
+    {"wave_no":"5","shipment_number":"S5B","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF32C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":8}],
   "outbound":[]}'::jsonb);
 select pg_temp.drop_plan_temps();
 select pg_temp.check('the untouched wave 3 was replaced (new id)', pg_temp.w('3') <> (select id from _old_w3));

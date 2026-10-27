@@ -78,17 +78,17 @@ language sql stable security definer set search_path = public as $$
   limit 1
 $$;
 
--- Board status of one shipment of a wave: Dimuat (loaded) > Selesai (wave completed or no planned
--- task left) > Dipicking (some task posted) > Belum. A REPLENISH task (no shipment) counts for every
--- shipment of its wave. No wave: Belum.
+-- Board status of one shipment of a wave: Dimuat (loaded) > Selesai (wave completed or cancelled, or no
+-- PLANNED / RESCHEDULED task left) > Dipicking (some task posted) > Belum. A REPLENISH task (no
+-- shipment) counts for every shipment of its wave. No wave: Belum.
 create or replace function public.shipment_status(p_wave_id uuid, p_shipment text) returns text
 language sql stable security definer set search_path = public as $$
   select coalesce((
     select case
       when exists (select 1 from public.shipment_loads l where l.wave_id = w.id and l.shipment_number = p_shipment)
         then 'Dimuat'
-      when w.status = 'COMPLETED'
-        or not exists (select 1 from public.pick_tasks t where t.wave_id = w.id and t.status = 'PLANNED'
+      when w.status in ('COMPLETED','CANCELLED')
+        or not exists (select 1 from public.pick_tasks t where t.wave_id = w.id and t.status in ('PLANNED','RESCHEDULED')
                          and (t.shipment_number = p_shipment or t.shipment_number is null))
         then 'Selesai'
       when exists (select 1 from public.pick_tasks t where t.wave_id = w.id and t.status = 'COMPLETED'
@@ -98,10 +98,12 @@ language sql stable security definer set search_path = public as $$
     from public.waves w where w.id = p_wave_id), 'Belum')
 $$;
 
--- An assignment still open: its shipment is neither Selesai nor Dimuat.
+-- An assignment still open: its shipment is still planned that day (a wave carried to another day
+-- leaves a stale row: not open, never released, not counted) and is neither Selesai nor Dimuat.
 create or replace function public.shipment_assignment_open(p_date date, p_shipment text) returns boolean
 language sql stable security definer set search_path = public as $$
-  select public.shipment_status(public.shipment_wave(p_date, p_shipment), p_shipment) not in ('Selesai','Dimuat')
+  select coalesce((select public.shipment_status(v.id, p_shipment) not in ('Selesai','Dimuat')
+                   from (select public.shipment_wave(p_date, p_shipment) as id) v where v.id is not null), false)
 $$;
 
 -- Whether the caller holds the shipment. p_shipment null (REPLENISH): any shipment of the wave.
@@ -152,7 +154,9 @@ begin
   end loop;
   return null;
 end $$;
-create trigger profiles_release_assignments after update of job, active on public.profiles
+-- role too: a legacy direct role write changes job in 0109's BEFORE trigger, and a column-list
+-- trigger fires only on the columns named in the UPDATE's SET list.
+create trigger profiles_release_assignments after update of job, role, active on public.profiles
   for each row when (old.job = 'operator' and (new.job <> 'operator' or not new.active))
   execute function public.profiles_release_assignments();
 
