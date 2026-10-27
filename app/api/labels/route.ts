@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkRole } from "@/lib/auth";
+import { checkPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { buildLabelPdf, type LabelBin, type LabelOptions } from "@/lib/labels";
@@ -15,7 +15,7 @@ type Body = LabelOptions & (
 
 // POST -> PDF. Supervisor/admin only; every print is written to print_logs.
 export async function POST(req: Request) {
-  const user = await checkRole(["supervisor", "admin"]);
+  const user = await checkPage("/labels");
   if (!user) return NextResponse.json({ error: "Hanya supervisor/admin yang bisa mencetak label." }, { status: 403 });
   const body = (await req.json()) as Body;
   const supabase = await createClient();

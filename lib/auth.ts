@@ -76,6 +76,13 @@ export async function checkRole(allowed: Role[], app: AppId = "shell_wms"): Prom
   return allowed.includes(user.role) ? user : null;
 }
 
+/** API twin of requirePage: the signed-in user when their job may open `path`, else null. */
+export async function checkPage(path: string, app: AppId = "shell_wms"): Promise<SessionUser | null> {
+  const user = await getSessionUser();
+  if (!user || !user.apps.includes(app)) return null;
+  return pageAllowed(user.job, path) ? user : null;
+}
+
 /** Require access to a specific app. Redirects to the user's other app home or /akses on failure. */
 export async function requireAppAccess(app: AppId): Promise<SessionUser> {
   const user = await getSessionUser();

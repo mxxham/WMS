@@ -109,5 +109,17 @@ test('every page under app/(app) gates with requirePage, never requireRole', () 
   }
 });
 
+test('export and print routes gate by job via checkPage', () => {
+  const routes: [string, string][] = [
+    ['app/api/movements/export/route.ts', '/movements'],
+    ['app/api/labels/route.ts', '/labels'],
+    ['app/api/labels/pallet-cards/route.ts', '/labels/pallet'],
+  ];
+  for (const [f, path] of routes) {
+    const src = readFileSync(join(process.cwd(), f), 'utf8');
+    assert.ok(src.includes(`checkPage("${path}")`), `${f} must call checkPage("${path}")`);
+    assert.ok(!src.includes('checkRole('), `${f} still gates by level only`);
+  }
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

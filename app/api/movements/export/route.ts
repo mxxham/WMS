@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { checkRole } from "@/lib/auth";
+import { checkPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { movementQuery, type MovementFilters } from "@/lib/movement-query";
@@ -22,7 +22,7 @@ type Row = {
 const MAX_ROWS = 100_000;
 
 export async function GET(req: Request) {
-  if (!(await checkRole(["supervisor", "admin"]))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await checkPage("/movements"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const f = Object.fromEntries(new URL(req.url).searchParams) as MovementFilters;
   if (!f.from && !f.to) {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });

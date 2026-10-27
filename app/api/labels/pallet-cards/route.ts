@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { checkRole } from "@/lib/auth";
+import { checkPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { readSheet } from "@/lib/read-sheet";
@@ -22,7 +22,7 @@ type Summary = {
 // card per pallet row, one card per A4 page. action=print may carry a `shipment`
 // number to print only that shipment's cards; without it every shipment is printed.
 export async function POST(req: Request) {
-  if (!(await checkRole(["supervisor", "admin"]))) {
+  if (!(await checkPage("/labels/pallet"))) {
     return NextResponse.json({ error: "Hanya supervisor/admin yang bisa mencetak kartu palet." }, { status: 403 });
   }
   let file: FormDataEntryValue | null = null;
