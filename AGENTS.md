@@ -68,7 +68,7 @@ easy to miss: `0005` adds the explicit `authenticated` grants without which *eve
 ```
 app/(app)/<feature>/     route + client component per page; Indonesian UI
 app/api/                 route handlers
-components/<area>/       bin, scan, warehouse, components/app/nav.tsx (nav)
+components/<area>/       bin, scan, warehouse, app/nav.tsx (nav)
 lib/allocator/           FEFO engine — pure functions, zero I/O
 lib/*.ts                 feature logic: labels, import, audit, SAP, batch codes
 supabase/migrations/     110 files; the real index of what exists
@@ -252,9 +252,9 @@ Regression guards worth knowing: `one-bin-per-line.test.ts` (FEFO at every pick)
 
 **Accounts (0071, spec `docs/superpowers/specs/2026-10-12-login-and-accounts-design.md`).** Login has been
 **required on ckb-wms-v2 since 26 Oct 2026** (`LOGIN_REQUIRED=true`; root-level static files such as
-`/ckb-warehouse.webp`, the login photo, bypass the sign-in check in `middleware`). The not-required mode
-below is how other projects behave, not ckb-wms-v2: with `LOGIN_REQUIRED` unset every visitor without a session is signed
-in as the shared site account (as before), and `/login` is optional — anyone can sign in as their own
+`/ckb-warehouse.webp`, the login photo, bypass the sign-in check in `middleware`). With `LOGIN_REQUIRED`
+unset the shared site account is used (ckb-wms-v2 has it set to `true`): every visitor without a session
+is signed in as the shared site account (as before), and `/login` is optional — anyone can sign in as their own
 account; `Keluar` returns to the shared one. Until the switch is on, personal accounts protect
 nothing: anyone can be the shared admin. With `LOGIN_REQUIRED=true` every page needs a sign-in.
 

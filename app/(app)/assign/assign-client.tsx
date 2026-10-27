@@ -50,7 +50,9 @@ function RowActions({ row, date, operators, person, onPerson }: {
   const needName = person.trim().length < 2 ? "Isi nama Anda dulu." : null;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {row.user_name && <span className="text-sm font-semibold">{row.user_name}</span>}
+      {row.user_id
+        ? <span className="text-sm font-semibold">{row.user_name}</span>
+        : <span className="text-sm text-steel-500">Belum ditugaskan</span>}
       <Select aria-label={`Operator untuk shipment ${row.shipment_number}`} value={pick} onChange={(e) => setPick(e.target.value)} className="h-9 w-44">
         <option value="">pilih operator</option>
         {operators.filter((o) => o.id !== row.user_id).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}

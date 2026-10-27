@@ -1,6 +1,6 @@
 import type { Role } from "@/lib/types";
 
-/** The seven flowchart jobs (profiles.job, 0108). Order is the order of the Pengguna dropdown. */
+/** The seven flowchart jobs (profiles.job, 0109). Order is the order of the Pengguna dropdown. */
 export type Job = "admin_inbound" | "admin_outbound" | "checker" | "inventory" | "operator" | "leader" | "admin";
 
 export const JOBS: readonly Job[] = ["admin_inbound", "admin_outbound", "checker", "inventory", "operator", "leader", "admin"];

@@ -17,13 +17,13 @@ type Summary = {
   shipmentRows: Record<string, string>;
 };
 
-// POST multipart (file + action) -> summary JSON or PDF. Supervisor/admin only.
+// POST multipart (file + action) -> summary JSON or PDF. Only the jobs that may open Kartu palet (checkPage("/labels/pallet")).
 // The upload is a "Form Checker" workbook (docs/FORM_CHECKER_FORMAT.md); one printed
 // card per pallet row, one card per A4 page. action=print may carry a `shipment`
 // number to print only that shipment's cards; without it every shipment is printed.
 export async function POST(req: Request) {
   if (!(await checkPage("/labels/pallet"))) {
-    return NextResponse.json({ error: "Hanya supervisor/admin yang bisa mencetak kartu palet." }, { status: 403 });
+    return NextResponse.json({ error: "Halaman Kartu palet tidak tersedia untuk peran Anda." }, { status: 403 });
   }
   let file: FormDataEntryValue | null = null;
   let action = "summary";

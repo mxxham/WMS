@@ -13,10 +13,10 @@ type Body = LabelOptions & (
   | { scope: "zone"; zone: string }
 );
 
-// POST -> PDF. Supervisor/admin only; every print is written to print_logs.
+// POST -> PDF. Only the jobs that may open Label (checkPage("/labels")); every print is written to print_logs.
 export async function POST(req: Request) {
   const user = await checkPage("/labels");
-  if (!user) return NextResponse.json({ error: "Hanya supervisor/admin yang bisa mencetak label." }, { status: 403 });
+  if (!user) return NextResponse.json({ error: "Halaman Label tidak tersedia untuk peran Anda." }, { status: 403 });
   const body = (await req.json()) as Body;
   const supabase = await createClient();
 
