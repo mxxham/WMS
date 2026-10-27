@@ -68,7 +68,7 @@ easy to miss: `0005` adds the explicit `authenticated` grants without which *eve
 ```
 app/(app)/<feature>/     route + client component per page; Indonesian UI
 app/api/                 route handlers
-components/<area>/       bin, scan, warehouse, app/nav.tsx (role-gated nav)
+components/<area>/       bin, scan, warehouse, components/app/nav.tsx (nav)
 lib/allocator/           FEFO engine — pure functions, zero I/O
 lib/*.ts                 feature logic: labels, import, audit, SAP, batch codes
 supabase/migrations/     110 files; the real index of what exists
@@ -190,7 +190,7 @@ the posting guard is in the database, not the UI.
 - Pages are cards on a phone, tables on a desktop.
 - Every action has a confirmation step with a summary sentence — a mis-tap on the floor costs more
   than one extra tap.
-- Roles gate the navigation in `components/app/nav.tsx`. Hiding a nav item is not authorization; RLS
+- The single page table in `components/app/nav-config.ts` is both the menu and the server gate (`requirePage` / `checkPage`). Hiding a nav item is not authorization; RLS
   is.
 - Client components are the default in `app/(app)/`; keep server components server-side and push
   `'use client'` down to the leaf that needs it.
@@ -226,9 +226,9 @@ Most tests construct `StockBin`/`DemandLine` fixtures inline against `withConfig
 the real engine against real workbooks in `data/`. When you add a test for an allocator rule, assert
 on quantities, pallet openings and FEFO order — not just "it didn't throw".
 
-7 of the 68 files are prefixed `TZ=Asia/Jakarta` in the `npm test` chain —
+8 of the 68 files are prefixed `TZ=Asia/Jakarta` in the `npm test` chain —
 `excel-date`, `picklist-sisa-replay`, `b2b-sisa-consistency`, `picklist-stress`,
-`picklist-stress-dedicated`, `putaway-sheet`, `sheet-picklist`. They assert on dates at day
+`picklist-stress-dedicated`, `putaway-sheet`, `sheet-picklist`, `greeting-home`. They assert on dates at day
 boundaries (Excel serial parsing, `asOf` comparisons), so they would pass or fail depending on the
 machine's timezone. Prefix any new test the same way if it touches a date boundary, and add it to
 the chain in `package.json` — a file that is not in the chain never runs.
@@ -246,13 +246,14 @@ Regression guards worth knowing: `one-bin-per-line.test.ts` (FEFO at every pick)
 | `NEXT_PUBLIC_SUPABASE_URL` | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | safe for the browser |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only.** Bypasses RLS. Never prefix with `NEXT_PUBLIC_`, never send to the browser. |
-| `LOGIN_REQUIRED` | `true` = everyone signs in with their own account; empty = shared account (today) |
+| `LOGIN_REQUIRED` | `true` = everyone signs in with their own account; empty = shared account; `true` on ckb-wms-v2 |
 | `SITE_ACCOUNT_EMAIL` | shared site account (an admin in Supabase Auth), used while login is not required |
 | `SITE_ACCOUNT_PASSWORD` | |
 
 **Accounts (0071, spec `docs/superpowers/specs/2026-10-12-login-and-accounts-design.md`).** Login has been
-**required on ckb-wms-v2 since 26 Oct 2026** (`LOGIN_REQUIRED=true`; static images bypass the sign-in
-check in `middleware`, so the login photo shows). The text below describes the switch: with `LOGIN_REQUIRED` unset every visitor without a session is signed
+**required on ckb-wms-v2 since 26 Oct 2026** (`LOGIN_REQUIRED=true`; root-level static files such as
+`/ckb-warehouse.webp`, the login photo, bypass the sign-in check in `middleware`). The not-required mode
+below is how other projects behave, not ckb-wms-v2: with `LOGIN_REQUIRED` unset every visitor without a session is signed
 in as the shared site account (as before), and `/login` is optional — anyone can sign in as their own
 account; `Keluar` returns to the shared one. Until the switch is on, personal accounts protect
 nothing: anyone can be the shared admin. With `LOGIN_REQUIRED=true` every page needs a sign-in.
@@ -261,7 +262,7 @@ nothing: anyone can be the shared admin. With `LOGIN_REQUIRED=true` every page n
   (`/admin/users`). Public sign-up stays disabled. Sign-in resolves the username to the account's
   auth email on the server (`account_email`, service role); new accounts get
   `<username>@pengguna.internal`, the shared account keeps its own email and is `gudang`.
-- Roles change only through `set_user_role` / `set_user_active` (never on yourself, always one active
+- Roles change only through `set_user_job` / `set_user_active` (never on yourself, always one active
   admin; no write policy on `profiles`). A deactivated account is refused before every API request
   (`check_request`, PostgREST pre-request) and by every read/insert policy (`is_active()`), even with
   a live token. Accounts are never deleted. **A new table's policies must include
