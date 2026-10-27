@@ -51,5 +51,30 @@ test('wrong item shows what was found; unaudited bins stay blank', () => {
   assert.equal(stg['Sisa dihitung'], null);
 });
 
+test('Remain Qty sits right after Qty pick, missing keys get 0, TOTAL is empty', () => {
+  const remain = new Map([['CA01A01|550024919', 7]]);
+  const lines = [line({}), line({ id: 'l9', bin_code: 'CB02B02', sku: '550056224' })];
+  const { bins, lines: rows } = auditWorkbookRows(lines, [], 'Sisa sistem', remain);
+  const ca = bins.find((b) => b.Bin === 'CA01A01')!, cb = bins.find((b) => b.Bin === 'CB02B02')!;
+  assert.equal(ca['Remain Qty'], 7);
+  assert.equal(cb['Remain Qty'], 0);
+  const bk = Object.keys(ca);
+  assert.equal(bk[bk.indexOf('Qty pick') + 1], 'Remain Qty');
+  const l1 = rows.find((r) => r.Bin === 'CA01A01')!;
+  assert.equal(l1['Remain Qty'], 7);
+  assert.equal(rows.find((r) => r.Bin === 'CB02B02')!['Remain Qty'], 0);
+  const lk = Object.keys(l1);
+  assert.equal(lk[lk.indexOf('Qty pick') + 1], 'Remain Qty');
+  const total = rows.find((r) => r.Shipment === 'TOTAL')!;
+  assert.equal(total['Remain Qty'], null);
+  assert.equal(Object.keys(total).indexOf('Remain Qty'), Object.keys(total).indexOf('Qty pick') + 1);
+});
+
+test('without the map there is no Remain Qty column', () => {
+  const { bins, lines: rows } = auditWorkbookRows([line({})], []);
+  assert.ok(!('Remain Qty' in bins[0]));
+  for (const r of rows) assert.ok(!('Remain Qty' in r));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

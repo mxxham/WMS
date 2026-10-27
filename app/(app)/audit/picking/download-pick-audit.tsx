@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { auditWorkbookRows, moveRows, type ExportAttempt, type ExportLine } from "@/lib/sheet-audit-export";
+import { fetchAll } from "@/lib/fetch-all";
 import { saveSheets } from "@/lib/save-xlsx";
 
 type LineRow = {
@@ -64,6 +65,21 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
         attempts.push(...((a ?? []) as (Omit<ExportAttempt, "line_id"> & { task_id: string })[]).map((x) => ({ ...x, line_id: x.task_id })));
       }
 
+      // Remain Qty: stock of bin + SKU at day end, from the same report as `Laporan WMS harian`.
+      let remain: Map<string, number> | undefined;
+      let note: string | null = null;
+      if (pickRows.length > 0) {
+        try {
+          const rep = await fetchAll<{ bin_code: string; sku: string; remain: number | string }>(
+            (a, b) => db.rpc("wms_day_report", { p_date: date }).range(a, b) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>);
+          remain = new Map();
+          for (const r of rep) {
+            const k = `${r.bin_code}|${r.sku}`;
+            remain.set(k, (remain.get(k) ?? 0) + Number(r.remain));
+          }
+        } catch (e) { note = `Remain Qty tidak bisa dibaca: ${(e as Error).message}`; }
+      }
+
       // Build pick workbook sheets
       const pickLines: ExportLine[] = pickRows.map((l) => ({
         id: l.task_id, shipment_number: l.shipment_number, wave_no: l.wave_no, picklist: null, seq: l.seq, bin_code: l.from_bin,
@@ -81,7 +97,7 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
         line_state: l.line_state,
       }));
 
-      const pickOut = pickRows.length > 0 ? auditWorkbookRows(pickLines, attempts, "Sisa sistem") : { bins: [], lines: [], history: [] };
+      const pickOut = pickRows.length > 0 ? auditWorkbookRows(pickLines, attempts, "Sisa sistem", remain) : { bins: [], lines: [], history: [] };
       const moveOut = moveRowsData.length > 0 ? moveRows(moveLines, attempts) : { lines: [], history: [] };
 
       const sheets: Record<string, Row[]> = {
@@ -96,6 +112,7 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
       }
 
       saveSheets(sheets, `Audit picking ${date}${zone ? ` rak ${zone}` : ""}.xlsx`, "belum ada audit");
+      if (note) setError(note);
     } catch (e) {
       setError((e as Error).message);
     } finally { setBusy(false); }

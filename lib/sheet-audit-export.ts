@@ -35,11 +35,13 @@ export function jakartaTime(iso: string | null): string {
 const errorText = (errors: PickError[]) => errors.map((e) => PICK_ERROR_LABEL[e] ?? e).join(", ");
 const zoneOf = (bin: string) => (/^[A-Z]{2}\d{2}[A-Z]\d{2}$/.test(bin) ? bin.slice(0, 2) : bin);
 
-export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[], sisaLabel = "Sisa di file"): { bins: Row[]; lines: Row[]; history: Row[] } {
+export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[], sisaLabel = "Sisa di file", remain?: Map<string, number>): { bins: Row[]; lines: Row[]; history: Row[] } {
   const byLine = new Map<string, ExportAttempt[]>();
   for (const a of [...attempts].sort((x, y) => x.attempt_no - y.attempt_no)) byLine.set(a.line_id, [...(byLine.get(a.line_id) ?? []), a]);
   const lastOf = (id: string) => byLine.get(id)?.at(-1);
   const lineById = new Map(lines.map((l) => [l.id, l]));
+  // "Remain Qty": the bin's stock of the SKU at day end (wms_day_report); only when the caller passes the map.
+  const remainCol = (bin: string, sku: string): Row => (remain ? { "Remain Qty": remain.get(`${bin}|${sku}`) ?? 0 } : {});
 
   // Per bin + SKU: the latest count of any of its lines.
   const groups = new Map<string, ExportLine[]>();
@@ -55,7 +57,7 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     return {
       Rak: zoneOf(l.bin_code), Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
       Shipment: [...new Set(ls.map((x) => x.shipment_number))].join(", "), Baris: ls.length,
-      "Qty pick": ls.reduce((s, x) => s + Number(x.qty), 0), [sisaLabel]: sisa, "Sisa dihitung": counted,
+      "Qty pick": ls.reduce((s, x) => s + Number(x.qty), 0), ...remainCol(l.bin_code, l.sku), [sisaLabel]: sisa, "Sisa dihitung": counted,
       Selisih: counted !== null && sisa !== null ? Number(counted) - sisa : null,
       "Barang ditemukan": last && last.found_sku !== l.sku ? last.found_sku : null,
       Status: STATE[state as ExportLine["line_state"]], Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
@@ -68,7 +70,7 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     const vol = l.volume_l != null ? Number((l.qty * l.volume_l).toFixed(1)) : null;
     return {
       Shipment: l.shipment_number, NO: l.wave_no, Picklist: l.picklist, Seq: l.seq, Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description,
-      Batch: l.batch, Expired: l.expiry, "Qty pick": Number(l.qty), "Volume (L)": vol, Status: STATE[l.line_state], Error: last ? errorText(last.errors) : null,
+      Batch: l.batch, Expired: l.expiry, "Qty pick": Number(l.qty), ...remainCol(l.bin_code, l.sku), "Volume (L)": vol, Status: STATE[l.line_state], Error: last ? errorText(last.errors) : null,
       "Dihitung (baris)": last ? Number(last.counted_qty) : null, Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
       Catatan: last?.note ?? null, Audit: byLine.get(l.id)?.length ?? 0,
     };
@@ -79,7 +81,7 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
   const totalLitres = lineRows.reduce((s, r) => s + (Number(r["Volume (L)"]) || 0), 0);
   const totalsRow: Row = {
     Shipment: "TOTAL", NO: null, Picklist: null, Seq: null, Bin: null, SKU: null, Deskripsi: null,
-    Batch: null, Expired: null, "Qty pick": totalBoxes, "Volume (L)": Number(totalLitres.toFixed(1)), Status: null, Error: null,
+    Batch: null, Expired: null, "Qty pick": totalBoxes, ...(remain ? { "Remain Qty": null } : {}), "Volume (L)": Number(totalLitres.toFixed(1)), Status: null, Error: null,
     "Dihitung (baris)": null, Checker: null, Waktu: null, Catatan: null, Audit: null,
   };
   const linesWithTotals = [...lineRows, totalsRow];
