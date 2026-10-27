@@ -18,6 +18,7 @@
 --     It covers post_task, post_task_by, post_pick_line, post_pick_with_move,
 --     post_task_found_elsewhere, complete_wave and every future path, and
 --     the raise rolls the whole call back, so nothing is half-posted.
+--     It binds status changes (posting) only, not audit corrections.
 --   · profiles_release_assignments: an operator moved to another job or
 --     deactivated loses their open shipments (logged RELEASE), so Penugasan
 --     shows them unassigned instead of pointing at someone who cannot pick.
@@ -209,7 +210,7 @@ begin
   values (p_date, p_shipment, v_prev, 'UNASSIGN', v_name);
 end $$;
 
--- One row per shipment of the day's waves, in wave order (earliest slot, then NO).
+-- One row per shipment of the day's waves (a cancelled wave has nothing to pick), in wave order (earliest slot, then NO).
 -- FL / HP = PICK lines on a pallet / by the case, the -FL / -HP split (picklist-from-tasks.ts);
 -- a line with no pick_type prints on -HP there, so it counts as HP here.
 create or replace function public.assignment_board(p_date date)
@@ -227,7 +228,7 @@ language sql stable security definer set search_path = public as $$
   cross join lateral unnest(w.shipment_numbers) with ordinality as s(shipment_number, n)
   left join public.shipment_assignments a on a.planned_date = w.planned_date and a.shipment_number = s.shipment_number
   left join public.profiles p on p.id = a.user_id
-  where w.planned_date = p_date and (select public.is_active())
+  where w.planned_date = p_date and w.status <> 'CANCELLED' and (select public.is_active())
   order by w.planned_slot nulls last, length(w.wave_no), w.wave_no, s.n
 $$;
 

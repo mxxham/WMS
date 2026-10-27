@@ -80,6 +80,17 @@ select pg_temp.check('the last-admin rule: moving the last active admin job to l
 select pg_temp.as_user('b3333333-3333-3333-3333-333333333333');
 select pg_temp.check('has_job is false for a job not in the list',
   not public.has_job(array['leader','admin']) and public.has_job(array['inventory']));
+-- A CKB-only account (no shell_wms app) holds no Shell job, like has_role since 0105.
+reset role;
+update profiles set job = 'leader', apps = array['ckb_3pl'] where id = 'b3333333-3333-3333-3333-333333333333';
+set role authenticated;
+select pg_temp.check('has_job is false for a CKB-only leader-job account',
+  not public.has_job(array['leader']));
+reset role;
+update profiles set apps = array['shell_wms'] where id = 'b3333333-3333-3333-3333-333333333333';
+set role authenticated;
+select pg_temp.check('the same account with shell_wms has the job',
+  public.has_job(array['leader']));
 select pg_temp.as_user('b9999999-9999-9999-9999-999999999999');
 select pg_temp.check('my_job is null and has_job false without an account',
   public.my_job() is null and not public.has_job(array['admin','operator']));

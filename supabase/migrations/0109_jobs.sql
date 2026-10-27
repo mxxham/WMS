@@ -13,7 +13,8 @@
 --   · set_user_job replaces set_user_role for the Shell app (same rules as
 --     0071: admin only, never yourself, one active admin stays);
 --     set_user_role is revoked from authenticated so the two cannot disagree.
---   · my_job / has_job: the caller's job, for the page gate and assignment.
+--   · my_job / has_job: the caller's job, for the page gate and assignment;
+--     has_job, like has_role since 0105, needs the shell_wms app.
 --   · placeholder_job: the placeholder accounts the owner already created
 --     get their job from their username (one-off update below).
 -- =====================================================================
@@ -68,8 +69,9 @@ create trigger profiles_job_level before insert or update of job, role on public
   for each row execute function public.profiles_job_level();
 
 -- One-off: the placeholder accounts take their job from the username (absent ones match nothing).
+-- Never an admin: a placeholder name must not demote the account that keeps the system running.
 update public.profiles set job = public.placeholder_job(username)
-where public.placeholder_job(username) is not null;
+where public.placeholder_job(username) is not null and role <> 'admin';
 
 create or replace function public.set_user_job(p_user uuid, p_job text) returns void
 language plpgsql security definer set search_path = public as $$
@@ -89,7 +91,8 @@ $$;
 
 create or replace function public.has_job(p_jobs text[]) returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce((select active and job = any(p_jobs) from public.profiles where id = auth.uid()), false)
+  -- Like has_role() since 0105: the job counts only with the Shell app.
+  select coalesce((select active and job = any(p_jobs) and 'shell_wms' = any(apps) from public.profiles where id = auth.uid()), false)
 $$;
 
 revoke execute on function public.job_level(text), public.placeholder_job(text), public.profiles_job_level(),

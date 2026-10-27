@@ -63,7 +63,9 @@ select save_plan('2026-11-20', '{
            {"wave_no":"5","shipment_numbers":["S5A","S5B"]},
            {"wave_no":"6","shipment_numbers":["S6"]},
            {"wave_no":"7","shipment_numbers":["S7"]},
-           {"wave_no":"8","shipment_numbers":["S8"]}],
+           {"wave_no":"8","shipment_numbers":["S8"]},
+           {"wave_no":"9","shipment_numbers":["S9"]},
+           {"wave_no":"10","shipment_numbers":["S10"]}],
   "tasks":[
     {"wave_no":"1","shipment_number":"S1","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF38C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":10,"seq":1},
     {"wave_no":"1","shipment_number":"S1","task_type":"PICK","pick_type":"PALLET","sku":"550044709","from_bin":"CF37C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":44,"seq":2},
@@ -76,7 +78,9 @@ select save_plan('2026-11-20', '{
     {"wave_no":"6","shipment_number":"S6","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF31C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":9},
     {"wave_no":"7","shipment_number":"S7","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF30C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":10},
     {"wave_no":"8","shipment_number":"S8","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF39C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":11},
-    {"wave_no":"8","shipment_number":"S8","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF39C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":2,"seq":12}],
+    {"wave_no":"8","shipment_number":"S8","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF39C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":2,"seq":12},
+    {"wave_no":"9","shipment_number":"S9","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF36C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":13},
+    {"wave_no":"10","shipment_number":"S10","task_type":"PICK","pick_type":"CASE","sku":"550044709","from_bin":"CF36C01","batch_lot":"Z72","expiry_date":"2030-08-18","quantity":1,"seq":14}],
   "outbound":[]}'::jsonb);
 select pg_temp.drop_plan_temps();
 
@@ -118,8 +122,15 @@ select pg_temp.check('board: S1 Belum, assignee name, 1 FL + 1 HP line',
   pg_temp.board('S1') = 'Belum|Op Satu|FL 1|HP 1');
 select pg_temp.check('board: S2 Belum, nobody assigned',
   pg_temp.board('S2') = 'Belum|-|FL 0|HP 1');
+-- A cancelled wave has nothing to pick: it is not on the board.
+reset role;
+update waves set status = 'CANCELLED' where id = pg_temp.w('10');
+set role authenticated;
+select pg_temp.as_user('c1111111-1111-1111-1111-111111111111');
+select pg_temp.check('board: a cancelled wave''s shipment is not listed',
+  not exists (select 1 from assignment_board('2026-11-20') where shipment_number = 'S10'));
 select pg_temp.check('board: one row per shipment, also for a two-shipment wave',
-  (select count(*) from assignment_board('2026-11-20')) = 9
+  (select count(*) from assignment_board('2026-11-20')) = 10
   and (select wave_no = '1' and truck = 'L 1234 AB' and planned_slot = '08:00' and wave_id = pg_temp.w('1')
        from assignment_board('2026-11-20') where shipment_number = 'S1'));
 select pg_temp.check('assignable_operators lists active operators with their open count',
@@ -141,6 +152,20 @@ select pg_temp.check('a REPLENISH task of an unassigned wave is refused naming i
   pg_temp.fails(format($q$select post_task_by(%L, p_by_name => 'Op Dua', p_scanned => 'CF38C01')$q$, pg_temp.t('2', 4)),
                 'Shipment S2 tidak ditugaskan ke Anda%'));
 select pg_temp.check('nothing of S1 was posted', pg_temp.st('1', 1) = 'PLANNED' and pg_temp.st('1', 2) = 'PLANNED');
+-- post_pick_line (the picking screen) goes through the same guard.
+select pg_temp.as_user('c1111111-1111-1111-1111-111111111111');
+select assign_shipment('2026-11-20', 'S9', 'c3333333-3333-3333-3333-333333333333', 'Inv');
+select pg_temp.as_user('c4444444-4444-4444-4444-444444444444');
+select pg_temp.check('post_pick_line: an operator not assigned to S9 is refused',
+  pg_temp.fails(format($q$select post_pick_line(%L, %L::jsonb, 'Op Dua', 'sesuai', 'CF36C01')$q$, pg_temp.w('9'),
+    jsonb_build_object('pick_id', pg_temp.t('9', 13), 'sources', '[{"bin":"CF36C01","batch":"Z72","expiry":"2030-08-18","qty":1}]'::jsonb)),
+    'Shipment S9 tidak ditugaskan ke Anda%'));
+select pg_temp.check('... and the line is still PLANNED', pg_temp.st('9', 13) = 'PLANNED');
+select pg_temp.as_user('c3333333-3333-3333-3333-333333333333');
+select post_pick_line(pg_temp.w('9'),
+  jsonb_build_object('pick_id', pg_temp.t('9', 13), 'sources', '[{"bin":"CF36C01","batch":"Z72","expiry":"2030-08-18","qty":1}]'::jsonb),
+  'Op Satu', 'sesuai', 'CF36C01');
+select pg_temp.check('post_pick_line: the assigned operator posts the line', pg_temp.st('9', 13) = 'COMPLETED');
 
 select pg_temp.as_user('c3333333-3333-3333-3333-333333333333');
 -- Review Focus 1: the pick is op1's (S1), the Bin To Bin belongs to wave 2 (S2, not op1's).
