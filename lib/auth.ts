@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Role } from "@/lib/types";
 import type { Job } from "@/lib/jobs";
 import type { AppId } from "@/lib/apps";
+import { pageAllowed } from "@/components/app/nav-config";
 import { normalizeApps, resolveAppsHome } from "@/lib/apps";
 
 export type SessionUser = {
@@ -52,6 +53,18 @@ export async function requireRole(allowed: Role[], app: AppId = "shell_wms"): Pr
     redirect(home);
   }
   if (!allowed.includes(user.role)) redirect("/?denied=1");
+  return user;
+}
+
+/**
+ * Page gate by job: same redirects as requireRole (signed out, no shell_wms), then the job's page
+ * table decides. Pass the static route (the parent of a dynamic segment). Not allowed: /?denied=1.
+ */
+export async function requirePage(path: string, app: AppId = "shell_wms"): Promise<SessionUser> {
+  const user = await getSessionUser();
+  if (!user) redirect("/keluar?nonaktif=1");
+  if (!user.apps.includes(app)) redirect(resolveAppsHome(user.apps, user.defaultApp));
+  if (!pageAllowed(user.job, path)) redirect("/?denied=1");
   return user;
 }
 

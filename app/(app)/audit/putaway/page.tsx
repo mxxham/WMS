@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { TabsNav } from "@/components/app/tabs-nav";
 import { AuditList, type AuditRow } from "@/components/audit/audit-list";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * audit: per rack (0027, default) or as one list.
  */
 export default async function PutawayAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/putaway");
   const supervisor = user.role !== "operator";
   const sp = await searchParams;
   const date = auditDate(sp.date);

@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { findIssues, type StockRow } from "@/lib/data-quality";
@@ -8,7 +8,7 @@ import { DataQualityClient } from "./data-quality-client";
 export const dynamic = "force-dynamic";
 
 export default async function DataQualityPage() {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/data-quality");
   const supabase = await createClient();
   const [rows, { data: counts }, { data: items }, { data: policy }] = await Promise.all([
     fetchAll<StockRow>((from, to) => supabase.from("inventory_detail")

@@ -5,7 +5,7 @@ import {
   IconChevronRight, IconCircleCheck, IconClipboardCheck, IconClipboardList, IconPackage,
   IconRoute, IconTruck, IconBuildingWarehouse, IconLock,
 } from "@tabler/icons-react";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
@@ -162,7 +162,7 @@ const SHELF_MAX = SHELF_BUCKETS.filter((b) => Number.isFinite(b.max)).map((b) =>
 const SHELF_KEYS = SHELF_BUCKETS.map((b) => b.key as string);
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ kalender?: string }> }) {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/dashboard");
   const supabase = await createClient();
   const today = jakartaDate();
   const todayStart = new Date(`${today}T00:00:00+07:00`);

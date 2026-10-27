@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
 import { parsePolicy } from "@/lib/inventory-control";
@@ -9,7 +9,7 @@ import { ReceiptDetail, type Actual, type Compare } from "./receipt-detail";
 export const dynamic = "force-dynamic";
 
 export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/receiving");
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
   const supabase = await createClient();

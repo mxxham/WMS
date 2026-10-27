@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
 import type { PickError } from "@/lib/pick-audit";
@@ -16,7 +16,7 @@ type AuditRow = Omit<AttemptView, "task_id" | "resolution" | "resolved_by_name" 
 export default async function FileShipmentAuditPage({ params, searchParams }: {
   params: Promise<{ shipment: string }>; searchParams: Promise<{ date?: string }>;
 }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/picking/file");
   const ship = decodeURIComponent((await params).shipment);
   const date = auditDate((await searchParams).date);
   const supabase = await createClient();

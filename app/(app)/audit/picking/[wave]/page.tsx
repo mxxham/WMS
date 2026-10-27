@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { ArrowLeft, ChevronRight } from "lucide-react";
@@ -25,7 +25,7 @@ type MoveRow = {
 };
 
 export default async function WaveMoveAuditPage({ params }: { params: Promise<{ wave: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/picking");
   const { wave } = await params;
   if (!UUID.test(wave)) notFound();
 

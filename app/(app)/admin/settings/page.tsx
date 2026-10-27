@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
 import type { Layout } from "@/lib/warehouse-types";
@@ -7,7 +7,7 @@ import { SettingsForms } from "./settings-forms";
 import { PolicyForm } from "./policy-form";
 
 export default async function SettingsPage() {
-  await requireRole(["admin"]);
+  await requirePage("/admin/settings");
   const supabase = await createClient();
   const [{ data }, { data: policy }] = await Promise.all([
     supabase.from("settings").select("value").eq("key", "layout").single(),

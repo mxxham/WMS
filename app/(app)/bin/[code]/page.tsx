@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getBinDetail } from "@/lib/bin-data";
 import { parseBinCode } from "@/config/warehouse";
@@ -9,7 +9,7 @@ import { BinPageClient, type OpenTask } from "./bin-page-client";
 export const dynamic = "force-dynamic";
 
 export default async function BinPage({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ scan?: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/bin");
   const { code } = await params;
   const { scan } = await searchParams;
   const supabase = await createClient();

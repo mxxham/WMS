@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
@@ -32,7 +32,7 @@ const exact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
  * went to, where it came from, and every movement of it (the ledger).
  */
 export default async function TracePage({ searchParams }: { searchParams: Promise<{ batch?: string; sku?: string }> }) {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/trace");
   const sp = await searchParams;
   const batch = (sp.batch ?? "").trim();
   const sku = (sp.sku ?? "").trim();

@@ -1,5 +1,5 @@
 import { packLines } from "@/lib/inventory-pack";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { unstable_cache } from "next/cache";
@@ -56,7 +56,7 @@ const getFefoCompliance = unstable_cache(async (days: number) => {
  * reconciliation with Shell's SAP stock and the approval queue.
  */
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<Params> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/inventory");
   const sp = await searchParams;
   const supervisor = user.role !== "operator";
   const tab: Tab = (TABS.some((t) => t.key === sp.tab) ? sp.tab : "stok") as Tab;

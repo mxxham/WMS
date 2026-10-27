@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
@@ -8,7 +8,7 @@ import { CountsClient, type CountTask, type Schedule } from "./counts-client";
 export const dynamic = "force-dynamic";
 
 export default async function CountsPage() {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/counts");
   const supabase = await createClient();
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const [{ data: open }, { data: done }, status, applied, { data: policy }, { data: items }] = await Promise.all([

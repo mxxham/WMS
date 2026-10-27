@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { AuditHeader, auditDate } from "../../../audit-header";
 import { RackAudit } from "../../rack-audit";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function RackAuditPage({ params, searchParams }: {
   params: Promise<{ zone: string }>; searchParams: Promise<{ date?: string }>;
 }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/picking/rak");
   const zone = decodeURIComponent((await params).zone).toUpperCase();
   const date = auditDate((await searchParams).date);
   if (!/^[A-Z0-9_]{1,20}$/.test(zone)) notFound();

@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { loginRequired } from "@/lib/auth-route";
 import { PageHeader } from "@/components/app/page-header";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 /** Pengguna (admin): every account, its role and status; create, change role, reset, deactivate. */
 export default async function UsersPage() {
-  const me = await requireRole(["admin"]);
+  const me = await requirePage("/admin/users");
   const { data } = await (await createClient()).from("profiles").select("id, name, username, role, active, apps, default_app").order("active", { ascending: false }).order("name");
   // The shared site account (app_metadata.shared): every floor device runs on it while login is off.
   const { data: auth } = await createServiceClient().auth.admin.listUsers({ perPage: 1000 });

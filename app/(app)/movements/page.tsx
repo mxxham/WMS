@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { movementQuery, type MovementFilters } from "@/lib/movement-query";
 import { PageHeader } from "@/components/app/page-header";
@@ -14,7 +14,7 @@ const TYPES = ["inbound", "putaway", "picking", "transfer", "adjustment"];
 const PAGE = 100;
 
 export default async function MovementsPage({ searchParams }: { searchParams: Promise<MovementFilters & { page?: string }> }) {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/movements");
   const sp = await searchParams;
   const page = Math.max(0, Number(sp.page ?? 0));
   const supabase = await createClient();

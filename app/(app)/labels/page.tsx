@@ -1,11 +1,11 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
 import { LabelsClient } from "./labels-client";
 
 export default async function LabelsPage() {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/labels");
   const supabase = await createClient();
   // Distinct zone/rack pairs for the pickers (rack bins only).
   const data = await fetchAll<{ zone: string; rack: string | null }>((a, b) =>

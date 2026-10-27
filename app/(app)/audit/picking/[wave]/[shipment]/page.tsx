@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
 import { binConfirm, type LineState, type PickError } from "@/lib/pick-audit";
@@ -18,7 +18,7 @@ type LineRow = {
 
 /** One shipment's lines. A line's picked qty / batch / expiry is not sent to the browser until it has been audited. */
 export default async function ShipmentAuditPage({ params }: { params: Promise<{ wave: string; shipment: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/picking");
   const { wave, shipment } = await params;
   const ship = decodeURIComponent(shipment);
   if (!UUID.test(wave)) notFound();

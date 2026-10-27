@@ -1,6 +1,6 @@
 /** One page table per flowchart job: the sidebar lists and pageAllowed read the same links. */
 import { strict as assert } from 'node:assert';
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { JOBS, jobLevel } from '../lib/jobs';
 import type { Job } from '../lib/jobs';
@@ -87,6 +87,26 @@ test('phone bar and Home main button', () => {
   assert.deepEqual(mobileLinksFor('operator').map((l) => l.href), ['/scan', '/waves', '/inventory', '/warehouse']);
   assert.equal(homePrimary('operator').href, '/scan');
   assert.equal(homePrimary('inventory').href, '/dashboard');
+});
+
+test('every page under app/(app) gates with requirePage, never requireRole', () => {
+  const pages: string[] = [];
+  const walk = (d: string) => {
+    for (const f of readdirSync(d)) {
+      const full = join(d, f);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (f === 'page.tsx') pages.push(full);
+    }
+  };
+  walk(join(process.cwd(), 'app', '(app)'));
+  // no gate by design: the two redirect-only pages (their targets are gated) and the two public text pages
+  const exempt = ['(app)/page.tsx', '(app)/audit/page.tsx', '(app)/lisensi/page.tsx', '(app)/privasi/page.tsx'];
+  for (const f of pages) {
+    const src = readFileSync(f, 'utf8');
+    assert.ok(!src.includes('requireRole('), `${f} still uses requireRole(`);
+    if (exempt.some((e) => f.endsWith(e))) continue;
+    assert.ok(src.includes('requirePage('), `${f} has no requirePage(`);
+  }
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

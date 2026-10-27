@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { PageHeader } from "@/components/app/page-header";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 /** Bind a carton barcode to a SKU (supervisor/admin). */
 export default async function BarcodePage() {
-  await requireRole(["supervisor", "admin"]);
+  await requirePage("/admin/barcode");
   const supabase = await createClient();
   const items = await fetchAll<BindItem>((from, to) =>
     supabase

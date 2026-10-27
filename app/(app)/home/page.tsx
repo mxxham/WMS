@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { HomePage, type HomeStats } from "@/components/home/home-page";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
@@ -14,7 +14,7 @@ type Task = { status: string; task_type: string };
 // same sources as the dashboard's "Operasi hari ini". The dashboard stays the command deck; here they
 // are only a live pulse.
 export default async function Home() {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/home");
   const supabase = await createClient();
   const today = jakartaDate();
   const todayStart = new Date(`${today}T00:00:00+07:00`);

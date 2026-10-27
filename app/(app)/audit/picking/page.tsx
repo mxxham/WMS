@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { TabsNav } from "@/components/app/tabs-nav";
 import { SHIPMENT_STATE_LABEL, type ShipmentState, MOVE_STATE_LABEL, type MoveState } from "@/lib/pick-audit";
@@ -24,7 +24,7 @@ const OPEN: ShipmentState[] = ["PICKING", "READY_AUDIT", "HAS_MISMATCH", "READY_
  * only when all its lines passed (0024).
  */
 export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string; view?: string }> }) {
-  const user = await requireRole(["operator", "supervisor", "admin"]);
+  const user = await requirePage("/audit/picking");
   const sp = await searchParams;
   const date = auditDate(sp.date);
   const supervisor = user.role !== "operator";
