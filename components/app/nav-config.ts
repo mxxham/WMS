@@ -1,48 +1,49 @@
-import { ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, type LucideIcon } from "lucide-react";
-import type { Role } from "@/lib/types";
+import { UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, type LucideIcon } from "lucide-react";
+import type { Job } from "@/lib/jobs";
 
 /**
  * The app's navigation, in one place: the desktop sidebar, the phone bottom bar and the Home page's
  * module cards all read it, so a new module added here appears in all three.
  */
-export type NavLink = { href: string; label: string; icon: LucideIcon; roles: Role[] };
-const ALL: Role[] = ["operator", "supervisor", "admin"];
-const SUP: Role[] = ["supervisor", "admin"];
+export type NavLink = { href: string; label: string; icon: LucideIcon; jobs: Job[] };
+const AI: Job = "admin_inbound", AO: Job = "admin_outbound", CK: Job = "checker", IV: Job = "inventory", OP: Job = "operator", LD: Job = "leader", AD: Job = "admin";
+const ALL_JOBS: Job[] = [AI, AO, CK, IV, OP, LD, AD];
 
 /** Sidebar order: overview first, then by job. Empty sections are hidden per role. */
 export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   { title: null, links: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: SUP },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, jobs: [AI, AO, IV, LD, AD] },
   ] },
   { title: "Operasional", links: [
-    { href: "/scan", label: "Scan", icon: ScanLine, roles: ALL },
-    { href: "/receiving", label: "Penerimaan", icon: Truck, roles: ALL },
-    { href: "/waves", label: "Wave", icon: ListChecks, roles: ALL },
-    { href: "/allocate", label: "Alokasi", icon: ClipboardList, roles: SUP },
-    { href: "/putaway", label: "Putaway", icon: PackagePlus, roles: SUP },
-    { href: "/pickfaces", label: "Pickface", icon: MapPin, roles: SUP },
+    { href: "/scan", label: "Scan", icon: ScanLine, jobs: ALL_JOBS },
+    { href: "/receiving", label: "Penerimaan", icon: Truck, jobs: [AI, CK, LD, AD] },
+    { href: "/waves", label: "Wave", icon: ListChecks, jobs: [AO, CK, OP, LD, AD] },
+    { href: "/assign", label: "Penugasan", icon: UserCheck, jobs: [IV, LD, AD] },
+    { href: "/allocate", label: "Alokasi", icon: ClipboardList, jobs: [AO, LD, AD] },
+    { href: "/putaway", label: "Putaway", icon: PackagePlus, jobs: [AI, LD, AD] },
+    { href: "/pickfaces", label: "Pickface", icon: MapPin, jobs: [IV, LD, AD] },
   ] },
   { title: "Stok", links: [
-    { href: "/inventory", label: "Inventory", icon: Package, roles: ALL },
-    { href: "/warehouse", label: "Gudang 3D", icon: Boxes, roles: ALL },
-    { href: "/adjust", label: "Adjust stok", icon: SlidersHorizontal, roles: SUP },
-    { href: "/movements", label: "Mutasi", icon: History, roles: SUP },
+    { href: "/inventory", label: "Inventory", icon: Package, jobs: ALL_JOBS },
+    { href: "/warehouse", label: "Gudang 3D", icon: Boxes, jobs: [IV, OP, LD, AD] },
+    { href: "/adjust", label: "Adjust stok", icon: SlidersHorizontal, jobs: [IV, LD, AD] },
+    { href: "/movements", label: "Mutasi", icon: History, jobs: [AI, IV, LD, AD] },
   ] },
   { title: "Kontrol", links: [
-    { href: "/counts", label: "Cycle count", icon: ListTodo, roles: ALL },
-    { href: "/audit/picking", label: "Audit picking", icon: PackageCheck, roles: ALL },
-    { href: "/audit/putaway", label: "Audit putaway", icon: ClipboardCheck, roles: ALL },
-    { href: "/data-quality", label: "Kualitas data", icon: ShieldCheck, roles: SUP },
-    { href: "/trace", label: "Lacak batch", icon: Route, roles: SUP },
+    { href: "/counts", label: "Cycle count", icon: ListTodo, jobs: [IV, LD, AD] },
+    { href: "/audit/picking", label: "Audit picking", icon: PackageCheck, jobs: [AO, CK, LD, AD] },
+    { href: "/audit/putaway", label: "Audit putaway", icon: ClipboardCheck, jobs: [AI, CK, LD, AD] },
+    { href: "/data-quality", label: "Kualitas data", icon: ShieldCheck, jobs: [IV, LD, AD] },
+    { href: "/trace", label: "Lacak batch", icon: Route, jobs: [IV, LD, AD] },
   ] },
   { title: "Admin", links: [
-    { href: "/labels", label: "Label", icon: Printer, roles: SUP },
-    { href: "/labels/pallet", label: "Kartu palet", icon: Printer, roles: SUP },
-    { href: "/admin/items", label: "Master item", icon: Tags, roles: SUP },
-    { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, roles: SUP },
-    { href: "/admin/import", label: "Import", icon: Upload, roles: ["admin"] },
-    { href: "/admin/settings", label: "Pengaturan", icon: Settings, roles: ["admin"] },
-    { href: "/admin/users", label: "Pengguna", icon: Users, roles: ["admin"] },
+    { href: "/labels", label: "Label", icon: Printer, jobs: [AI, LD, AD] },
+    { href: "/labels/pallet", label: "Kartu palet", icon: Printer, jobs: [AI, LD, AD] },
+    { href: "/admin/items", label: "Master item", icon: Tags, jobs: [AI, IV, LD, AD] },
+    { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, jobs: [IV, LD, AD] },
+    { href: "/admin/import", label: "Import", icon: Upload, jobs: [AD] },
+    { href: "/admin/settings", label: "Pengaturan", icon: Settings, jobs: [AD] },
+    { href: "/admin/users", label: "Pengguna", icon: Users, jobs: [AD] },
   ] },
 ];
 
@@ -50,18 +51,38 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
 export const MOBILE = ["/scan", "/waves", "/inventory", "/adjust", "/dashboard", "/warehouse"];
 
 
-/** The sidebar's sections for a role; empty sections are dropped. */
-export function sectionsFor(role: Role): { title: string | null; links: NavLink[] }[] {
-  return SECTIONS.map((sec) => ({ ...sec, links: sec.links.filter((l) => l.roles.includes(role)) })).filter((sec) => sec.links.length > 0);
+/** The sidebar's sections for a job; empty sections are dropped. */
+export function sectionsFor(job: Job): { title: string | null; links: NavLink[] }[] {
+  return SECTIONS.map((sec) => ({ ...sec, links: sec.links.filter((l) => l.jobs.includes(job)) })).filter((sec) => sec.links.length > 0);
 }
 
-/** The phone bottom bar for a role: at most five. */
-export function mobileLinksFor(role: Role): NavLink[] {
-  const byHref = new Map(sectionsFor(role).flatMap((sec) => sec.links).map((l) => [l.href, l]));
+/** The phone bottom bar for a job: at most five. */
+export function mobileLinksFor(job: Job): NavLink[] {
+  const byHref = new Map(sectionsFor(job).flatMap((sec) => sec.links).map((l) => [l.href, l]));
   return MOBILE.map((h) => byHref.get(h)).filter((l): l is NavLink => !!l).slice(0, 5);
 }
 
-/** The Home page's main button: the dashboard, or Scan for operators (who cannot open the dashboard). */
-export function homePrimary(role: Role): { href: string; label: string } {
-  return role === "operator" ? { href: "/scan", label: "Buka Scan" } : { href: "/dashboard", label: "Buka dashboard" };
+/** The Home page's main button: the dashboard when the job may open it, otherwise Scan. */
+export function homePrimary(job: Job): { href: string; label: string } {
+  return pageAllowed(job, "/dashboard") ? { href: "/dashboard", label: "Buka dashboard" } : { href: "/scan", label: "Buka Scan" };
+}
+
+/** Pages every job may open. */
+export const OPEN_PATHS = ["/home", "/lisensi", "/privasi"];
+
+const LINKS: NavLink[] = SECTIONS.flatMap((sec) => sec.links);
+const under = (path: string, href: string) => path === href || path.startsWith(href + "/");
+
+/**
+ * The single page gate. The longest link href that is the path or a parent of it decides, so
+ * `/labels/pallet` is not governed by `/labels`; `/bin/...` follows Scan; `/audit` follows either
+ * audit link; `/` only redirects. No match means closed.
+ */
+export function pageAllowed(job: Job, path: string): boolean {
+  if (path === "/" || OPEN_PATHS.some((p) => under(path, p))) return true;
+  if (under(path, "/bin")) return pageAllowed(job, "/scan");
+  if (path === "/audit") return pageAllowed(job, "/audit/picking") || pageAllowed(job, "/audit/putaway");
+  let best: NavLink | null = null;
+  for (const l of LINKS) if (under(path, l.href) && (!best || l.href.length > best.href.length)) best = l;
+  return best ? best.jobs.includes(job) : false;
 }

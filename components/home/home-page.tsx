@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ABOUT } from "@/components/app/about-copy";
 import { homePrimary, sectionsFor, type NavLink } from "@/components/app/nav-config";
 import { Clock } from "@/components/app/clock";
-import type { Role } from "@/lib/types";
+import type { Job } from "@/lib/jobs";
 import { BRAND } from "@/config/brand";
 import { cn, fmtNum } from "@/lib/utils";
 
@@ -24,16 +24,16 @@ export type HomeStats = {
 /**
  * Home (/home, opened from the logo): the welcome banner runs edge to edge (no card), a navy status
  * strip continues the image's own right panel — greeting, today's pulse and the way in — then every
- * module the role can open, and who built the system.
+ * module the job can open, and who built the system.
  */
-export function HomePage({ role, greet, dateLine, date, stats }: {
-  role: Role; greet: string; dateLine: string; date: string; stats: HomeStats;
+export function HomePage({ job, greet, dateLine, date, stats }: {
+  job: Job; greet: string; dateLine: string; date: string; stats: HomeStats;
 }) {
   return (
     <main>
-      <Hero role={role} greet={greet} dateLine={dateLine} date={date} stats={stats} />
+      <Hero job={job} greet={greet} dateLine={dateLine} date={date} stats={stats} />
       <div className="px-4 pb-10 lg:px-10">
-        <Modules role={role} />
+        <Modules job={job} />
         <Credits />
       </div>
     </main>
@@ -45,10 +45,10 @@ export function HomePage({ role, greet, dateLine, date, stats }: {
  * only. Its right panel is open navy, so the strip under it (`bg-jeir-side`, the sidebar gradient)
  * reads as the image simply continuing: first row greeting and CTAs, second row today's pulse.
  */
-function Hero({ role, greet, dateLine, date, stats }: {
-  role: Role; greet: string; dateLine: string; date: string; stats: HomeStats;
+function Hero({ job, greet, dateLine, date, stats }: {
+  job: Job; greet: string; dateLine: string; date: string; stats: HomeStats;
 }) {
-  const primary = homePrimary(role);
+  const primary = homePrimary(job);
   const buttons = (cls: string) => (
     <>
       <Button asChild variant="accent" className={cn(cls, FOCUS, "focus-visible:ring-offset-jeir-navy")} style={delay(500)}>
@@ -106,14 +106,14 @@ function Stat({ label, value, href }: { label: string; value: string; href: stri
   );
 }
 
-function Modules({ role }: { role: Role }) {
-  const primary = homePrimary(role).href;
+function Modules({ job }: { job: Job }) {
+  const primary = homePrimary(job).href;
   let i = 0;
   return (
     <section aria-labelledby="home-modules-title" id="home-modules" className="relative scroll-mt-6 space-y-6 pt-10">
       <span aria-hidden className="home-dots pointer-events-none absolute right-0 top-0 hidden h-28 w-56 lg:block" />
       <h2 id="home-modules-title" className="font-cond text-2xl font-semibold">{ABOUT.modulesTitle}</h2>
-      {sectionsFor(role).map((sec) => (
+      {sectionsFor(job).map((sec) => (
         <div key={sec.title ?? "top"} className="space-y-2">
           {sec.title && <h3 className="text-xs font-semibold uppercase tracking-wide text-steel-500">{sec.title}</h3>}
           <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">

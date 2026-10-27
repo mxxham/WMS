@@ -40,5 +40,5 @@ export default async function Home() {
     picks: { total: picks.length, done: picks.filter((t) => t.status === "COMPLETED").length },
   };
   const dateLine = todayStart.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
-  return <HomePage role={user.role} greet={greet} dateLine={dateLine} date={today} stats={stats} />;
+  return <HomePage job={user.job} greet={greet} dateLine={dateLine} date={today} stats={stats} />;
 }

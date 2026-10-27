@@ -3,11 +3,12 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Role } from "@/lib/types";
+import type { Job } from "@/lib/jobs";
 import type { AppId } from "@/lib/apps";
 import { normalizeApps, resolveAppsHome } from "@/lib/apps";
 
 export type SessionUser = {
-  id: string; email: string | null; name: string; role: Role; username: string;
+  id: string; email: string | null; name: string; role: Role; job: Job; username: string;
   /** the shared site account (app_metadata.shared, 0072), not a personal account */
   shared: boolean;
   apps: AppId[];
@@ -22,7 +23,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const claims = data?.claims;
   if (!claims) return null;
   const email = typeof claims.email === "string" ? claims.email : null;
-  const { data: profile, error } = await supabase.from("profiles").select("name, role, username, active, apps, default_app").eq("id", claims.sub).single();
+  const { data: profile, error } = await supabase.from("profiles").select("name, role, job, username, active, apps, default_app").eq("id", claims.sub).single();
   // Deactivated: refused before the request (PT403, 0071), no readable row (PGRST116) or active=false.
   // Any other failure (network, timeout) is an error page with retry, never a sign-out.
   if (error && error.code !== "PT403" && error.code !== "PGRST116") throw new Error(`Profil tidak bisa dibaca: ${error.message}`);
@@ -34,6 +35,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     email,
     name: profile.name ?? email ?? "User",
     role: profile.role as Role,
+    job: profile.job as Job,
     username: profile.username,
     shared,
     apps: normalizeApps(profile.apps),

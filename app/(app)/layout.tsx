@@ -22,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       shared: user.shared,
     }}>
       <div className="min-h-screen">
-        <Nav role={user.role} />
+        <Nav job={user.job} />
         <div className="pb-20 lg:pb-0 lg:pl-72">
           {children}
           <SiteFooter />

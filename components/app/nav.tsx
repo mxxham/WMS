@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import * as D from "@radix-ui/react-dialog";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Role } from "@/lib/types";
+import type { Job } from "@/lib/jobs";
 import { mobileLinksFor, sectionsFor } from "./nav-config";
 import { AccountBox, AccountSwitch } from "./account";
 import { BRAND } from "@/config/brand";
@@ -34,10 +34,10 @@ const BAR_HEIGHT = "calc(3.5rem + env(safe-area-inset-bottom) + 0.5rem)";
 const RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plate focus-visible:ring-offset-2 focus-visible:ring-offset-jeir-navy";
 const ROW_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-plate focus-visible:bg-ckb-dark";
 
-export function Nav({ role }: { role: Role }) {
+export function Nav({ job }: { job: Job }) {
   const path = usePathname();
-  const sections = sectionsFor(role);
-  const mobile = mobileLinksFor(role);
+  const sections = sectionsFor(job);
+  const mobile = mobileLinksFor(job);
   const [moreOpen, setMoreOpen] = useState(false);
 
   // Any route change closes the sheet, including one nobody tapped here (back button, a deep link):

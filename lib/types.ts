@@ -1,4 +1,5 @@
 export type Role = "admin" | "supervisor" | "operator";
+export type { Job } from "@/lib/jobs";
 export type MovementType = "inbound" | "putaway" | "picking" | "transfer" | "adjustment";
 
 export type Bin = {
