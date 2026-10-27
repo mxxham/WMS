@@ -12,6 +12,7 @@ import { WaveGuide } from "../guide";
 import { ProblemsSummary } from "../problems-summary";
 import { StatusTag } from "../wave-parts";
 import { filterActive, rowMatches, waveHref, type RowFilter, type WaveModel } from "../wave-model";
+import { emptyDayText } from "@/lib/assigned-waves";
 
 const TONE = { normal: "text-steel", bad: "font-semibold text-bad", muted: "text-steel-500" } as const;
 
@@ -59,7 +60,7 @@ export function DayScreen({ model: m, filter, onFilter, onOpenWave, onShowProble
 
         {m.waves.length === 0 ? (
           <div className="space-y-2 rounded-lg bg-white p-4 text-sm">
-            <p>Belum ada rencana untuk {fmtDate(m.date)}.</p>
+            <p>{emptyDayText(m.assignedOnly, fmtDate(m.date))}</p>
             {m.supervisor && <p><Link href="/allocate" className="font-semibold underline">Jalankan alokasi</Link></p>}
           </div>
         ) : (

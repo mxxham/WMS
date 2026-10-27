@@ -33,6 +33,8 @@ export function foldDone(visible: LineItem[], showDone: boolean): { listed: Line
 export type WaveModel = {
   date: string; prevDate: string | null; nextDate: string | null;
   waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
+  /** operator view: the lists hold only their assigned shipments */
+  assignedOnly: boolean;
   supervisor: boolean; rpc: Rpc; onDone: () => void;
   short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
   /** manual DO numbers per wave+shipment (0079), keyed `${wave_id}|${shipment_number}` */

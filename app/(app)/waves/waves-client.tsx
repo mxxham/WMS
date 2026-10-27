@@ -33,6 +33,7 @@ import { useIsPhone } from "./use-is-phone";
 import { NO_FILTER, filterActive, foldDone, lineCancelled, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
 import { WavePrimary } from "./wave-primary";
 import { DoButton } from "./do-dialog";
+import { emptyDayText } from "@/lib/assigned-waves";
 
 export type { OutboundDetail, TaskWait } from "./wave-parts";
 export { rowMatches, lineIds, lineDone, lineCancelled, type RowFilter, type WaveModel } from "./wave-model";
@@ -51,9 +52,9 @@ const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSh
  * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
  * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
+export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = false, waves, tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
   date: string; prevDate: string | null; nextDate: string | null;
-  role: Role; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
+  role: Role; /** operator view: only their assigned shipments are passed in */ assignedOnly?: boolean; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** ids of open tasks the current stock can no longer satisfy */
   shortfalls: string[];
   /** audit / loading state per `${wave_id}|${shipment}` (0024) */
@@ -137,7 +138,7 @@ export function WavesClient({ date, prevDate, nextDate, role, waves, tasks, outb
 
   const model: WaveModel = {
     date, prevDate, nextDate, waves, tasks, outbound, supervisor, rpc, onDone: () => router.refresh(),
-    short, waits, audit, rest: restNotesFromTasks(waves, tasks), dos,
+    assignedOnly, short, waits, audit, rest: restNotesFromTasks(waves, tasks), dos,
     // 0073: picks whose pallet's relokasi is already posted (posted alone to unblock another
     // wave) may not be cancelled: the moved cartons stay moved and the pickface keeps the rest.
     postedMoveOf: new Map([...movesOfPicks([...tasks].sort((a, b) => a.seq - b.seq), { anyState: true })]
@@ -218,7 +219,7 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
 
       {m.waves.length === 0 ? (
         <Card><CardContent className="space-y-2 text-sm">
-          <p>Belum ada rencana untuk {fmtDate(m.date)}.</p>
+          <p>{emptyDayText(m.assignedOnly, fmtDate(m.date))}</p>
           {m.supervisor && <p><Link href="/allocate" className="font-semibold underline">Jalankan alokasi</Link></p>}
         </CardContent></Card>
       ) : (
