@@ -158,5 +158,14 @@ test('app/ckb/** files do not import SessionProvider or Shell nav', () => {
   }
 });
 
+test('the middleware matcher skips static images and fonts, so the login photo is not sent to /login', () => {
+  const m = src('middleware.ts');
+  const matcher = /matcher:\s*\[(.*)\]/.exec(m);
+  assert.ok(matcher, 'middleware has no matcher line');
+  for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'woff', 'woff2']) {
+    assert.ok(matcher[1]!.includes(ext), `matcher does not exclude .${ext}`);
+  }
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
