@@ -63,7 +63,7 @@ Card fields, big enough to read with the pallet stacked up high (A4 LANDSCAPE, p
 - Quantity (`Act. Qty`) + `UoM` — 64 pt, a bare number with no field label, the same size as the batch no. `UoM` falls back from the item master to the file.
 - `Bin Location` printed as LOCATION — 96 pt, and a full-width write-in line when the file left it empty.
 - `Batch No.` — 64 pt so it reads across the floor; when empty, a blank write-in line (checker hand-fills at the dock).
-- `Exp Date` / `GR No` / `Putaway no.` in one tiny gray strip at the bottom, only when any of them is filled. `Mfg Date` is parsed but not printed; the item description is not printed either.
+- `Exp Date` / `GR No` / `Putaway no.` in one tiny gray strip at the bottom, only when any of them is filled. `Mfg Date` is printed only for drum / pail / IBC / fluidbag items (unit from `lib/allocator/uom-master.ts`, `lib/form-checker/mfg.ts`): `BATCH NO.` left and `MFG DATE` right at one size, a blank write-in line when the file has no date. Carton items do not print it. The item description is not printed.
 - NOT printed (dropped at the owner's request): the month · user · shipment context band, `UPP` and `Pallet ID` — Pallet ID stays in the parsed data, it is just no longer on the card.
 - The API also accepts a `shipment` number on `action=print` to print just that shipment's cards; without it every shipment is printed.
 

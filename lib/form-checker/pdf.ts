@@ -1,6 +1,7 @@
 import "server-only";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 import { PALLET_CARD } from "@/config/warehouse";
+import { showsMfgDate } from "./mfg";
 import type { FormCheckerCard } from "./types";
 
 const MM = 72 / 25.4; // PDF points per millimetre
@@ -67,6 +68,7 @@ function cardStack(
   inner: number,
   cx: number,
   yStart: number,
+  showMfg = false,
 ): number {
   let y = yStart;
   const dy = (h: number) => { y -= h; };
@@ -99,17 +101,36 @@ function cardStack(
 
   // BATCH NO. — must be readable from across the floor, so it sits right under the quantities.
   dy(4);
-  centered(canvas, "BATCH NO.", fonts.reg, C.labelPt, cx, y - C.labelPt, GRAY);
-  dy(C.labelPt + 2);
-  if (card.batchNo) {
-    let batchSize = C.batchPt;
-    while (fonts.bold.widthOfTextAtSize(card.batchNo, batchSize) > inner && batchSize > 40) batchSize -= 4;
-    centered(canvas, card.batchNo, fonts.bold, batchSize, cx, y - batchSize * 0.95, BLACK);
-    dy(batchSize * 1.1 + 6);
+  if (showMfg) {
+    // Drum / pail / IBC / fluidbag: BATCH NO. left, MFG DATE right, one size for both.
+    const gap = 48;
+    const colW = (inner - gap) / 2;
+    const cols: { label: string; value: string | null; x: number }[] = [
+      { label: "BATCH NO.", value: card.batchNo, x: cx - gap / 2 - colW / 2 },
+      { label: "MFG DATE", value: card.mfgDate, x: cx + gap / 2 + colW / 2 },
+    ];
+    for (const c of cols) centered(canvas, c.label, fonts.reg, C.labelPt, c.x, y - C.labelPt, GRAY);
+    dy(C.labelPt + 2);
+    let size = C.batchPt;
+    while (cols.some((c) => c.value && fonts.bold.widthOfTextAtSize(c.value, size) > colW) && size > 32) size -= 4;
+    for (const c of cols) {
+      if (c.value) centered(canvas, c.value, fonts.bold, size, c.x, y - size * 0.95, BLACK);
+      else hline(canvas, c.x - colW * 0.4, y - C.batchPt * 0.75, colW * 0.8, 1, BLACK); // write-in at the dock
+    }
+    dy(cols.every((c) => c.value) ? size * 1.1 + 6 : Math.max(size * 1.1 + 6, C.batchPt * 0.95 + 10));
   } else {
-    const lineWb = inner * 0.7;
-    hline(canvas, cx - lineWb / 2, y - C.batchPt * 0.75, lineWb, 1, BLACK);
-    dy(C.batchPt * 0.95 + 10);
+    centered(canvas, "BATCH NO.", fonts.reg, C.labelPt, cx, y - C.labelPt, GRAY);
+    dy(C.labelPt + 2);
+    if (card.batchNo) {
+      let batchSize = C.batchPt;
+      while (fonts.bold.widthOfTextAtSize(card.batchNo, batchSize) > inner && batchSize > 40) batchSize -= 4;
+      centered(canvas, card.batchNo, fonts.bold, batchSize, cx, y - batchSize * 0.95, BLACK);
+      dy(batchSize * 1.1 + 6);
+    } else {
+      const lineWb = inner * 0.7;
+      hline(canvas, cx - lineWb / 2, y - C.batchPt * 0.75, lineWb, 1, BLACK);
+      dy(C.batchPt * 0.95 + 10);
+    }
   }
 
   // LOCATION — where this pallet belongs/what it holds.
@@ -149,7 +170,8 @@ function cardStack(
 /**
  * One A4 landscape page per pallet (page.count === cards.length). Vertical stack, all centred:
  * item code (largest on the page) → quantity + UoM (bare number, no label) →
- * BATCH NO. (readable from across the floor; ruled line when blank) →
+ * BATCH NO. (readable from across the floor; ruled line when blank; for drum / pail /
+ * IBC / fluidbag items MFG DATE sits to its right at the same size) →
  * LOCATION (ruled line when blank) →
  * optional detail strip (exp/GR/putaway in one gray line).
  * Long values shrink to fit instead of shrinking the SKU or wrapping off-page.
@@ -173,6 +195,7 @@ export async function buildPalletCardPdf(cards: FormCheckerCard[], master: Map<s
     const page = pdf.addPage([W, H]);
     const m = master.get(String(card.itemCode));
     const uom = m?.uom ?? card.actUom ?? card.orderUom ?? "";
+    const showMfg = showsMfgDate(String(card.itemCode), m?.uom, card.actUom || card.orderUom);
 
     // Cutting/print border at the page edge, 2 mm outside the content margin —
     // a frame of filled strips, same reason as hline() above.
@@ -188,9 +211,9 @@ export async function buildPalletCardPdf(cards: FormCheckerCard[], master: Map<s
     // (overfull cards keep the top-anchor).
     const yTop = H - M;
     const measure = createMeasure();
-    cardStack(measure.canvas, card, uom, fonts, C, inner, cx, yTop);
+    cardStack(measure.canvas, card, uom, fonts, C, inner, cx, yTop, showMfg);
     const shift = Number.isFinite(measure.midpoint()) ? Math.min(0, H / 2 - measure.midpoint()) : 0;
-    cardStack(page, card, uom, fonts, C, inner, cx, yTop + shift);
+    cardStack(page, card, uom, fonts, C, inner, cx, yTop + shift, showMfg);
   }
   return pdf.save();
 }

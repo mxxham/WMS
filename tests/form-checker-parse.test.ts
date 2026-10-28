@@ -11,6 +11,11 @@ import * as XLSX from "xlsx";
 import { readSheet } from "../lib/read-sheet";
 import { parseFormChecker, FC_COL, detectColumns } from "../lib/form-checker/parse";
 import { buildPalletCardPdf } from "../lib/form-checker/pdf";
+import { showsMfgDate } from "../lib/form-checker/mfg";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PDFDocument } from "pdf-lib";
 
 let passed = 0, failed = 0;
@@ -18,10 +23,11 @@ function test(name: string, fn: (() => void) | (() => Promise<void>)) {
   (async () => {
     try { await fn(); passed++; console.log(`  ✓ ${name}`); }
     catch (e) { failed++; console.log(`  ✗ ${name}\n    ${(e as Error).message}`); }
+    done++;
     if (done === total) finish();
   })();
 }
-let done = 0, total = 11;
+let done = 0, total = 14;
 function finish() {
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);
@@ -262,4 +268,57 @@ test("one A4 landscape page per card, every page exactly A4", async () => {
     assert.ok(Math.abs(page.getWidth() - A4W) < 1, `width ${page.getWidth()} is not A4 landscape`);
     assert.ok(Math.abs(page.getHeight() - A4H) < 1, `height ${page.getHeight()} is not A4 landscape`);
   }
+});
+
+console.log("\nForm Checker: manufacture date for drum / pail / IBC / fluidbag");
+
+test("which items print the manufacture date", () => {
+  assert.equal(showsMfgDate("550024919", "EA", "EA"), true, "Spirax 209L = Drum");
+  assert.equal(showsMfgDate("550024955", "EA", "EA"), true, "Corena 20L = Pail");
+  assert.equal(showsMfgDate("550027259", "EA", "EA"), true, "Fluidbag");
+  assert.equal(showsMfgDate("550070614", "CAR", "CAR"), false, "carton item");
+  assert.equal(showsMfgDate("999000001", null, "IBC"), true, "unknown SKU, the file says IBC");
+  assert.equal(showsMfgDate("999000001", "EA", "EA"), false, "unknown SKU, EA alone is not a drum");
+});
+
+const card = (itemCode: number, batchNo: string | null, mfgDate: string | null) => ({
+  month: "OCT", userName: "T", shipmentNo: 1, itemCode, qtyOrder: 4, orderUom: "EA", asnNo: null, vendorAsnNo: null, actQty: 4, actUom: "EA",
+  palletId: "540000000001", binLocation: "CA01A01", grNo: null, batchNo, mfgDate, expDate: "15/05/2031", putawayNo: null,
+});
+/** Page text through pdftotext when the machine has it (poppler); null otherwise. */
+function pageText(pdf: Uint8Array, args: string[] = ["-layout"]): string | null {
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "card-"));
+    writeFileSync(join(dir, "c.pdf"), pdf);
+    return execFileSync("pdftotext", [...args, join(dir, "c.pdf"), "-"], { encoding: "utf8" });
+  } catch { return null; }
+}
+/** Left edge of each word on the page (pdftotext -bbox). */
+function wordX(pdf: Uint8Array): Map<string, number> | null {
+  const html = pageText(pdf, ["-bbox"]);
+  if (html === null) return null;
+  const m = new Map<string, number>();
+  for (const w of html.matchAll(/<word xMin="([\d.]+)"[^>]*>([^<]+)<\/word>/g)) if (!m.has(w[2])) m.set(w[2], Number(w[1]));
+  return m;
+}
+
+test("a drum card prints MFG DATE to the right of the batch", async () => {
+  const pdf = await buildPalletCardPdf([card(550024919, "21E26JJ", "15/05/2026")], new Map([["550024919", { uom: "EA" }]]));
+  assert.equal((await PDFDocument.load(pdf)).getPageCount(), 1);
+  const x = wordX(pdf);
+  if (x === null) return; // no pdftotext here: page count only
+  assert.ok(x.has("MFG") && x.has("15/05/2026"), [...x.keys()].join(" "));
+  assert.ok(x.get("BATCH")! < x.get("MFG")!, "label MFG DATE right of BATCH NO.");
+  assert.ok(x.get("21E26JJ")! < x.get("15/05/2026")!, "date right of the batch");
+});
+
+test("a carton card has no MFG DATE; a drum without a date gets the label and a write-in line", async () => {
+  const pdf = await buildPalletCardPdf([card(550070614, "18H26JJ", "01/08/2026"), card(550024919, "21E26JJ", null)],
+    new Map([["550070614", { uom: "CAR" }], ["550024919", { uom: "EA" }]]));
+  assert.equal((await PDFDocument.load(pdf)).getPageCount(), 2);
+  const text = pageText(pdf);
+  if (text === null) return;
+  const [carton, drum] = text.split("\f");
+  assert.ok(!carton.includes("MFG DATE") && !carton.includes("01/08/2026"), "carton card prints no manufacture date");
+  assert.ok(drum.includes("MFG DATE"), "drum card keeps the label for the write-in");
 });
