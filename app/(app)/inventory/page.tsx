@@ -11,7 +11,7 @@ import { FefoTab, type FefoException } from "./tabs/fefo-tab";
 import { StayTab } from "./tabs/stay-tab";
 import { HoldsTab, type HoldRow } from "./tabs/holds-tab";
 import { AccuracyTab, type AccuracyRow, type AdjustmentRow } from "./tabs/accuracy-tab";
-import { ReconTab, type ReconLine, type ReconSummary } from "./tabs/recon-tab";
+import { ReconTab, type PrevGap, type ReconLine, type ReconSummary, type SapMove, type ShipMatch } from "./tabs/recon-tab";
 import { ApprovalsTab, type RequestRow } from "./tabs/approvals-tab";
 import { EmptyTab, type EmptyBin } from "./tabs/empty-tab";
 import { WmsDayDownload } from "./wms-day-download";
@@ -30,7 +30,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
-type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string };
+type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string; rv?: string };
 
 // fefo_exceptions takes ~8s on the live data set; cache both counts per window
 // for 15 min, mirroring the dashboard's getFefoCompliance, so the FEFO tab
@@ -82,7 +82,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         near={(sp.near ?? "").trim().toUpperCase()} aisle={sp.aisle ?? ""} level={sp.level ?? ""} />}
       {tab === "hold" && supervisor && await holdTab()}
       {tab === "akurasi" && supervisor && await accuracyTab(policy.ira_target_pct)}
-      {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon)}
+      {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon, sp.rv)}
       {tab === "persetujuan" && supervisor && await approvalsTab(policy.adjust_approval_qty)}
     </main>
   );
@@ -162,12 +162,35 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     return <AccuracyTab counts={counts} adjustments={adjustments} target={target} recons={(recons ?? []) as { id: string; as_of: string; accuracy_pct: number | null; skus: number; skus_match: number }[]} />;
   }
 
-  async function reconTab(reconId?: string) {
-    const [{ data: runs }, lines] = await Promise.all([
-      supabase.from("stock_recon_summary").select("*").order("created_at", { ascending: false }).limit(20),
-      reconId ? fetchAll<ReconLine>((a, b) => supabase.from("stock_recon_lines").select("*").eq("recon_id", reconId).order("sku").range(a, b)) : Promise.resolve(null),
+  async function reconTab(reconId?: string, view?: string) {
+    const { data: runsRaw } = await supabase.from("stock_recon_summary").select("*").order("created_at", { ascending: false }).limit(30);
+    const runs = (runsRaw ?? []) as ReconSummary[];
+    const run = reconId ? runs.find((r) => r.id === reconId) : undefined;
+    if (!reconId || !run) {
+      return <ReconTab runs={runs} selected={reconId ?? null} lines={null} moves={[]} ships={[]} shipError={null} prev={null} prevAsOf={null} />;
+    }
+    // The reconciliation made just before this one: its gap per SKU shows which differences keep coming back.
+    const before = runs.find((r) => r.created_at < run.created_at) ?? null;
+    const [lines, moves, prevLines, match] = await Promise.all([
+      fetchAll<ReconLine>((a, b) => supabase.from("stock_recon_lines").select("*").eq("recon_id", run.id).order("sku").range(a, b)),
+      run.sap_moves
+        ? fetchAll<SapMove>((a, b) => supabase.from("stock_recon_sap_moves")
+            .select("line_no, sku, description, sloc, mvt_type, mvt_text, mat_doc, posting_date, quantity, uom, reference, customer, customer_name, user_name")
+            .eq("recon_id", run.id).order("line_no").order("id").range(a, b))
+        : Promise.resolve([] as SapMove[]),
+      before
+        ? fetchAll<{ sku: string; diff_unrestricted: number; diff_blocked: number }>((a, b) => supabase.from("stock_recon_lines")
+            .select("sku, diff_unrestricted, diff_blocked").eq("recon_id", before.id).order("sku").range(a, b))
+        : Promise.resolve(null),
+      run.sap_moves ? supabase.rpc("recon_shipment_match", { p_recon_id: run.id }) : Promise.resolve({ data: [], error: null }),
     ]);
-    return <ReconTab runs={(runs ?? []) as ReconSummary[]} selected={reconId ?? null} lines={lines} />;
+    const prev: PrevGap | null = prevLines
+      ? Object.fromEntries(prevLines.map((l) => [l.sku, -(Number(l.diff_unrestricted) + Number(l.diff_blocked))]))
+      : null;
+    return (
+      <ReconTab runs={runs} selected={run.id} lines={lines} moves={moves} ships={(match.data ?? []) as ShipMatch[]} shipError={match.error?.message ?? null}
+        prev={prev} prevAsOf={before?.as_of ?? null} view={view} />
+    );
   }
 
   async function approvalsTab(limit: number) {
