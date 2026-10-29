@@ -1,0 +1,253 @@
+/* The 404's own stylesheet, imported only by app/not-found.tsx. Deliberately excessive (user-requested:
+   "as loud as it can"). Every class is prefixed `nf-` so nothing leaks into the app.
+
+   Two safety rails stay on regardless of how loud it gets:
+   - No full-screen flash faster than 1 per second (photosensitive-seizure guideline is < 3/s); the
+     siren wash alternates every 0.6s at partial opacity, never black/white.
+   - Under `prefers-reduced-motion` globals.css stops every animation and the block at the bottom
+     hides the purely decorative layers, so the page rests as a readable static card. */
+
+/* ---------- ground ---------- */
+
+.nf-root {
+  background: #032741;
+  color: #032741;
+}
+
+/* A rainbow wheel, larger than the screen, turning behind everything. */
+.nf-wheel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 250vmax;
+  height: 250vmax;
+  margin: -125vmax 0 0 -125vmax;
+  background: repeating-conic-gradient(
+    from 0deg,
+    #c0392b 0deg 15deg,
+    #d9941a 15deg 30deg,
+    #f4d03f 30deg 45deg,
+    #27ae60 45deg 60deg,
+    #2a6f97 60deg 75deg,
+    #8e44ad 75deg 90deg
+  );
+  opacity: 0.55;
+  animation: nf-spin 14s linear infinite, nf-hue 6s linear infinite;
+}
+
+/* Hazard tape scrolling diagonally over the wheel. */
+.nf-tape {
+  background: repeating-linear-gradient(-45deg, #111 0 22px, #f4c20d 22px 44px);
+  background-size: 62.2px 62.2px;
+  animation: nf-tape 0.8s linear infinite;
+}
+
+/* Police-light wash: red left, blue right, swapping. */
+.nf-siren {
+  background: linear-gradient(90deg, rgba(192, 57, 43, 0.55), transparent 45%, transparent 55%, rgba(42, 111, 151, 0.6));
+  animation: nf-siren 1.2s steps(1, end) infinite;
+}
+
+/* Two rotating searchlight beams. */
+.nf-beam {
+  position: absolute;
+  width: 180vmax;
+  height: 180vmax;
+  background: conic-gradient(from 0deg, rgba(255, 255, 255, 0.35) 0deg 8deg, transparent 8deg 360deg);
+  border-radius: 50%;
+}
+.nf-beam-a { left: -90vmax; top: -90vmax; animation: nf-spin 3.2s linear infinite; }
+.nf-beam-b { right: -90vmax; bottom: -90vmax; animation: nf-spin 4.1s linear infinite reverse; }
+
+/* CRT scanlines on top of everything. */
+.nf-scan {
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 4px);
+  animation: nf-scan 0.35s linear infinite;
+}
+
+/* ---------- tickers ---------- */
+
+.nf-ticker {
+  display: flex;
+  width: max-content;
+  white-space: nowrap;
+}
+.nf-ticker-l { animation: nf-marquee 9s linear infinite; }
+.nf-ticker-r { animation: nf-marquee 7s linear infinite reverse; }
+
+/* ---------- falling things ---------- */
+
+.nf-fall {
+  position: absolute;
+  top: -12vh;
+  animation-name: nf-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.nf-confetti {
+  position: absolute;
+  top: -5vh;
+  width: 10px;
+  height: 16px;
+  animation-name: nf-confetti;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* ---------- the forklift that keeps driving past ---------- */
+
+.nf-forklift { animation: nf-drive 6s linear infinite; }
+.nf-forklift-body { animation: nf-bump 0.25s ease-in-out infinite alternate; }
+
+/* ---------- card ---------- */
+
+.nf-card {
+  animation: nf-shake 2.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite, nf-tilt 5s ease-in-out infinite;
+}
+.nf-border {
+  background: conic-gradient(from var(--nf-angle, 0deg), #c0392b, #d9941a, #f4d03f, #27ae60, #2a6f97, #8e44ad, #c0392b);
+  animation: nf-hue 2s linear infinite;
+}
+
+/* The 404 itself: rainbow fill sliding, jelly bounce, RGB-split glitch layers. */
+.nf-404 {
+  background: linear-gradient(90deg, #c0392b, #d9941a, #f4d03f, #27ae60, #2a6f97, #8e44ad, #c0392b);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: nf-slide 1.5s linear infinite, nf-jelly 1.8s ease-in-out infinite;
+  display: inline-block;
+}
+.nf-glitch {
+  position: absolute;
+  inset: 0;
+  mix-blend-mode: multiply;
+}
+.nf-glitch-a { color: #e91e63; animation: nf-glitch-a 1.1s steps(2, end) infinite; }
+.nf-glitch-b { color: #00bcd4; animation: nf-glitch-b 0.9s steps(2, end) infinite; }
+
+/* Each heading letter bounces in a wave. */
+.nf-letter {
+  display: inline-block;
+  animation: nf-wave 1s ease-in-out infinite, nf-hue 3s linear infinite;
+}
+
+.nf-pin { animation: nf-pin 1.4s cubic-bezier(0.28, 0.84, 0.42, 1) infinite; }
+.nf-ring { animation: nf-spin 4s linear infinite; }
+.nf-ring-2 { animation: nf-spin 2.5s linear infinite reverse; }
+.nf-ripple { animation: nf-ripple 1.6s ease-out infinite; }
+
+/* Bin plates orbiting the card. */
+.nf-orbit { animation: nf-spin 10s linear infinite; }
+.nf-orbit-rev { animation: nf-spin 10s linear infinite reverse; }
+
+/* Starburst sticker. */
+.nf-burst {
+  clip-path: polygon(50% 0%, 61% 18%, 82% 7%, 79% 30%, 100% 35%, 84% 52%, 98% 70%, 76% 72%, 74% 95%, 56% 82%, 40% 100%, 34% 78%, 12% 88%, 18% 66%, 0% 55%, 16% 40%, 4% 18%, 27% 22%, 32% 0%);
+  animation: nf-burst 2.2s ease-in-out infinite;
+}
+
+.nf-button {
+  animation: nf-pulse 1s ease-in-out infinite, nf-hue 4s linear infinite;
+}
+.nf-button:hover { animation-duration: 0.3s, 1s; }
+.nf-blink { animation: nf-blink 1s steps(1, end) infinite; }
+.nf-spin-slow { animation: nf-spin 6s linear infinite; }
+.nf-spin-fast { animation: nf-spin 1.5s linear infinite; }
+.nf-float { animation: nf-float 3s ease-in-out infinite; }
+
+/* ---------- keyframes ---------- */
+
+@keyframes nf-spin { to { transform: rotate(360deg); } }
+@keyframes nf-hue { to { filter: hue-rotate(360deg); } }
+@keyframes nf-tape { to { background-position: 62.2px 0; } }
+@keyframes nf-siren { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
+@keyframes nf-scan { to { background-position: 0 4px; } }
+@keyframes nf-marquee { to { transform: translateX(-50%); } }
+
+@keyframes nf-fall {
+  0% { transform: translateY(0) rotate(0deg); }
+  100% { transform: translateY(125vh) rotate(720deg); }
+}
+@keyframes nf-confetti {
+  0% { transform: translate3d(0, 0, 0) rotateX(0) rotateY(0); }
+  25% { transform: translate3d(30px, 30vh, 0) rotateX(180deg) rotateY(90deg); }
+  50% { transform: translate3d(-25px, 60vh, 0) rotateX(360deg) rotateY(180deg); }
+  75% { transform: translate3d(20px, 85vh, 0) rotateX(540deg) rotateY(270deg); }
+  100% { transform: translate3d(0, 112vh, 0) rotateX(720deg) rotateY(360deg); }
+}
+
+@keyframes nf-drive {
+  0% { transform: translateX(-30vw) scaleX(1); }
+  49.99% { transform: translateX(110vw) scaleX(1); }
+  50% { transform: translateX(110vw) scaleX(-1); }
+  100% { transform: translateX(-30vw) scaleX(-1); }
+}
+@keyframes nf-bump { to { transform: translateY(-4px) rotate(-2deg); } }
+
+@keyframes nf-shake {
+  0%, 70%, 100% { transform: translate(0, 0); }
+  72%, 80%, 88%, 96% { transform: translate(-8px, 2px) rotate(-1.5deg); }
+  76%, 84%, 92% { transform: translate(8px, -2px) rotate(1.5deg); }
+}
+@keyframes nf-tilt {
+  0%, 100% { rotate: -2deg; scale: 1; }
+  50% { rotate: 2deg; scale: 1.03; }
+}
+
+@keyframes nf-slide { to { background-position: 200% 0; } }
+@keyframes nf-jelly {
+  0%, 100% { transform: scale(1, 1); }
+  15% { transform: scale(1.25, 0.75); }
+  30% { transform: scale(0.8, 1.2); }
+  45% { transform: scale(1.12, 0.9); }
+  60% { transform: scale(0.95, 1.05); }
+  75% { transform: scale(1.03, 0.98); }
+}
+@keyframes nf-glitch-a {
+  0% { transform: translate(-6px, 2px); clip-path: inset(10% 0 55% 0); }
+  50% { transform: translate(5px, -3px); clip-path: inset(60% 0 8% 0); }
+  100% { transform: translate(-3px, 1px); clip-path: inset(30% 0 40% 0); }
+}
+@keyframes nf-glitch-b {
+  0% { transform: translate(6px, -2px); clip-path: inset(50% 0 20% 0); }
+  50% { transform: translate(-5px, 3px); clip-path: inset(5% 0 70% 0); }
+  100% { transform: translate(3px, -1px); clip-path: inset(70% 0 5% 0); }
+}
+
+@keyframes nf-wave {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-14px) rotate(-8deg); }
+  50% { transform: translateY(0) rotate(0deg); }
+  75% { transform: translateY(5px) rotate(6deg); }
+}
+@keyframes nf-pin {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  10% { transform: translateY(0) scale(1.2, 0.8); }
+  40% { transform: translateY(-38px) scale(0.9, 1.1) rotate(-15deg); }
+  60% { transform: translateY(-38px) scale(0.9, 1.1) rotate(15deg); }
+  90% { transform: translateY(0) scale(1.15, 0.85); }
+}
+@keyframes nf-ripple {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes nf-burst {
+  0%, 100% { transform: rotate(-12deg) scale(1); }
+  50% { transform: rotate(12deg) scale(1.2); }
+}
+@keyframes nf-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.8), 0 0 18px 2px rgba(244, 208, 63, 0.7); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 14px rgba(192, 57, 43, 0), 0 0 40px 10px rgba(244, 208, 63, 0.9); }
+}
+@keyframes nf-blink { 50% { opacity: 0; } }
+@keyframes nf-float {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50% { transform: translateY(-18px) rotate(6deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nf-decor { display: none !important; }
+  .nf-glitch { display: none; }
+}
