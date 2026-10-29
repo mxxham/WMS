@@ -24,7 +24,11 @@ export type RackBin = {
   correctable: boolean;
   last: { checker: string; system: number | null; counted: number | null; at: string } | null;
 };
-export type RackSummary = { zone: string; bins: number; lines: number; todo: number; mismatch: number; done: number; state: RackState };
+export type RackSummary = {
+  zone: string; bins: number; lines: number; todo: number; mismatch: number; done: number; state: RackState;
+  /** Bin To Bin lines into this rack (picking only): audited at the destination bin */
+  moves?: { total: number; todo: number; mismatch: number; done: number };
+};
 
 type Line = {
   task_id: string; from_bin: string; zone: string; sku: string; description: string; uom: string | null; shipment_number: string;
@@ -100,4 +104,31 @@ export function rackSummary(bins: RackBin[]): RackSummary[] {
   }
   return [...by.values()].map((s) => ({ ...s, state: s.mismatch ? "MISMATCH" : s.todo ? "TODO" : "DONE" } as RackSummary))
     .sort((a, b) => a.zone.localeCompare(b.zone));
+}
+
+type MoveSide = "TODO" | "OK" | "MISMATCH" | "RESOLVED" | "AUTO_PASS";
+
+/**
+ * Adds the day's Bin To Bin lines to the racks they touch: a move CB05C01 -> CF05A01 is one check in
+ * rack CB (what is left in the source bin, 0114) and one in rack CF (what arrived, 0088). A rack is
+ * done only when its picked bins and its move checks are; a rack with moves but no picks still gets a row.
+ */
+export function withMoves(racks: RackSummary[],
+  moves: { zone: string | null; to_zone: string | null; line_state: MoveSide; from_state?: MoveSide }[]): RackSummary[] {
+  const by = new Map(racks.map((r) => [r.zone, { ...r }]));
+  // from_state is missing until 0114 is on the database: then only the destination side counts.
+  const add = (zone: string | null, state: MoveSide | undefined) => {
+    if (!zone || !state || state === "AUTO_PASS") return;
+    const r = by.get(zone) ?? { zone, bins: 0, lines: 0, todo: 0, mismatch: 0, done: 0, state: "DONE" as RackState };
+    const v = r.moves ?? { total: 0, todo: 0, mismatch: 0, done: 0 };
+    v.total += 1;
+    if (state === "TODO") v.todo += 1; else if (state === "MISMATCH") v.mismatch += 1; else v.done += 1;
+    r.moves = v;
+    by.set(zone, r);
+  };
+  for (const m of moves) { add(m.zone, m.from_state); add(m.to_zone, m.line_state); }
+  return [...by.values()].map((r) => {
+    const mismatch = r.mismatch + (r.moves?.mismatch ?? 0), todo = r.todo + (r.moves?.todo ?? 0);
+    return { ...r, state: (mismatch ? "MISMATCH" : todo ? "TODO" : "DONE") as RackState };
+  }).sort((a, b) => a.zone.localeCompare(b.zone));
 }

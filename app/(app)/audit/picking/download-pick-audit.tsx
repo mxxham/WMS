@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { auditWorkbookRows, moveRows, type ExportAttempt, type ExportLine } from "@/lib/sheet-audit-export";
+import { auditWorkbookRows, moveRows, type ExportAttempt, type ExportLine, type ExportMove } from "@/lib/sheet-audit-export";
 import { fetchAll } from "@/lib/fetch-all";
 import { saveSheets } from "@/lib/save-xlsx";
 
@@ -19,9 +19,12 @@ type MoveLineRow = {
   sku: string; description: string; uom: string | null;
   batch_lot: string; expiry_date: string | null;
   planned_qty: number; moved_qty: number; line_state: "TODO" | "OK" | "MISMATCH" | "RESOLVED" | "AUTO_PASS";
+  from_state: "TODO" | "OK" | "MISMATCH" | "AUTO_PASS"; from_system: number | null; from_counted: number | null;
+  from_checker: string | null; from_found_sku: string | null; from_note: string | null; from_audited_at: string | null;
+  from_correction: boolean | null;
 };
 
-/** Downloads the day's picking audit (system pick tasks + move tasks) as .xlsx. */
+/** Downloads the day's picking audit as .xlsx: picked bins and Bin To Bin bins together in Per bin. */
 export function DownloadPickAudit({ date, zone }: { date: string; zone?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +45,10 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
 
       // ---- Move audit (new) ----
       let moveQ = db.from("pick_audit_move")
-        .select("task_id, wave_no, seq, from_bin, zone, to_bin, to_zone, sku, description, uom, batch_lot, expiry_date, planned_qty, moved_qty, line_state")
+        .select("*") // "*": works before 0114 too
         .eq("planned_date", date).neq("wave_status", "CANCELLED");
-      if (zone) moveQ = moveQ.eq("zone", zone);
+      // A move belongs to both racks it touches (source bin and destination bin), as on the rack page.
+      if (zone) moveQ = moveQ.or(`zone.eq.${zone},to_zone.eq.${zone}`);
       const { data: moveData, error: moveError } = await moveQ;
       if (moveError) throw moveError;
       const moveRowsData = (moveData ?? []) as MoveLineRow[];
@@ -68,7 +72,7 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
       // Remain Qty: stock of bin + SKU at day end, from the same report as `Laporan WMS harian`.
       let remain: Map<string, number> | undefined;
       let note: string | null = null;
-      if (pickRows.length > 0) {
+      if (pickRows.length > 0 || moveRowsData.length > 0) {
         try {
           const rep = await fetchAll<{ bin_code: string; sku: string; remain: number | string }>(
             (a, b) => db.rpc("wms_day_report", { p_date: date }).range(a, b) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>);
@@ -87,29 +91,28 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
         bin_remaining: null, line_state: l.line_state, volume_l: l.volume_l,
       }));
 
-      // Build move workbook sheets
-      const moveLines = moveRowsData.map((l) => ({
+      // Bin To Bin lines go into Per bin with the picked bins: a row for the source bin, one for the destination.
+      const moves: ExportMove[] = moveRowsData.map((l) => ({
         task_id: l.task_id, wave_no: l.wave_no, seq: l.seq,
         from_bin: l.from_bin, from_zone: l.zone, to_bin: l.to_bin, to_zone: l.to_zone,
         sku: l.sku, description: l.description, uom: l.uom,
-        batch: l.batch_lot, expiry: l.expiry_date,
-        planned_qty: Number(l.planned_qty), moved_qty: Number(l.moved_qty),
-        line_state: l.line_state,
+        moved_qty: Number(l.moved_qty), line_state: l.line_state,
+        from_state: l.from_state, from_system: l.from_system == null ? null : Number(l.from_system),
+        from_counted: l.from_counted == null ? null : Number(l.from_counted), from_checker: l.from_checker,
+        from_found_sku: l.from_found_sku, from_note: l.from_note, from_correction: l.from_correction, from_audited_at: l.from_audited_at,
       }));
-
-      const pickOut = pickRows.length > 0 ? auditWorkbookRows(pickLines, attempts, "Sisa sistem", remain) : { bins: [], lines: [], history: [] };
-      const moveOut = moveRowsData.length > 0 ? moveRows(moveLines, attempts) : { lines: [], history: [] };
+      const out = auditWorkbookRows(pickLines, attempts, "Sisa sistem", remain, { rows: moves, zone });
+      const moveHistory = moveRows(moveRowsData.map((l) => ({
+        task_id: l.task_id, wave_no: l.wave_no, seq: l.seq, from_bin: l.from_bin, from_zone: l.zone, to_bin: l.to_bin, to_zone: l.to_zone,
+        sku: l.sku, description: l.description, uom: l.uom, batch: l.batch_lot, expiry: l.expiry_date,
+        planned_qty: Number(l.planned_qty), moved_qty: Number(l.moved_qty), line_state: l.line_state,
+      })), attempts).history;
 
       const sheets: Record<string, Row[]> = {
-        "Per bin": pickOut.bins,
-        "Per baris": pickOut.lines,
-        Riwayat: pickOut.history,
+        "Per bin": out.bins,
+        "Per baris": pickRows.length ? out.lines : [],
+        Riwayat: [...out.history, ...moveHistory],
       };
-      if (moveRowsData.length > 0) {
-        sheets["Pindahan bin"] = moveOut.lines;
-        // Append move history to Riwayat (or keep separate; here we append for one history sheet)
-        sheets.Riwayat = [...pickOut.history, ...moveOut.history];
-      }
 
       saveSheets(sheets, `Audit picking ${date}${zone ? ` rak ${zone}` : ""}.xlsx`, "belum ada audit");
       if (note) setError(note);

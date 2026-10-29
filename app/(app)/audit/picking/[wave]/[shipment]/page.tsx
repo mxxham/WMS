@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
@@ -23,13 +24,14 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   const ship = decodeURIComponent(shipment);
   if (!UUID.test(wave)) notFound();
   const supabase = await createClient();
-  const [{ data: s }, { data: lines }, { data: attempts }] = await Promise.all([
+  const [{ data: s }, { data: lines }, { data: attempts }, { count: moves }] = await Promise.all([
     supabase.from("pick_audit_shipment").select("*").eq("wave_id", wave).eq("shipment_number", ship).maybeSingle(),
     supabase.from("pick_audit_line")
       .select("task_id, seq, sku, description, uom, from_bin, batch_lot, expiry_date, planned_qty, picked_qty, deviation_reason, picked_by_name, bulk_posted, scanned_code, scan_method, line_state, attempts")
       .eq("wave_id", wave).eq("shipment_number", ship).order("seq"),
     supabase.from("pick_audits").select("*, pick_tasks!inner(wave_id, shipment_number)")
       .eq("pick_tasks.wave_id", wave).eq("pick_tasks.shipment_number", ship).order("attempt_no"),
+    supabase.from("pick_audit_move").select("task_id", { count: "exact", head: true }).eq("wave_id", wave),
   ]);
   if (!s) notFound();
 
@@ -62,7 +64,12 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   return (
     <main>
       <PageHeader title={`Audit shipment ${ship}`} live={["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
-      <div className="p-4 lg:p-8">
+      <div className="space-y-3 p-4 lg:p-8">
+        {(moves ?? 0) > 0 && (
+          <Link href={`/audit/picking/${wave}`} className="inline-block text-sm font-semibold text-ckb underline">
+            Pindahan bin (Bin To Bin) di wave ini: {moves} baris. Cek bin asal dan tujuan
+          </Link>
+        )}
         <ShipmentAuditClient shipment={s as ShipmentRow} lines={view} attempts={tries} supervisor={user.role !== "operator"} />
       </div>
     </main>

@@ -35,7 +35,24 @@ export function jakartaTime(iso: string | null): string {
 const errorText = (errors: PickError[]) => errors.map((e) => PICK_ERROR_LABEL[e] ?? e).join(", ");
 const zoneOf = (bin: string) => (/^[A-Z]{2}\d{2}[A-Z]\d{2}$/.test(bin) ? bin.slice(0, 2) : bin);
 
-export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[], sisaLabel = "Sisa di file", remain?: Map<string, number>): { bins: Row[]; lines: Row[]; history: Row[] } {
+/** One posted Bin To Bin line for the Per bin sheet: a row for its source bin and one for its destination. */
+export type ExportMove = {
+  task_id: string; wave_no: string; seq: number;
+  from_bin: string; from_zone: string | null; to_bin: string; to_zone: string | null;
+  sku: string; description: string; uom: string | null;
+  moved_qty: number; line_state: MoveState;
+  /** 0114: the count left in the source bin; absent before 0114 is on the database */
+  from_state?: "TODO" | "OK" | "MISMATCH" | "AUTO_PASS"; from_system?: number | null; from_counted?: number | null;
+  from_checker?: string | null; from_found_sku?: string | null; from_note?: string | null;
+  from_correction?: boolean | null; from_audited_at?: string | null;
+};
+
+/**
+ * `moves` (system audit only): Bin To Bin lines go into Per bin next to the picked bins, one row per
+ * bin they touch; `zone` keeps only the rows of that rack (a rack's own download).
+ */
+export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[], sisaLabel = "Sisa di file", remain?: Map<string, number>,
+  moves?: { rows: ExportMove[]; zone?: string }): { bins: Row[]; lines: Row[]; history: Row[] } {
   const byLine = new Map<string, ExportAttempt[]>();
   for (const a of [...attempts].sort((x, y) => x.attempt_no - y.attempt_no)) byLine.set(a.line_id, [...(byLine.get(a.line_id) ?? []), a]);
   const lastOf = (id: string) => byLine.get(id)?.at(-1);
@@ -55,15 +72,19 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     const state = ls.some((x) => x.line_state === "MISMATCH") ? "MISMATCH" : ls.some((x) => x.line_state === "TODO") ? "TODO" : "OK";
     const counted = last?.method === "RACK" ? last.rack_counted : null;
     return {
-      Rak: zoneOf(l.bin_code), Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
-      Shipment: [...new Set(ls.map((x) => x.shipment_number))].join(", "), Baris: ls.length,
-      "Qty pick": ls.reduce((s, x) => s + Number(x.qty), 0), ...remainCol(l.bin_code, l.sku), [sisaLabel]: sisa, "Sisa dihitung": counted,
+      Rak: zoneOf(l.bin_code), Bin: l.bin_code, ...(moves ? { Jenis: "Pick" } : {}), SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
+      Shipment: [...new Set(ls.map((x) => x.shipment_number))].join(", "), ...(moves ? { "Bin To Bin": null } : {}), Baris: ls.length,
+      "Qty pick": ls.reduce((s, x) => s + Number(x.qty), 0), ...(moves ? { "Qty Bin To Bin": null } : {}),
+      ...remainCol(l.bin_code, l.sku), [sisaLabel]: sisa, "Sisa dihitung": counted, ...(moves ? { "Tiba dihitung": null } : {}),
       Selisih: counted !== null && sisa !== null ? Number(counted) - sisa : null,
       "Barang ditemukan": last && last.found_sku !== l.sku ? last.found_sku : null,
       Status: STATE[state as ExportLine["line_state"]], Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
       Catatan: last?.note ?? null, Diubah: ls.some((x) => byLine.get(x.id)?.some((a) => a.correction)) ? "Ya" : null,
     };
-  }).sort((a, b) => String(a.Rak).localeCompare(String(b.Rak)) || String(a.Bin).localeCompare(String(b.Bin)));
+  });
+  if (moves) bins.push(...moveBinRows(moves.rows, attempts, sisaLabel, remainCol, moves.zone));
+  bins.sort((a, b) => String(a.Rak).localeCompare(String(b.Rak)) || String(a.Bin).localeCompare(String(b.Bin))
+    || String(a.Jenis ?? "").localeCompare(String(b.Jenis ?? "")));
 
   const lineRows: Row[] = [...lines].sort((a, b) => a.shipment_number.localeCompare(b.shipment_number) || a.seq - b.seq).map((l) => {
     const last = lastOf(l.id);
@@ -86,7 +107,8 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
   };
   const linesWithTotals = [...lineRows, totalsRow];
 
-  const history: Row[] = [...attempts].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((a) => {
+  // Only this sheet's lines: Bin To Bin attempts (same list in the system audit) have their own history rows.
+  const history: Row[] = [...attempts].filter((a) => lineById.has(a.line_id)).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((a) => {
     const l = lineById.get(a.line_id);
     return {
       Waktu: jakartaTime(a.created_at), Bin: l?.bin_code ?? null, SKU: l?.sku ?? null, Shipment: l?.shipment_number ?? null,
@@ -96,6 +118,56 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     };
   });
   return { bins, lines: linesWithTotals, history };
+}
+
+const FROM_STATE_TEXT = { TODO: "Belum dihitung", OK: "OK", MISMATCH: "Selisih", AUTO_PASS: "Tidak dipindah (0)" } as const;
+
+/**
+ * Per bin rows of the Bin To Bin lines, in the same columns as the picked bins: the source bin (what
+ * is left after the move, counted like a rack count, 0114) and the destination bin (what arrived, 0088).
+ */
+function moveBinRows(moves: ExportMove[], attempts: ExportAttempt[], sisaLabel: string,
+  remainCol: (bin: string, sku: string) => Row, zone?: string): Row[] {
+  const byTask = new Map<string, ExportAttempt[]>();
+  for (const a of [...attempts].sort((x, y) => x.attempt_no - y.attempt_no)) byTask.set(a.line_id, [...(byTask.get(a.line_id) ?? []), a]);
+  const rows: Row[] = [];
+  for (const m of moves) {
+    if (m.line_state === "AUTO_PASS") continue;
+    const route = `NO ${m.wave_no} #${m.seq}: ${m.from_bin} → ${m.to_bin}`;
+    const fromZone = m.from_zone ?? zoneOf(m.from_bin), toZone = m.to_zone ?? zoneOf(m.to_bin);
+    if (m.from_state && (!zone || fromZone === zone)) {
+      const counted = m.from_counted ?? null, sys = m.from_system ?? null;
+      rows.push({
+        Rak: fromZone, Bin: m.from_bin, Jenis: "Bin To Bin (asal)", SKU: m.sku, Deskripsi: m.description, UOM: m.uom,
+        Shipment: null, "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": -Number(m.moved_qty),
+        ...remainCol(m.from_bin, m.sku), [sisaLabel]: sys, "Sisa dihitung": counted, "Tiba dihitung": null,
+        Selisih: counted !== null && sys !== null ? Number(counted) - Number(sys) : null,
+        "Barang ditemukan": m.from_found_sku ?? null, Status: FROM_STATE_TEXT[m.from_state],
+        Checker: m.from_checker ?? null, Waktu: jakartaTime(m.from_audited_at ?? null), Catatan: m.from_note ?? null,
+        Diubah: m.from_correction ? "Ya" : null,
+      });
+    }
+    if (!zone || toZone === zone) {
+      const hist = byTask.get(m.task_id) ?? [];
+      const last = hist.at(-1);
+      rows.push({
+        Rak: toZone, Bin: m.to_bin, Jenis: "Bin To Bin (tujuan)", SKU: m.sku, Deskripsi: m.description, UOM: m.uom,
+        Shipment: null, "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": Number(m.moved_qty),
+        // A rack count (0115) compares the whole bin with the system, like a picked bin; a blind audit (0088)
+        // counted what arrived against the moved quantity.
+        ...remainCol(m.to_bin, m.sku),
+        [sisaLabel]: last?.method === "RACK" ? last.rack_system : null,
+        "Sisa dihitung": last?.method === "RACK" ? last.rack_counted : null,
+        "Tiba dihitung": last ? Number(last.counted_qty) : null,
+        Selisih: !last ? null : last.method === "RACK" ? Number(last.rack_counted) - Number(last.rack_system)
+          : Number(last.counted_qty) - Number(m.moved_qty),
+        "Barang ditemukan": last && last.found_sku !== m.sku ? last.found_sku : null, Status: MOVE_STATE_LABEL[m.line_state],
+        Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null), Catatan: last?.note ?? null,
+        Diubah: hist.some((a) => a.correction) ? "Ya" : null,
+      });
+    }
+  }
+  return rows;
 }
 
 /**
