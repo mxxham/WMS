@@ -183,3 +183,17 @@ export function causeBreakdown(lines: CompareLine[]): { cause: CauseCode | null;
 
 /** "+5" / "-3" / "0", from our side. */
 export const signed = (v: number) => (v > 0 ? `+${v.toLocaleString("id-ID")}` : v.toLocaleString("id-ID"));
+
+/**
+ * Our side of the comparison is our stock at a cut-off (0112), not at the
+ * moment the reconciliation is made: today's picks must not count against
+ * a morning MB52. Times are WIB wall-clock, as typed in a datetime-local box.
+ */
+export const defaultCutoff = (asOf: string) => `${asOf}T00:00`;
+/** "2026-10-28T09:45" (WIB) -> "2026-10-28T09:45:00+07:00". */
+export const cutoffIso = (local: string) => `${local.length === 16 ? `${local}:00` : local}+07:00`;
+/** Now in WIB, minute precision, for the box's max. */
+export function nowWib(at: Date = new Date()): string {
+  return new Date(at.getTime() + 7 * 3_600_000).toISOString().slice(0, 16);
+}
+export const isFuture = (local: string, at: Date = new Date()) => new Date(cutoffIso(local)).getTime() > at.getTime();

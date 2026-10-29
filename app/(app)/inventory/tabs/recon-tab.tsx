@@ -60,7 +60,7 @@ export function ReconTab({ runs, selected, lines, moves, ships, shipError, prev,
                     <Th className="text-right">WMS lebih</Th><Th className="text-right">WMS kurang</Th><Th className="text-right">Belum ditangani</Th><Th>Status</Th><Th /></tr></thead>
                   <tbody>{runs.map((r) => (
                     <tr key={r.id}>
-                      <Td className="whitespace-nowrap">{fmtDate(r.as_of)}</Td><Td className="text-xs">{r.file_name}<div>{r.created_by_name} · {fmtDateTime(r.created_at)}</div></Td>
+                      <Td className="whitespace-nowrap">{fmtDate(r.as_of)}<div className="text-xs text-steel-500">WMS {r.wms_day ? `on hand ${fmtDate(r.wms_day)}` : r.wms_at ? fmtDateTime(r.wms_at) : "saat dibuat"}</div></Td><Td className="text-xs">{r.file_name}<div>{r.created_by_name} · {fmtDateTime(r.created_at)}</div></Td>
                       <Td className="text-right tabular">{fmtNum(r.skus)}</Td><Td className="text-right tabular">{fmtNum(r.skus_match)}</Td>
                       <Td className="text-right font-semibold tabular">{r.accuracy_pct === null ? "–" : `${n(r.accuracy_pct).toFixed(1)}%`}</Td>
                       <Td className="text-right tabular text-ckb-dark">{r.skus_wms_more === null ? "–" : <>{fmtNum(n(r.skus_wms_more))} <span className="text-xs">(+{fmtNum(n(r.qty_wms_more))})</span></>}</Td>

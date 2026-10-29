@@ -3,7 +3,7 @@ import type { CompareLine } from "@/lib/sap-compare";
 export type ReconSummary = {
   id: string; as_of: string; file_name: string | null; note: string | null; status: "OPEN" | "CLOSED"; created_by_name: string; created_at: string;
   closed_by_name: string | null; closed_at: string | null; close_note: string | null;
-  slocs: string[] | null; other_slocs: string[] | null; sap_moves: number | null; auto_gi_at: string | null; auto_gi_by_name: string | null;
+  wms_at: string | null; wms_day: string | null; slocs: string[] | null; other_slocs: string[] | null; sap_moves: number | null; auto_gi_at: string | null; auto_gi_by_name: string | null;
   skus: number; skus_match: number; accuracy_pct: number | null; abs_diff: number; sap_total: number; wms_total: number | null; open_diffs: number;
   skus_wms_more: number | null; skus_wms_less: number | null; qty_wms_more: number | null; qty_wms_less: number | null;
 };

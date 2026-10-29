@@ -18,7 +18,8 @@ export async function exportRecon(run: ReconSummary, lines: ReconLine[], moves: 
   const summary: (string | number)[][] = [
     ["Rekonsiliasi stok SAP vs WMS"], [],
     ["Stok SAP per", run.as_of], ["File", run.file_name ?? ""], ["Storage location dihitung", (run.slocs ?? []).join(", ") || "semua"],
-    ["Lokasi SAP lain", (run.other_slocs ?? []).join(", ")], ["Dibuat", `${run.created_by_name} ${run.created_at}`],
+    ["Lokasi SAP lain", (run.other_slocs ?? []).join(", ")],
+    ["Stok WMS per", run.wms_day ? `on hand ${run.wms_day} (Laporan WMS harian)` : run.wms_at ? `${new Date(run.wms_at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : `saat dibuat (${run.created_at})`], ["Dibuat", `${run.created_by_name} ${run.created_at}`],
     ["Status", run.status === "OPEN" ? "Terbuka" : `Ditutup ${run.closed_at} oleh ${run.closed_by_name}: ${run.close_note ?? ""}`], [],
     ["SKU", s.skus], ["SKU cocok", s.match], ["Akurasi SKU (%)", pct(s.skuAccuracy)], ["Akurasi qty (%)", pct(s.qtyAccuracy)],
     ["Total SAP", s.sapQty], ["Total WMS", s.wmsQty], ["Koreksi timing", s.timingQty],

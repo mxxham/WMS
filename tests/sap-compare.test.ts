@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
 import { dateFromFileName, defaultSlocs, parseMb51, parseMb52, splitBySloc } from '../lib/sap-stock';
-import { compareStats, direction, filterLines, flags, gapTotal, hint, type CompareLine } from '../lib/sap-compare';
+import { compareStats, cutoffIso, defaultCutoff, direction, filterLines, flags, gapTotal, hint, isFuture, nowWib, type CompareLine } from '../lib/sap-compare';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -113,6 +113,16 @@ test('filter + search + sort', () => {
   assert.deepEqual(filterLines(lines, 'less', '', 'gap').map((l) => l.sku), ['2', '1']);
   assert.deepEqual(filterLines(lines, 'all', 'helix', 'gap').map((l) => l.sku), ['1']);
   assert.deepEqual(filterLines(lines, 'match', '', 'gap').map((l) => l.sku), ['3']);
+});
+
+test('cut-off: 00:00 WIB of the SAP stock date, sent with the +07:00 offset', () => {
+  assert.equal(defaultCutoff('2026-10-28'), '2026-10-28T00:00');
+  assert.equal(cutoffIso('2026-10-28T09:45'), '2026-10-28T09:45:00+07:00');
+  assert.equal(new Date(cutoffIso('2026-10-28T00:00')).toISOString(), '2026-10-27T17:00:00.000Z');
+  const at = new Date('2026-10-28T03:00:00Z'); // 10:00 WIB
+  assert.equal(nowWib(at), '2026-10-28T10:00');
+  assert.equal(isFuture('2026-10-28T09:59', at), false);
+  assert.equal(isFuture('2026-10-28T10:01', at), true);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

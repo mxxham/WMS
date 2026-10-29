@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WorkBook } from "xlsx";
 import { Upload } from "lucide-react";
@@ -8,9 +8,10 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
-import { mvtLabel } from "@/lib/sap-compare";
+import { cutoffIso, defaultCutoff, isFuture, mvtLabel, nowWib } from "@/lib/sap-compare";
 import type { Mb51Parse, Mb52Parse, PendingRow } from "@/lib/sap-stock";
-import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { fetchAll } from "@/lib/fetch-all";
+import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 const sap = () => import("@/lib/sap-stock");
@@ -43,6 +44,51 @@ export function NewRecon() {
   const [gr, setGr] = useState<PendingRow[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Our side of the comparison (0113): the on hand of the SAP date as in Laporan WMS harian
+  // (default), our stock at a WIB time (0112), or our stock now (0111).
+  const [mode, setMode] = useState<"day" | "at" | "now">("day");
+  const [cutoffEdit, setCutoffEdit] = useState<string | null>(null);
+  const cutoff = cutoffEdit ?? defaultCutoff(asOf);
+  const dayFuture = asOf > nowWib().slice(0, 10);
+  const future = mode === "day" ? dayFuture : mode === "at" && isFuture(cutoff);
+  const [later, setLater] = useState<{ all: number; picks: number } | null>(null);
+  const [onHand, setOnHand] = useState<{ day: string; bySku: Map<string, number>; total: number } | null>(null);
+  const [onHandErr, setOnHandErr] = useState<string | null>(null);
+
+  // The day's on hand, summed per SKU from the same function as the daily report, so the
+  // match with SAP is visible before Buat.
+  useEffect(() => {
+    if (mode !== "day" || dayFuture) return;
+    let live = true;
+    setOnHandErr(null);
+    void (async () => {
+      const db = createClient();
+      try {
+        const rows = await fetchAll<{ sku: string; on_hand: number }>((a, b) =>
+          db.rpc("wms_day_report", { p_date: asOf }).select("sku, on_hand").range(a, b) as unknown as PromiseLike<{ data: { sku: string; on_hand: number }[] | null; error: { message: string } | null }>);
+        const bySku = new Map<string, number>();
+        for (const r of rows) bySku.set(r.sku, (bySku.get(r.sku) ?? 0) + Number(r.on_hand));
+        if (live) setOnHand({ day: asOf, bySku, total: [...bySku.values()].reduce((x, y) => x + y, 0) });
+      } catch (e) { if (live) setOnHandErr((e as Error).message); }
+    })();
+    return () => { live = false; };
+  }, [mode, asOf, dayFuture]);
+
+  // How much of our ledger a cut-off time leaves out.
+  useEffect(() => {
+    if (mode !== "at" || future) { setLater(null); return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      const sb = createClient();
+      const since = cutoffIso(cutoff);
+      const [a, p] = await Promise.all([
+        sb.from("movements").select("id", { count: "exact", head: true }).gt("created_at", since),
+        sb.from("movements").select("id", { count: "exact", head: true }).gt("created_at", since).eq("type", "picking"),
+      ]);
+      if (live && !a.error && !p.error) setLater({ all: a.count ?? 0, picks: p.count ?? 0 });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [mode, cutoff, future]);
 
   async function onSap(f: File | undefined) {
     setError(null); setMb52(null); setBook(null);
@@ -111,6 +157,7 @@ export function NewRecon() {
     const { data, error } = await createClient().rpc("create_stock_recon_mb52", {
       p_as_of: asOf, p_file_name: `${files} · ${slocs.filter(Boolean).join(", ") || "semua lokasi"}`, p_note: note || null,
       p_sap: counted, p_other: other, p_slocs: slocs.filter(Boolean), p_moves: mb51?.rows ?? [], p_pending: [...pending.values()], p_by_name: person,
+      p_wms_at: mode === "at" ? cutoffIso(cutoff) : null, p_wms_day: mode === "day" ? asOf : null,
     });
     if (error) return error.message;
     router.push(`/inventory?tab=rekonsiliasi&recon=${data}`);
@@ -118,7 +165,7 @@ export function NewRecon() {
   }
 
   const summary = split
-    ? `Bandingkan ${fmtNum(split.skus)} SKU stok SAP ${slocs.filter(Boolean).join(" + ")} per ${fmtDate(asOf)} (bebas ${fmtNum(split.unrestricted)}, blok ${fmtNum(split.blocked)}) dengan stok WMS saat ini.`
+    ? `Bandingkan ${fmtNum(split.skus)} SKU stok SAP ${slocs.filter(Boolean).join(" + ")} per ${fmtDate(asOf)} (bebas ${fmtNum(split.unrestricted)}, blok ${fmtNum(split.blocked)}) dengan ${mode === "day" ? `on hand WMS ${fmtDate(asOf)} (Laporan WMS harian)` : mode === "at" ? `stok WMS per ${fmtDateTime(cutoffIso(cutoff))} WIB` : "stok WMS saat ini"}.`
       + (mb51 ? ` ${fmtNum(mb51.rows.length)} transaksi MB51 ikut disimpan.` : "")
     : "";
 
@@ -127,12 +174,41 @@ export function NewRecon() {
       <CardHeader><CardTitle>Bandingkan stok dengan SAP</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-steel-500">
-          SAP adalah acuan. Upload export MB52 (boleh satu file dengan sheet MB51). Stok WMS diambil saat tombol Buat ditekan, jadi tarik MB52 sedekat mungkin dengan waktu itu.
+          SAP adalah acuan. Upload export MB52 (boleh satu file dengan sheet MB51). Stok WMS yang dibandingkan: on hand hari itu, sama dengan kolom Qty (on hand) di Laporan WMS harian (setelah putaway, sebelum pick hari itu), jadi barang yang keluar hari ini tidak terbaca kurang. Stok fisik tidak berubah.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <FilePick label={book ? book.name : "File MB52 (.xlsx)"} onFile={onSap} />
           <FilePick label={mb51 ? `MB51: ${mb51.file}` : "MB51 terpisah (opsional)"} onFile={onMb51} />
           <div><Label htmlFor="asof">Stok SAP per tanggal</Label><Input id="asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></div>
+        </div>
+        <div className="space-y-2 rounded-md border border-steel-200 bg-white p-3">
+          <div className="text-sm font-medium">Stok WMS yang dibandingkan</div>
+          <div className="flex flex-wrap gap-1">
+            {([["day", `On hand harian ${fmtDate(asOf)}`], ["at", "Jam tertentu"], ["now", "Sekarang"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setMode(k)}
+                className={cn("rounded-md border px-3 py-2 text-sm", mode === k ? "border-ckb bg-ckb/10 font-semibold" : "border-steel-300")}>{l}</button>
+            ))}
+          </div>
+          {mode === "day" && (
+            <p className="text-sm">
+              {dayFuture ? <span className="font-semibold text-bad">Tanggal ini belum tiba.</span>
+                : onHandErr ? <span className="text-bad">{onHandErr}</span>
+                : !onHand || onHand.day !== asOf ? <span className="text-steel-500">Menghitung on hand {fmtDate(asOf)}…</span>
+                : <OnHandCheck onHand={onHand.bySku} total={onHand.total} mb52={mb52} slocs={slocs} />}
+            </p>
+          )}
+          {mode === "at" && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div><Label htmlFor="cutoff">Stok WMS per (WIB)</Label>
+                <Input id="cutoff" type="datetime-local" value={cutoff} max={nowWib()} onChange={(e) => setCutoffEdit(e.target.value || null)} /></div>
+              <p className="min-w-60 flex-1 pb-2 text-xs text-steel-500">
+                {future ? <span className="font-semibold text-bad">Jam ini belum lewat.</span>
+                  : later ? <>{fmtNum(later.all)} mutasi WMS sesudah jam ini tidak dihitung{later.picks > 0 && <>, termasuk {fmtNum(later.picks)} pick</>}. Putaway sesudah jam ini juga tidak dihitung.</>
+                  : "Menghitung mutasi sesudah jam ini…"}
+              </p>
+            </div>
+          )}
+          {mode === "now" && <p className="text-xs text-steel-500">Pick hari ini ikut mengurangi stok WMS: hanya cocok bila MB52 ditarik barusan dan SAP sudah GI semua pengiriman hari ini.</p>}
         </div>
 
         {book && book.stockSheets.length > 1 && (
@@ -200,10 +276,28 @@ export function NewRecon() {
           <div className="min-w-64 flex-1"><Label htmlFor="rnote">Catatan</Label><Input id="rnote" value={note} onChange={(e) => setNote(e.target.value)} placeholder="opsional, mis. MB52 ditarik jam 09:45" /></div>
           <PersonNameField id="rperson" value={person} onChange={setPerson} />
           <ConfirmButton title="Buat rekonsiliasi" summary={summary} confirmLabel="Buat" onConfirm={create}
-            disabled={!split || person.trim().length < 2}>Buat rekonsiliasi</ConfirmButton>
+            disabled={!split || future || person.trim().length < 2}>Buat rekonsiliasi</ConfirmButton>
         </div>
         {error && <p role="alert" className="text-sm text-bad">{error}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/** On hand of the day vs the counted MB52 locations, before anything is saved. */
+function OnHandCheck({ onHand, total, mb52, slocs }: { onHand: Map<string, number>; total: number; mb52: Mb52Parse | null; slocs: string[] }) {
+  if (!mb52) return <>On hand WMS: <b className="tabular">{fmtNum(total)}</b> karton, {fmtNum(onHand.size)} SKU. Upload MB52 untuk melihat kecocokannya.</>;
+  const keep = new Set(slocs);
+  const sap = new Map<string, number>();
+  for (const r of mb52.rows) if (!r.sloc || keep.has(r.sloc)) sap.set(r.sku, (sap.get(r.sku) ?? 0) + r.unrestricted + r.blocked);
+  const skus = new Set([...sap.keys(), ...[...onHand].filter(([, q]) => q !== 0).map(([k]) => k)]);
+  let same = 0;
+  for (const k of skus) if ((sap.get(k) ?? 0) === (onHand.get(k) ?? 0)) same++;
+  const sapTotal = [...sap.values()].reduce((a, b) => a + b, 0);
+  const d = total - sapTotal;
+  return (
+    <>On hand WMS <b className="tabular">{fmtNum(total)}</b> · SAP {slocs.filter(Boolean).join(" + ") || "semua"} <b className="tabular">{fmtNum(sapTotal)}</b>
+      {" · "}<span className={cn("font-semibold", d === 0 ? "text-ok" : "text-warn")}>{d === 0 ? "total sama" : `beda ${d > 0 ? "+" : ""}${fmtNum(d)}`}</span>
+      {" · "}<b>{fmtNum(same)}</b> dari {fmtNum(skus.size)} SKU sama persis (bebas + blok).</>
   );
 }

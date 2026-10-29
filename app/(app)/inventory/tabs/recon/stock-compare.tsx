@@ -251,6 +251,7 @@ function SkuDetail({ l, moves, run, person, editable }: { l: ReconLine; moves: S
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const days = moves.map((m) => m.posting_date).filter((d): d is string => !!d).sort();
   const from = days[0] ?? run.as_of, to = days[days.length - 1] ?? run.as_of;
+  const cut = run.wms_at ? new Date(run.wms_at).getTime() : null;
 
   useEffect(() => {
     let live = true;
@@ -336,7 +337,9 @@ function SkuDetail({ l, moves, run, person, editable }: { l: ReconLine; moves: S
           <div className="max-h-48 overflow-auto rounded bg-white">
             <table className="w-full text-xs"><tbody>{wms.map((m, i) => (
               <tr key={i} className="border-t border-steel-100 first:border-0">
-                <td className="p-1 whitespace-nowrap">{fmtDateTime(m.created_at)}</td><td className="p-1">{m.type}</td>
+                <td className="p-1 whitespace-nowrap">{fmtDateTime(m.created_at)}
+                  {cut !== null && new Date(m.created_at).getTime() > cut && <span className="ml-1 rounded bg-steel-100 px-1 text-[10px]" title="Sesudah jam stok WMS: tidak ikut dibandingkan">tidak dihitung</span>}</td>
+                <td className="p-1">{m.type}</td>
                 <td className="p-1">{m.from_bin?.bin_code ?? ""}{m.from_bin && m.to_bin ? " → " : ""}{m.to_bin?.bin_code ?? ""}</td>
                 <td className="p-1 text-right tabular">{fmtNum(num(m.quantity))}</td><td className="p-1 text-steel-500">{m.by_name}{m.note && ` · ${m.note}`}</td>
               </tr>

@@ -65,6 +65,7 @@ export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsO
         <p className="text-xs text-steel-500">
           {run.file_name} · dibuat {run.created_by_name} {fmtDateTime(run.created_at)}{run.note && ` · ${run.note}`}
           {" · "}SAP acuan, dihitung: <b>{(run.slocs ?? []).join(", ") || "semua lokasi"}</b>
+          {" · "}stok WMS: <b>{run.wms_day ? `on hand ${fmtDate(run.wms_day)} (Laporan WMS harian)` : run.wms_at ? `per ${fmtDateTime(run.wms_at)} WIB` : `saat dibuat (${fmtDateTime(run.created_at)})`}</b>
           {(run.other_slocs ?? []).length > 0 && <> · lokasi lain: {(run.other_slocs ?? []).join(", ")}</>}
           {!open && <> · <b>ditutup</b> {fmtDateTime(run.closed_at)} oleh {run.closed_by_name}{run.close_note && `: ${run.close_note}`}</>}
         </p>

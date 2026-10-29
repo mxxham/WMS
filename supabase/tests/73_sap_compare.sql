@@ -92,6 +92,6 @@ reset role;
 select pg_temp.check('MB51 lines cannot be edited',
   pg_temp.fails(format($q$update stock_recon_sap_moves set quantity = 0 where recon_id = %L$q$, current_setting('t.rec')), '%tidak bisa diubah%'));
 select pg_temp.check('anon cannot execute the new functions',
-  not has_function_privilege('anon', 'public.create_stock_recon_mb52(date, text, text, jsonb, jsonb, text[], jsonb, jsonb, text)', 'execute')
+  not has_function_privilege('anon', 'public.create_stock_recon_mb52(date, text, text, jsonb, jsonb, text[], jsonb, jsonb, text, timestamptz, date)', 'execute')
   and not has_function_privilege('anon', 'public.recon_shipment_match(uuid)', 'execute'));
 rollback;

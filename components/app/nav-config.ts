@@ -1,4 +1,4 @@
-import { UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, type LucideIcon } from "lucide-react";
+import { UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, BookOpen, type LucideIcon } from "lucide-react";
 import type { Job } from "@/lib/jobs";
 
 /**
@@ -28,6 +28,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
     { href: "/warehouse", label: "Gudang 3D", icon: Boxes, jobs: [IV, OP, LD, AD] },
     { href: "/adjust", label: "Adjust stok", icon: SlidersHorizontal, jobs: [IV, LD, AD] },
     { href: "/movements", label: "Mutasi", icon: History, jobs: [AI, IV, LD, AD] },
+    { href: "/ledger", label: "Buku stok", icon: BookOpen, jobs: [IV, LD, AD] },
   ] },
   { title: "Kontrol", links: [
     { href: "/counts", label: "Cycle count", icon: ListTodo, jobs: [IV, LD, AD] },
