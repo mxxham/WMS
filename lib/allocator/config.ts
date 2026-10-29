@@ -130,6 +130,8 @@ export const DEFAULT_CONFIG: AllocatorConfig = {
     'CE33C02', 'CE33D01', 'CE33D02', 'CE33E01', 'CE33E02',
     'CE32A02', 'CE32B02', 'CE32C02', 'CE32D02', 'CE32E02',
     'CE34A01', 'CE34B01', 'CE34C01', 'CE34D01', 'CE34E01',
+    // Level A of CF21-CF40 holds the CKB 3PL's goods (29 Oct 2026, migration 0120 blocks them in the DB).
+    ...Array.from({ length: 20 }, (_, i) => [`CF${21 + i}A01`, `CF${21 + i}A02`]).flat(),
   ],
 
   aisleSequence: ['CA', 'CB', 'CC', 'CD', 'CE', 'CF', 'CG'],

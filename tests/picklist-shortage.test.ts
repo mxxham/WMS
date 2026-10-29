@@ -43,11 +43,11 @@ test('reprint without order quantities (older callers): no shortage line', () =>
 
 test('Alokasi run: the run\'s shortages for that shipment go into its header', () => {
   const config = withConfig({ asOf: new Date('2026-10-06T00:00:00Z') });
-  const bin = (location: string, qty: number): StockBin => ({ binId: `${location}|550069887|08I26JJ`, location, aisle: 'CF', bay: 29, level: 'A', position: 1,
+  const bin = (location: string, qty: number): StockBin => ({ binId: `${location}|550069887|08I26JJ`, location, aisle: 'CF', bay: 19, level: 'A', position: 1,
     sku: '550069887', description: 'Rimula', batch: '08I26JJ', expiryDate: new Date('2030-09-08T00:00:00Z'), grDate: null, qtyCartons: qty, upp: 44, uom: 'CAR', isFullPallet: false });
   const demand: DemandLine[] = [{ shipmentNumber: '109704727', waveNo: '13', orderNos: ['538386894'], sku: '550069887', description: 'Rimula', qtyCartons: 39,
     upp: 44, destination: 'MANADO', shipToLocation: 'MANADO', transport: null, truckType: 'C20', slotTime: '07:52', deliveryDate: null }];
-  const result = allocate([bin('CF29A01', 27)], demand, config);
+  const result = allocate([bin('CF19A01', 27)], demand, config);
   const [pl] = buildPicklists(result, demand, config);
   assert.deepEqual(pl.shortages, [{ sku: '550069887', qtyShort: 12 }]);
 });

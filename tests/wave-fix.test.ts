@@ -35,13 +35,21 @@ test('nothing left after the pick → the Bin To Bin is dropped, the pick stays'
   if (p.kind === 'resize') assert.deepEqual([p.moveTo, p.moveQty], [null, null]);
 });
 
-test('NO 1 #1 (5 Oct): CF40C01 emptied into CF39A02 → pick from CF39A02, same batch, no move', () => {
+// NO 1 #1 (5 Oct) was CF40C01 emptied into CF39A02. Since 29 Oct level A of CF21-CF40 is the CKB 3PL's and
+// blocked (0120), so the case runs on CF19A02; the rule it pins is unchanged.
+test('NO 1 #1 (5 Oct): CF40C01 emptied into an open rest → pick from that rest, same batch, no move', () => {
   const p = proposeFix({ from: 'CF40C01', sku: '550044709', batch: '14I26JJ', expiry: '2030-09-14', qty: 2, upp: 48 }, null,
-    [st('CF39A02', '14I26JJ', '2030-09-14', 33), st('CF04D01', '14I26JJ', '2030-09-14', 48)], [], config);
+    [st('CF19A02', '14I26JJ', '2030-09-14', 33), st('CF04D01', '14I26JJ', '2030-09-14', 48)], [], config);
   assert.equal(p.kind, 'repoint');
   if (p.kind !== 'repoint') return;
-  assert.deepEqual([p.from, p.batch, p.expiry, p.moveTo, p.fefoLater], ['CF39A02', '14I26JJ', '2030-09-14', null, false]);
+  assert.deepEqual([p.from, p.batch, p.expiry, p.moveTo, p.fefoLater], ['CF19A02', '14I26JJ', '2030-09-14', null, false]);
   // The engine's rule: the open rest (33) is used before a sealed pallet (48) is broken for 2 cartons.
+});
+
+test('a blocked CKB bin (CF39A02, 0120) is never proposed, even holding the open rest', () => {
+  const p = proposeFix({ from: 'CF40C01', sku: '550044709', batch: '14I26JJ', expiry: '2030-09-14', qty: 2, upp: 48 }, null,
+    [st('CF39A02', '14I26JJ', '2030-09-14', 33), st('CF04D01', '14I26JJ', '2030-09-14', 48)], [], config);
+  assert.ok(p.kind !== 'repoint' || p.from !== 'CF39A02', JSON.stringify(p));
 });
 
 test('NO 5 #2 (5 Oct): CC25A02 empty → CE10A02, the rest of pallet CE08C01', () => {
