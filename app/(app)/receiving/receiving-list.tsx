@@ -12,11 +12,15 @@ import { Input, Label } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { RECEIPT_STATUS } from "@/lib/inventory-control";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { PlanUpload } from "./plan-upload";
 
 export type ReceiptSummary = {
   id: string; doc_no: string; doc_date: string | null; supplier: string; vehicle: string | null; note: string | null;
   status: keyof typeof RECEIPT_STATUS; created_by_name: string; created_at: string; checked_by_name: string | null; checked_at: string | null;
   posted_by_name: string | null; posted_at: string | null; expected_qty: number; good_qty: number; damaged_qty: number; pallets: number; issues: number;
+  /** 0118: uploaded inbound plan */
+  source?: "MANUAL" | "PLAN"; plan_date?: string | null; shipment_no?: string | null; sales_order?: string | null;
+  container_no?: string | null; seal_no?: string | null; transporter?: string | null; slot_time?: string | null;
 };
 
 type DocDraft = { sku: string; batch_lot: string; quantity: string };
@@ -30,6 +34,7 @@ export function ReceivingList({ receipts, supervisor }: { receipts: ReceiptSumma
         expired (dicek dengan kode batch), qty baik, qty rusak, bin tujuan — tanpa melihat qty dokumen. 3. Orang lain memposting: stok baik masuk bin,
         karton rusak ke karantina dengan hold, dan selisih dengan dokumen tercatat.
       </p>
+      {supervisor && <PlanUpload />}
       {supervisor && <NewReceipt />}
       <Card>
         <CardHeader><CardTitle>Penerimaan</CardTitle></CardHeader>
@@ -39,7 +44,8 @@ export function ReceivingList({ receipts, supervisor }: { receipts: ReceiptSumma
               <thead><tr><Th>Dokumen</Th><Th>Tanggal</Th><Th>Status</Th><Th className="text-right">Dokumen</Th><Th className="text-right">Baik</Th><Th className="text-right">Rusak</Th><Th className="text-right">Selisih</Th><Th>Orang</Th></tr></thead>
               <tbody>{receipts.map((r) => (
                 <tr key={r.id} className={cn(r.status === "OPEN" && "bg-plate/10")}>
-                  <Td><Link className="font-semibold underline" href={`/receiving/${r.id}`}>{r.doc_no}</Link><div className="text-xs">{r.supplier}{r.vehicle && ` · ${r.vehicle}`}</div></Td>
+                  <Td><Link className="font-semibold underline" href={`/receiving/${r.id}`}>{r.doc_no}</Link><div className="text-xs">{r.supplier}{r.vehicle && ` · ${r.vehicle}`}
+                    {r.source === "PLAN" && <> · rencana{r.slot_time && `, slot ${r.slot_time}`}{r.shipment_no && `, SH ${r.shipment_no}`}</>}</div></Td>
                   <Td className="whitespace-nowrap text-xs">{fmtDate(r.doc_date)}<div>dibuat {fmtDateTime(r.created_at)}</div></Td>
                   <Td className="text-xs">{RECEIPT_STATUS[r.status]}</Td>
                   <Td className="text-right tabular">{fmtNum(Number(r.expected_qty))}</Td>

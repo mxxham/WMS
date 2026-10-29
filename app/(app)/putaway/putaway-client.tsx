@@ -13,6 +13,7 @@ import { readSheet } from "@/lib/read-sheet";
 import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawaySheet, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
 import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { addDays, jakartaDay } from "@/lib/ledger/dates";
 import { PutawayFixPanel } from "./putaway-fix-panel";
 import { PutawayHistory } from "./putaway-history";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -53,6 +54,8 @@ export function PutawayClient() {
   // "Sheet benar" (0066): a decision per line the bin holds, the name on the posting, the confirmation step.
   const [fixes, setFixes] = useState<Record<number, FixLine[]>>({});
   const [name, setName] = useState("");
+  // Tanggal barang datang (0117): the team posts a day's putaway the next day, so yesterday by default.
+  const [arrival, setArrival] = useState(() => addDays(jakartaDay(), -1));
   const [confirming, setConfirming] = useState(false);
   const [limit, setLimit] = useState(20);
   const [historyKey, setHistoryKey] = useState(0);
@@ -111,7 +114,9 @@ export function PutawayClient() {
     const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({
       ...r, action: acts[r.line] ?? null, fix: acts[r.line] === "fix" ? fixPayload(fixes[r.line] ?? []) : undefined,
     }));
-    const { data, error } = await createClient().rpc("putaway_import", { p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null });
+    const { data, error } = await createClient().rpc("putaway_import_arrival", {
+      p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null, p_arrival_date: apply ? arrival || null : null,
+    });
     if (error) { setError(error.message); return null; }
     return data as Result;
   }
@@ -402,17 +407,23 @@ export function PutawayClient() {
           {step === "review" && confirming && (
             <Card className="bg-ckb-tint/40 ring-1 ring-ckb/30"><CardContent className="space-y-3 text-sm">
               <p className="font-cond text-lg font-semibold">Konfirmasi posting</p>
-              <p>{fmtNum(toPost)} baris diposting sebagai putaway{toCount > 0 && `, ${fmtNum(toCount)} konflik menjadi tugas Hitung stok`}.</p>
+              <p>{fmtNum(toPost)} baris diposting sebagai putaway untuk barang datang <b>{arrival ? fmtDate(arrival) : "–"}</b>{toCount > 0 && `, ${fmtNum(toCount)} konflik menjadi tugas Hitung stok`}.</p>
               {fixRows.length > 0 && (
                 <div className="space-y-1">
                   <p className="font-semibold">Isi bin dibetulkan (sheet benar):</p>
                   <ul className="list-disc pl-5">{fixRows.map((r) => <li key={r.line}>Baris {r.line} · {fixSummary(r, fixes[r.line] ?? [], limit)}</li>)}</ul>
                 </div>
               )}
-              <div className="max-w-xs"><Label htmlFor="putaway-name">Nama Anda{fixRows.length > 0 ? " (wajib)" : ""}</Label>
-                <Input id="putaway-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="nama yang memposting" /></div>
+              <div className="flex flex-wrap gap-3">
+                <div className="max-w-xs"><Label htmlFor="putaway-arrival">Tanggal barang datang</Label>
+                  <Input id="putaway-arrival" type="date" value={arrival} max={jakartaDay()} min={addDays(jakartaDay(), -7)}
+                    onChange={(e) => setArrival(e.target.value)} />
+                  <p className="mt-1 text-xs text-steel-500">Dipakai Buku stok: inbound dicatat di tanggal ini.</p></div>
+                <div className="max-w-xs"><Label htmlFor="putaway-name">Nama Anda{fixRows.length > 0 ? " (wajib)" : ""}</Label>
+                  <Input id="putaway-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="nama yang memposting" /></div>
+              </div>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={post} disabled={busy || (fixRows.length > 0 && name.trim().length < 2)}><Upload className="h-4 w-4" />{busy ? "Memposting…" : "Ya, posting"}</Button>
+                <Button onClick={post} disabled={busy || !arrival || (fixRows.length > 0 && name.trim().length < 2)}><Upload className="h-4 w-4" />{busy ? "Memposting…" : "Ya, posting"}</Button>
                 <Button variant="outline" onClick={() => setConfirming(false)} disabled={busy}>Batal</Button>
               </div>
             </CardContent></Card>

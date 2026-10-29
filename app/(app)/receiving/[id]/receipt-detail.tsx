@@ -15,9 +15,11 @@ import { expectedExpiry, expiryCheck, MISMATCH_LABEL } from "@/lib/batch-code";
 import { RECEIPT_RESULT, RECEIPT_STATUS } from "@/lib/inventory-control";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import type { ReceiptSummary } from "../receiving-list";
+import type { PutawaySetup } from "@/lib/inbound/load";
+import { PlanCheck } from "./plan-check";
 
 export type Actual = {
-  line_no: number; batch_lot: string; expiry_date: string; expiry_confirmed: boolean; quantity: number; damaged_qty: number;
+  line_no: number; batch_lot: string; expiry_date: string | null; expiry_confirmed: boolean; mfg_date?: string | null; quantity: number; damaged_qty: number;
   items: { sku: string; description: string; uom: string | null } | null; bins: { bin_code: string } | null;
 };
 export type Compare = {
@@ -27,8 +29,10 @@ export type Compare = {
 type Pallet = { sku: string; batch_lot: string; expiry_date: string; quantity: string; damaged_qty: string; to_bin_code: string; expiryOk: boolean };
 const emptyPallet = (): Pallet => ({ sku: "", batch_lot: "", expiry_date: "", quantity: "", damaged_qty: "", to_bin_code: "", expiryOk: false });
 
-export function ReceiptDetail({ receipt: r, actuals, compare, supervisor, shelfLife, defaultShelfLife }: {
+export function ReceiptDetail({ receipt: r, actuals, compare, supervisor, shelfLife, defaultShelfLife, setup }: {
   receipt: ReceiptSummary; actuals: Actual[]; compare: Compare[]; supervisor: boolean; shelfLife: Record<string, number>; defaultShelfLife: number;
+  /** a planned receipt (0118): what the auto putaway needs */
+  setup?: PutawaySetup | null;
 }) {
   const [checking, setChecking] = useState(r.status === "OPEN");
   const editable = r.status === "OPEN" || r.status === "CHECKED";
@@ -42,9 +46,20 @@ export function ReceiptDetail({ receipt: r, actuals, compare, supervisor, shelfL
         ))}
       </div>
       {r.note && <p className="text-sm">Catatan: {r.note}</p>}
+      {r.source === "PLAN" && (
+        <p className="rounded-md bg-white p-3 text-sm">Rencana inbound {fmtDate(r.plan_date ?? null)}: shipment <b>{r.shipment_no ?? "–"}</b> ·
+          kontainer <b>{r.container_no ?? "–"}</b> · seal {r.seal_no ?? "–"} · {r.transporter ?? "–"} · slot <b>{r.slot_time ?? "–"}</b>
+          {r.sales_order && ` · SO ${r.sales_order}`}</p>
+      )}
 
-      {editable && checking && <DockCheck receipt={r} shelfLife={shelfLife} defaultShelfLife={defaultShelfLife} onDone={() => setChecking(false)} />}
-      {editable && !checking && <Button variant="outline" onClick={() => setChecking(true)}>Periksa ulang seluruh truk</Button>}
+      {editable && setup && <PlanCheck receiptId={r.id} setup={setup} actuals={actuals} onDone={() => setChecking(false)} />}
+      {r.source === "PLAN" && (r.status === "CHECKED" || r.status === "POSTED") && actuals.some((a) => Number(a.quantity) > 0) && (
+        <a className="inline-block rounded-md bg-ckb px-4 py-2 text-sm font-semibold text-white" href={`/api/receiving/${r.id}/cards`} target="_blank" rel="noreferrer">
+          Cetak kartu palet ({fmtNum(actuals.filter((a) => Number(a.quantity) > 0).length)})</a>
+      )}
+
+      {!setup && editable && checking && <DockCheck receipt={r} shelfLife={shelfLife} defaultShelfLife={defaultShelfLife} onDone={() => setChecking(false)} />}
+      {!setup && editable && !checking && <Button variant="outline" onClick={() => setChecking(true)}>Periksa ulang seluruh truk</Button>}
 
       {r.status !== "OPEN" && (
         <>
@@ -72,11 +87,11 @@ export function ReceiptDetail({ receipt: r, actuals, compare, supervisor, shelfL
             <CardHeader><CardTitle>Palet yang diperiksa · {fmtNum(actuals.length)}{r.checked_by_name && ` · oleh ${r.checked_by_name} ${fmtDateTime(r.checked_at)}`}</CardTitle></CardHeader>
             <CardContent>
               <Table>
-                <thead><tr><Th>#</Th><Th>SKU</Th><Th>Batch</Th><Th>Expired</Th><Th className="text-right">Baik</Th><Th className="text-right">Rusak</Th><Th>Bin</Th></tr></thead>
+                <thead><tr><Th>#</Th><Th>SKU</Th><Th>Batch</Th><Th>Tgl produksi</Th><Th>Expired</Th><Th className="text-right">Baik</Th><Th className="text-right">Rusak</Th><Th>Bin</Th></tr></thead>
                 <tbody>{actuals.map((a) => (
                   <tr key={a.line_no}>
-                    <Td>{a.line_no}</Td><Td>{a.items?.sku}<div className="text-xs">{a.items?.description}</div></Td><Td>{a.batch_lot}</Td>
-                    <Td className="whitespace-nowrap">{fmtDate(a.expiry_date)}{a.expiry_confirmed && <div className="text-xs text-warn">beda dari kode batch, sesuai label</div>}</Td>
+                    <Td>{a.line_no}</Td><Td>{a.items?.sku}<div className="text-xs">{a.items?.description}</div></Td><Td>{a.batch_lot}</Td><Td className="whitespace-nowrap">{a.mfg_date ? fmtDate(a.mfg_date) : "–"}</Td>
+                    <Td className="whitespace-nowrap">{a.expiry_date ? fmtDate(a.expiry_date) : <span className="text-warn">belum diisi</span>}{a.expiry_confirmed && r.source !== "PLAN" && <div className="text-xs text-warn">beda dari kode batch, sesuai label</div>}</Td>
                     <Td className="text-right tabular">{fmtNum(Number(a.quantity))}</Td><Td className="text-right tabular">{Number(a.damaged_qty) ? fmtNum(Number(a.damaged_qty)) : "–"}</Td>
                     <Td>{a.bins ? <Link className="underline" href={`/bin/${encodeURIComponent(a.bins.bin_code)}`}>{a.bins.bin_code}</Link> : "–"}{Number(a.damaged_qty) > 0 && <div className="text-xs">rusak → karantina</div>}</Td>
                   </tr>
