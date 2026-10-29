@@ -100,6 +100,7 @@ calls, reading the same table. Sub-routes follow their parent (`/audit/picking/.
 | Gudang 3D | | | | ✓ | ✓ | ✓ | ✓ |
 | Adjust stok | | | | ✓ | | ✓ | ✓ |
 | Mutasi | ✓ | | | ✓ | | ✓ | ✓ |
+| Buku stok (0116, 28 Oct 2026) | | | | ✓ | | ✓ | ✓ |
 | Cycle count | | | | ✓ | | ✓ | ✓ |
 | Audit picking | | ✓ | ✓ | | | ✓ | ✓ |
 | Audit putaway | ✓ | | ✓ | | | ✓ | ✓ |

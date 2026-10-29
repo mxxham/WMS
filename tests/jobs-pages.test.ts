@@ -19,10 +19,10 @@ const EXPECTED: Record<Job, string[]> = {
   admin_inbound: ['/dashboard', '/scan', '/receiving', '/putaway', '/inventory', '/movements', '/audit/putaway', '/labels', '/labels/pallet', '/admin/items'],
   admin_outbound: ['/dashboard', '/scan', '/waves', '/allocate', '/inventory', '/audit/picking'],
   checker: ['/scan', '/receiving', '/waves', '/inventory', '/audit/picking', '/audit/putaway'],
-  inventory: ['/dashboard', '/scan', '/assign', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/counts', '/data-quality', '/trace', '/admin/items', '/admin/barcode'],
+  inventory: ['/dashboard', '/scan', '/assign', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/ledger', '/counts', '/data-quality', '/trace', '/admin/items', '/admin/barcode'],
   operator: ['/scan', '/waves', '/inventory', '/warehouse'],
-  leader: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode'],
-  admin: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/admin/import', '/admin/settings', '/admin/users'],
+  leader: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/ledger', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode'],
+  admin: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/warehouse', '/adjust', '/movements', '/ledger', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/admin/import', '/admin/settings', '/admin/users'],
 };
 
 for (const j of JOBS) {
