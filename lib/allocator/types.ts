@@ -29,6 +29,12 @@ export interface StockBin {
   isFullPallet: boolean;
 }
 
+/** One DO (delivery order = Schedule "Order No") and its cartons of one SKU. */
+export interface OrderQty {
+  orderNo: string;
+  qty: number;
+}
+
 /** Demand for one SKU on one shipment (orders already merged). */
 export interface DemandLine {
   shipmentNumber: string;
@@ -39,6 +45,11 @@ export interface DemandLine {
    */
   waveNo: string;
   orderNos: string[];
+  /**
+   * The cartons of each DO, in Schedule row order. Absent when the source only
+   * names the DOs (then a line can only be split when there is a single DO).
+   */
+  orders?: OrderQty[];
   sku: string;
   description: string;
   qtyCartons: number;
@@ -55,7 +66,10 @@ export interface DemandLine {
 export interface AllocationLine {
   shipmentNumber: string;
   waveNo: string;
+  /** the DOs whose cartons this line carries (assignOrders); the demand line's list until then */
   orderNos: string[];
+  /** the cartons of each of those DOs, summing to qtyPick (assignOrders); absent when not splittable */
+  orders?: OrderQty[];
   sku: string;
   description: string;
   location: string;

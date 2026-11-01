@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
-import { BinLeftCheck } from "./bin-left-check";
 import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
@@ -86,7 +85,6 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   const [error, setError] = useState<string | null>(null);
   const [person, setPerson] = usePersonName();
   // After a successful posting: Cek sisa bin (0058) before the dialog closes.
-  const [checking, setChecking] = useState(false);
   // The rack label of the bin this posting takes from (0068): scanned or typed, always required.
   const [rack, setRack] = useState<RackConfirm | null>(null);
   // Optional Bin To Bin (0045) offered with the pick: where what the chosen source keeps goes.
@@ -145,7 +143,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
     const moveQtyN = Math.min(Math.max(Number(moveQty) || 0, 0), leftover);
     const doMove = showMove && moveQtyN > 0 && /^[A-Z0-9_]{3,20}$/.test(dest) && dest !== srcBin;
     async function afterPost() {
-      if (!doMove) { setBusy(false); setChecking(true); return; }
+      if (!doMove) { setBusy(false); setOpen(false); onDone(); return; }
       const { error: moveErr } = await createClient().rpc("add_relocation", {
         p_task_id: t.id, p_to_bin: dest, p_qty: moveQtyN, p_by_name: person, p_reason: reason.trim(),
       });
@@ -155,7 +153,7 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
         onDone();
         return;
       }
-      setChecking(true);
+      setOpen(false); onDone();
     }
     if (different && source === "other") {
       const { error } = await createClient().rpc("post_task_found_elsewhere", {
@@ -225,10 +223,9 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
   }, [showMove, srcBin, t.sku]);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setChecking(false); setDifferent(false); setQty(String(t.quantity)); setReason(""); setRack(null); setOtherBin(""); setOtherHave(null); setSource("0"); setMoveTo(""); setMoveQty(""); setMoveSuggest([]); setMoveLoaded(false); moveTouched.current = false; loadLeft(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); if (o) { setDifferent(false); setQty(String(t.quantity)); setReason(""); setRack(null); setOtherBin(""); setOtherHave(null); setSource("0"); setMoveTo(""); setMoveQty(""); setMoveSuggest([]); setMoveLoaded(false); moveTouched.current = false; loadLeft(); } }}>
       <DialogTrigger asChild><Button size="sm">Posting</Button></DialogTrigger>
       <DialogContent title="Posting tugas" description={`NO ${t.wave_no} · #${t.seq}`}>
-        {checking ? <BinLeftCheck taskId={t.id} person={person} onDone={() => { setOpen(false); onDone(); }} /> : (
         <div className="space-y-4">
           <p className="rounded-md bg-plate/30 p-3 text-base">{what}</p>
           {relocate && left !== null && left !== Number(t.quantity) && (
@@ -347,7 +344,6 @@ export function TaskPostDialog({ task: t, onDone }: { task: TaskRow; onDone: () 
             <Button size="lg" onClick={submit} disabled={busy || invalid}>{busy ? "Memproses…" : "Sudah dikerjakan"}</Button>
           </div>
         </div>
-        )}
       </DialogContent>
     </Dialog>
   );

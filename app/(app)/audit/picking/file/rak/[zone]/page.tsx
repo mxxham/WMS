@@ -17,8 +17,8 @@ export default async function FileRackAuditPage({ params, searchParams }: {
   const zone = decodeURIComponent((await params).zone).toUpperCase();
   const date = auditDate((await searchParams).date);
   if (!/^[A-Z0-9_]{1,20}$/.test(zone)) notFound();
-  const { data } = await (await createClient()).from("sheet_pick_line_state").select("*")
-    .eq("pick_date", date).like("bin_code", `${zone}%`);
+  const supabase = await createClient();
+  const { data } = await supabase.from("sheet_pick_line_state").select("*").eq("pick_date", date).like("bin_code", `${zone}%`);
   const bins = sheetRackBins(((data ?? []) as SheetLineRow[]).filter((l) => sheetZone(l.bin_code) === zone));
   const [summary] = rackSummary(bins);
 

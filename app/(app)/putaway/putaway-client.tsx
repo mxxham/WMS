@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
-import { ACTIONS, KIND_LABELS, PUTAWAY_SHEET, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawaySheet, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
+import { ACTIONS, KIND_LABELS, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawayDetail, pickPutawaySheet, sheetDay, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
 import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import { addDays, jakartaDay } from "@/lib/ledger/dates";
@@ -59,6 +59,8 @@ export function PutawayClient() {
   const [confirming, setConfirming] = useState(false);
   const [limit, setLimit] = useState(20);
   const [historyKey, setHistoryKey] = useState(0);
+  // Rekap inbound: pallets on the sheet with no BIN Location yet (still in staging), not posted.
+  const [pending, setPending] = useState<{ pallets: number; quantity: number }>({ pallets: 0, quantity: 0 });
   const [draftBanner, setDraftBanner] = useState<{ source: string; rows: number; updated_at: string } | null>(null);
 
   useEffect(() => {
@@ -137,10 +139,15 @@ export function PutawayClient() {
     ).catch((e: Error) => console.error("putaway_draft_save:", e));
   }
 
-  async function loadSheet(book: XLSX.WorkBook, name: string) {
+  async function loadSheet(book: XLSX.WorkBook, name: string, file = fileName) {
     setError(null); setBusy(true); setSheet(name);
     try {
-      const parsed = parsePutawaySheet(readSheet(book, name));
+      const detail = parsePutawayDetail(readSheet(book, name));
+      const parsed = detail.rows;
+      setPending(detail.pending);
+      // A Rekap inbound day sheet ("27" of "Rekap inbound 202610") is that day's arrivals.
+      const day = sheetDay(name, file);
+      if (day) setArrival(day);
       setRows(parsed); setActions({}); setFixes({}); setConfirming(false);
       const res = await call(false, {}, parsed);
       if (!res) return;
@@ -160,7 +167,7 @@ export function PutawayClient() {
     try { book = XLSX.read(await f.arrayBuffer(), { cellDates: true }); }
     catch { return setError("File tidak bisa dibaca. Gunakan .xlsx atau .csv."); }
     setWb(book);
-    await loadSheet(book, book.SheetNames.find((n) => PUTAWAY_SHEET.test(n)) ?? book.SheetNames[0]);
+    await loadSheet(book, pickPutawaySheet(book.SheetNames, f.name, arrival), f.name);
   }
 
   /** Send a line to another bin (the one the pallet really went to), or back to the sheet's bin; then check again. */
@@ -265,7 +272,7 @@ export function PutawayClient() {
     XLSX.writeFile(book, `konflik-putaway-${fileName.replace(/\.\w+$/, "")}.xlsx`);
   }
 
-  function reset() { setStep("upload"); setRows([]); setVerdicts(new Map()); setActions({}); setFixes({}); setConfirming(false); setResult(null); setError(null); setDraftBanner(null); Promise.resolve(createClient().rpc("putaway_draft_clear")).catch((e: Error) => console.error("putaway_draft_clear:", e)); }
+  function reset() { setStep("upload"); setRows([]); setPending({ pallets: 0, quantity: 0 }); setVerdicts(new Map()); setActions({}); setFixes({}); setConfirming(false); setResult(null); setError(null); setDraftBanner(null); Promise.resolve(createClient().rpc("putaway_draft_clear")).catch((e: Error) => console.error("putaway_draft_clear:", e)); }
 
   return (
     <div className="space-y-6 p-4 lg:p-8">
@@ -274,8 +281,8 @@ export function PutawayClient() {
       {step === "upload" && (
         <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-steel-300 bg-white p-10 text-center hover:bg-steel-100">
           <FileSpreadsheet className="h-10 w-10 text-steel-500" />
-          <span className="font-cond text-xl font-semibold">{busy ? "Memeriksa sheet…" : "Pilih file WMS (.xlsx)"}</span>
-          <span className="max-w-md text-sm text-steel-500">Sheet <b>data putaway</b> dipilih otomatis. Setiap baris dibandingkan dengan isi bin sekarang. Belum ada yang diposting sampai Anda menekan tombol Posting.</span>
+          <span className="font-cond text-xl font-semibold">{busy ? "Memeriksa sheet…" : "Pilih file WMS atau Rekap inbound (.xlsx)"}</span>
+          <span className="max-w-md text-sm text-steel-500">Sheet <b>data putaway</b> dipilih otomatis; di file Rekap inbound, sheet tanggal barang datang (kemarin). Setiap baris dibandingkan dengan isi bin sekarang. Belum ada yang diposting sampai Anda menekan tombol Posting.</span>
           <input type="file" accept=".xlsx,.xls,.csv" className="sr-only" disabled={busy} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
       )}
@@ -288,6 +295,12 @@ export function PutawayClient() {
             </Select></div>
           <Button variant="outline" onClick={reset} disabled={busy}>Ganti file</Button>
         </div>
+      )}
+
+      {step !== "upload" && pending.pallets > 0 && (
+        <p className="rounded-md bg-steel-100 p-3 text-sm">
+          {fmtNum(pending.pallets)} palet di sheet ini belum punya BIN Location ({fmtNum(pending.quantity)} qty): belum di-putaway, tidak diposting. Upload ulang setelah bin-nya terisi.
+        </p>
       )}
 
       {draftBanner && step === "review" && (
@@ -353,7 +366,8 @@ export function PutawayClient() {
                   return (
                     <tr key={r.line} className={STATUS[st].row}>
                       <Td>{r.line}</Td><Td className="font-semibold">{r.bin_code}
-                        {r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
+                        {r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}
+                        {r.pallet_lines && <span className="block text-xs font-normal text-steel-500">{r.pallet_lines.length} palet (baris {r.pallet_lines.join(", ")})</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
                       <Td className="text-right tabular">{r.quantity ?? "–"}</Td>
                       <Td>{fmtDate(r.expiry_date)}{v?.expiry_expected && <div className="text-xs font-semibold text-warn" title="Expired menurut kode batch">batch → {fmtDate(v.expiry_expected)}</div>}</Td>
                       <Td className="text-xs">{problem(r) || (st === "same" ? "Isi bin sudah sama" : "")}</Td>
@@ -418,7 +432,8 @@ export function PutawayClient() {
                 <div className="max-w-xs"><Label htmlFor="putaway-arrival">Tanggal barang datang</Label>
                   <Input id="putaway-arrival" type="date" value={arrival} max={jakartaDay()} min={addDays(jakartaDay(), -7)}
                     onChange={(e) => setArrival(e.target.value)} />
-                  <p className="mt-1 text-xs text-steel-500">Dipakai Buku stok: inbound dicatat di tanggal ini.</p></div>
+                  <p className="mt-1 text-xs text-steel-500">Dipakai Buku stok: inbound dicatat di tanggal ini.</p>
+                  {arrival && arrival < addDays(jakartaDay(), -7) && <p className="mt-1 text-xs text-bad">Lebih dari 7 hari yang lalu: posting akan ditolak. Pilih tanggal dalam 7 hari terakhir.</p>}</div>
                 <div className="max-w-xs"><Label htmlFor="putaway-name">Nama Anda{fixRows.length > 0 ? " (wajib)" : ""}</Label>
                   <Input id="putaway-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="nama yang memposting" /></div>
               </div>

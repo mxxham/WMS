@@ -11,6 +11,10 @@ type LineRow = {
   task_id: string; shipment_number: string; wave_no: string; seq: number; from_bin: string; zone: string; sku: string;
   description: string; uom: string | null; batch_lot: string; expiry_date: string | null; picked_qty: number; line_state: ExportLine["line_state"];
   volume_l: number | null;
+  /** the item's own DOs (task_do_nos, 0124) */
+  do_nos: string[] | null;
+  // 0123: the shipment's ship-to party and city; undefined on a database before 0123.
+  destination?: string | null; ship_to_location?: string | null;
 };
 
 type MoveLineRow = {
@@ -22,6 +26,10 @@ type MoveLineRow = {
   from_state: "TODO" | "OK" | "MISMATCH" | "AUTO_PASS"; from_system: number | null; from_counted: number | null;
   from_checker: string | null; from_found_sku: string | null; from_note: string | null; from_audited_at: string | null;
   from_correction: boolean | null;
+  // 0122: the wave's shipments for this SKU and their DOs; undefined on a database before 0122.
+  shipment_numbers: string[] | null; do_nos: string[] | null;
+  // 0123: those shipments' ship-to parties and cities; undefined on a database before 0123.
+  destinations?: string[] | null; ship_to_locations?: string[] | null;
 };
 
 /** Downloads the day's picking audit as .xlsx: picked bins and Bin To Bin bins together in Per bin. */
@@ -35,8 +43,9 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
       const db = createClient();
 
       // ---- Pick audit (existing) ----
+      // "*": works before 0123 too (destination / ship_to_location simply absent then).
       let pickQ = db.from("pick_audit_line")
-        .select("task_id, shipment_number, wave_no, seq, from_bin, zone, sku, description, uom, batch_lot, expiry_date, picked_qty, line_state, volume_l")
+        .select("*")
         .eq("planned_date", date).neq("wave_status", "CANCELLED");
       if (zone) pickQ = pickQ.eq("zone", zone);
       const { data: pickData, error: pickError } = await pickQ;
@@ -89,6 +98,10 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
         id: l.task_id, shipment_number: l.shipment_number, wave_no: l.wave_no, picklist: null, seq: l.seq, bin_code: l.from_bin,
         sku: l.sku, description: l.description, uom: l.uom, batch: l.batch_lot, expiry: l.expiry_date, qty: Number(l.picked_qty),
         bin_remaining: null, line_state: l.line_state, volume_l: l.volume_l,
+        // The item's own DOs, by the one rule (task_do_nos, 0124).
+        do_nos: l.do_nos ?? [],
+        // The shipment's ship-to party and city (0123); undefined on a database before 0123.
+        destination: l.destination, ship_to_location: l.ship_to_location,
       }));
 
       // Bin To Bin lines go into Per bin with the picked bins: a row for the source bin, one for the destination.
@@ -100,12 +113,18 @@ export function DownloadPickAudit({ date, zone }: { date: string; zone?: string 
         from_state: l.from_state, from_system: l.from_system == null ? null : Number(l.from_system),
         from_counted: l.from_counted == null ? null : Number(l.from_counted), from_checker: l.from_checker,
         from_found_sku: l.from_found_sku, from_note: l.from_note, from_correction: l.from_correction, from_audited_at: l.from_audited_at,
+        // The shipment and DOs of the pick this move is the rest of (0124).
+        shipment_numbers: l.shipment_numbers, do_nos: l.do_nos,
+        // 0123: their ship-to parties and cities, same derivation.
+        destinations: l.destinations, ship_to_locations: l.ship_to_locations,
       }));
       const out = auditWorkbookRows(pickLines, attempts, "Sisa sistem", remain, { rows: moves, zone });
       const moveHistory = moveRows(moveRowsData.map((l) => ({
         task_id: l.task_id, wave_no: l.wave_no, seq: l.seq, from_bin: l.from_bin, from_zone: l.zone, to_bin: l.to_bin, to_zone: l.to_zone,
         sku: l.sku, description: l.description, uom: l.uom, batch: l.batch_lot, expiry: l.expiry_date,
         planned_qty: Number(l.planned_qty), moved_qty: Number(l.moved_qty), line_state: l.line_state,
+        shipment_numbers: l.shipment_numbers, do_nos: l.do_nos,
+        destinations: l.destinations, ship_to_locations: l.ship_to_locations,
       })), attempts).history;
 
       const sheets: Record<string, Row[]> = {

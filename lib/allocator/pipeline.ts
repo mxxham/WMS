@@ -3,6 +3,7 @@ import type { AllocatorConfig } from './config';
 import { detectDoubles, type DoubleEntry } from './double';
 import { settleSisa } from './ledger';
 import { buildMovementReport } from './movement';
+import { assignOrders } from './orders';
 import { derivePickfaces } from './pickface';
 import { annotateRestNotes, buildPicklists } from './picklist';
 import type { AllocationResult, DemandLine, MovementRow, PickfaceAssignment, StockBin, Warning } from './types';
@@ -35,6 +36,8 @@ export function runPipeline(
   }
   // An opened pallet without a move says where its rest goes later (after settleSisa: final moves).
   annotateRestNotes(allocation.picklists.flatMap((p) => p.lines));
+  // Each line's own DOs, filled in the same printed order (orders.ts).
+  assignOrders(allocation, demand);
   return {
     allocation,
     pickfaces,

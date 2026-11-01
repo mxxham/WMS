@@ -1,3 +1,4 @@
+import { mergeDos } from "@/lib/audit-do";
 import { PICK_ERROR_LABEL, type PickError, type MoveState } from "@/lib/pick-audit";
 
 /**
@@ -11,6 +12,10 @@ export type ExportLine = {
   bin_code: string; sku: string; description: string; uom: string | null; batch: string; expiry: string | null;
   qty: number; bin_remaining: number | null; line_state: "TODO" | "OK" | "MISMATCH" | "RESOLVED" | "AUTO_PASS";
   volume_l: number | null; // litres per carton/article for this SKU
+  /** the DO (delivery order) numbers of this item (0121); absent when the source has none */
+  do_nos?: string[];
+  /** the ship-to company and its city (0123); absent when the source has none */
+  destination?: string | null; ship_to_location?: string | null;
 };
 export type ExportAttempt = {
   line_id: string; attempt_no: number; checker_name: string; method: "STAGING" | "RACK" | "MOVE" | null; result: "OK" | "MISMATCH";
@@ -34,6 +39,8 @@ export function jakartaTime(iso: string | null): string {
 }
 const errorText = (errors: PickError[]) => errors.map((e) => PICK_ERROR_LABEL[e] ?? e).join(", ");
 const zoneOf = (bin: string) => (/^[A-Z]{2}\d{2}[A-Z]\d{2}$/.test(bin) ? bin.slice(0, 2) : bin);
+/** The distinct non-empty values of a shipment-level field, as one cell (0123). */
+const uniqText = (vals: (string | null | undefined)[]) => [...new Set(vals.map((v) => v ?? "").filter((v) => v !== ""))].join(", ");
 
 /** One posted Bin To Bin line for the Per bin sheet: a row for its source bin and one for its destination. */
 export type ExportMove = {
@@ -45,6 +52,12 @@ export type ExportMove = {
   from_state?: "TODO" | "OK" | "MISMATCH" | "AUTO_PASS"; from_system?: number | null; from_counted?: number | null;
   from_checker?: string | null; from_found_sku?: string | null; from_note?: string | null;
   from_correction?: boolean | null; from_audited_at?: string | null;
+  /** 0122: the shipments the move serves (derived from the wave, not stored on the task) */
+  shipment_numbers?: string[] | null;
+  /** the DOs of the pick this move is the pallet rest of (task_do_nos, 0124) */
+  do_nos?: string[] | null;
+  /** 0123: the ship-to companies and cities of those shipments; absent before 0123 is on the database */
+  destinations?: string[] | null; ship_to_locations?: string[] | null;
 };
 
 /**
@@ -73,7 +86,12 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     const counted = last?.method === "RACK" ? last.rack_counted : null;
     return {
       Rak: zoneOf(l.bin_code), Bin: l.bin_code, ...(moves ? { Jenis: "Pick" } : {}), SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
-      Shipment: [...new Set(ls.map((x) => x.shipment_number))].join(", "), ...(moves ? { "Bin To Bin": null } : {}), Baris: ls.length,
+      Shipment: [...new Set(ls.map((x) => x.shipment_number))].join(", "),
+      // One bin + SKU can serve several DOs (one line each): the union, first-seen order.
+      DO: mergeDos(...ls.map((x) => x.do_nos)).join(", "),
+      // 0123: shipment-level ship-to party and city; one bin + SKU can serve several, so the distinct values.
+      Destination: uniqText(ls.map((x) => x.destination)), "Location of the ship-to party": uniqText(ls.map((x) => x.ship_to_location)),
+      ...(moves ? { "Bin To Bin": null } : {}), Baris: ls.length,
       "Qty pick": ls.reduce((s, x) => s + Number(x.qty), 0), ...(moves ? { "Qty Bin To Bin": null } : {}),
       ...remainCol(l.bin_code, l.sku), [sisaLabel]: sisa, "Sisa dihitung": counted, ...(moves ? { "Tiba dihitung": null } : {}),
       Selisih: counted !== null && sisa !== null ? Number(counted) - sisa : null,
@@ -90,7 +108,10 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
     const last = lastOf(l.id);
     const vol = l.volume_l != null ? Number((l.qty * l.volume_l).toFixed(1)) : null;
     return {
-      Shipment: l.shipment_number, NO: l.wave_no, Picklist: l.picklist, Seq: l.seq, Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description,
+      Shipment: l.shipment_number, DO: mergeDos(l.do_nos).join(", "),
+      // 0123: the shipment's ship-to party and city, right after its DO.
+      Destination: l.destination ?? "", "Location of the ship-to party": l.ship_to_location ?? "",
+      NO: l.wave_no, Picklist: l.picklist, Seq: l.seq, Bin: l.bin_code, SKU: l.sku, Deskripsi: l.description,
       Batch: l.batch, Expired: l.expiry, "Qty pick": Number(l.qty), ...remainCol(l.bin_code, l.sku), "Volume (L)": vol, Status: STATE[l.line_state], Error: last ? errorText(last.errors) : null,
       "Dihitung (baris)": last ? Number(last.counted_qty) : null, Checker: last?.checker_name ?? null, Waktu: jakartaTime(last?.created_at ?? null),
       Catatan: last?.note ?? null, Audit: byLine.get(l.id)?.length ?? 0,
@@ -101,7 +122,7 @@ export function auditWorkbookRows(lines: ExportLine[], attempts: ExportAttempt[]
   const totalBoxes = lineRows.reduce((s, r) => s + (Number(r["Qty pick"]) || 0), 0);
   const totalLitres = lineRows.reduce((s, r) => s + (Number(r["Volume (L)"]) || 0), 0);
   const totalsRow: Row = {
-    Shipment: "TOTAL", NO: null, Picklist: null, Seq: null, Bin: null, SKU: null, Deskripsi: null,
+    Shipment: "TOTAL", DO: null, Destination: null, "Location of the ship-to party": null, NO: null, Picklist: null, Seq: null, Bin: null, SKU: null, Deskripsi: null,
     Batch: null, Expired: null, "Qty pick": totalBoxes, ...(remain ? { "Remain Qty": null } : {}), "Volume (L)": Number(totalLitres.toFixed(1)), Status: null, Error: null,
     "Dihitung (baris)": null, Checker: null, Waktu: null, Catatan: null, Audit: null,
   };
@@ -135,11 +156,17 @@ function moveBinRows(moves: ExportMove[], attempts: ExportAttempt[], sisaLabel: 
     if (m.line_state === "AUTO_PASS") continue;
     const route = `NO ${m.wave_no} #${m.seq}: ${m.from_bin} → ${m.to_bin}`;
     const fromZone = m.from_zone ?? zoneOf(m.from_bin), toZone = m.to_zone ?? zoneOf(m.to_bin);
+    // 0122: a move belongs to the shipments the wave picks for its SKU, so its DO is not lost on a move.
+    const shipments = (m.shipment_numbers ?? []).join(", ");
+    const dos = mergeDos(m.do_nos).join(", ");
+    // 0123: the ship-to parties and cities of those shipments, as the view derives them.
+    const destinations = (m.destinations ?? []).join(", "), locations = (m.ship_to_locations ?? []).join(", ");
     if (m.from_state && (!zone || fromZone === zone)) {
       const counted = m.from_counted ?? null, sys = m.from_system ?? null;
       rows.push({
         Rak: fromZone, Bin: m.from_bin, Jenis: "Bin To Bin (asal)", SKU: m.sku, Deskripsi: m.description, UOM: m.uom,
-        Shipment: null, "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": -Number(m.moved_qty),
+        Shipment: shipments, DO: dos, Destination: destinations, "Location of the ship-to party": locations,
+        "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": -Number(m.moved_qty),
         ...remainCol(m.from_bin, m.sku), [sisaLabel]: sys, "Sisa dihitung": counted, "Tiba dihitung": null,
         Selisih: counted !== null && sys !== null ? Number(counted) - Number(sys) : null,
         "Barang ditemukan": m.from_found_sku ?? null, Status: FROM_STATE_TEXT[m.from_state],
@@ -152,7 +179,8 @@ function moveBinRows(moves: ExportMove[], attempts: ExportAttempt[], sisaLabel: 
       const last = hist.at(-1);
       rows.push({
         Rak: toZone, Bin: m.to_bin, Jenis: "Bin To Bin (tujuan)", SKU: m.sku, Deskripsi: m.description, UOM: m.uom,
-        Shipment: null, "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": Number(m.moved_qty),
+        Shipment: shipments, DO: dos, Destination: destinations, "Location of the ship-to party": locations,
+        "Bin To Bin": route, Baris: 1, "Qty pick": null, "Qty Bin To Bin": Number(m.moved_qty),
         // A rack count (0115) compares the whole bin with the system, like a picked bin; a blind audit (0088)
         // counted what arrived against the moved quantity.
         ...remainCol(m.to_bin, m.sku),
@@ -172,7 +200,7 @@ function moveBinRows(moves: ExportMove[], attempts: ExportAttempt[], sisaLabel: 
 
 /**
  * Build move-audit export rows: one row per move line.
- * Mirrors auditWorkbookRows style but for REPLENISH (no shipment, has to_bin).
+ * Mirrors auditWorkbookRows style but for REPLENISH (no shipment of its own, has to_bin).
  */
 export function moveRows(
   lines: Array<{
@@ -182,6 +210,10 @@ export function moveRows(
     batch: string; expiry: string | null;
     planned_qty: number; moved_qty: number;
     line_state: MoveState;
+    /** 0122: the shipments the move serves and their DOs (absent before 0122 is on the database) */
+    shipment_numbers?: string[] | null; do_nos?: string[] | null;
+    /** 0123: the ship-to companies and cities of those shipments (absent before 0123 is on the database) */
+    destinations?: string[] | null; ship_to_locations?: string[] | null;
   }>,
   attempts: ExportAttempt[]
 ): { lines: Row[]; history: Row[] } {
@@ -196,6 +228,10 @@ export function moveRows(
       NO: l.wave_no, Seq: l.seq,
       "Dari bin": l.from_bin, "Zona asal": l.from_zone,
       "Ke bin": l.to_bin, "Zona tujuan": l.to_zone,
+      // 0122: the wave's shipments and DOs, so a move shows them like a pick does.
+      Shipment: (l.shipment_numbers ?? []).join(", "), DO: mergeDos(l.do_nos).join(", "),
+      // 0123: the ship-to parties and cities of those shipments, right after the DO.
+      Destination: (l.destinations ?? []).join(", "), "Location of the ship-to party": (l.ship_to_locations ?? []).join(", "),
       SKU: l.sku, Deskripsi: l.description, UOM: l.uom,
       Batch: l.batch, Expired: l.expiry,
       Rencana: Number(l.planned_qty), Dipindah: Number(l.moved_qty),
@@ -216,6 +252,8 @@ export function moveRows(
       Waktu: jakartaTime(a.created_at),
       "Dari bin": l?.from_bin ?? null, "Zona asal": l?.from_zone ?? null,
       "Ke bin": l?.to_bin ?? null, "Zona tujuan": l?.to_zone ?? null,
+      // 0122: same keys as a pick attempt's history row, so one Riwayat sheet reads the same for both.
+      Shipment: l?.shipment_numbers?.join(", ") ?? null, DO: l ? mergeDos(l.do_nos).join(", ") : null,
       SKU: l?.sku ?? null,
       "Audit ke": a.attempt_no, Checker: a.checker_name, Cara: "Pindahan bin",
       Hasil: a.result === "OK" ? "OK" : "Selisih", Error: errorText(a.errors),

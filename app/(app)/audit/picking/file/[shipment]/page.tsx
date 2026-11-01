@@ -6,6 +6,7 @@ import type { PickError } from "@/lib/pick-audit";
 import { auditDate } from "../../../audit-header";
 import type { AttemptView } from "../../[wave]/[shipment]/shipment-audit-client";
 import type { SheetLineRow } from "../data";
+import { manualDosByWaveNo } from "../../do-data";
 import { FileAuditClient, type FileLineView } from "./file-audit-client";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +25,15 @@ export default async function FileShipmentAuditPage({ params, searchParams }: {
     .eq("pick_date", date).eq("shipment_number", ship).order("seq").order("bin_code");
   const rows = (data ?? []) as SheetLineRow[];
   if (!rows.length) notFound();
-  const { data: attempts } = await supabase.from("sheet_pick_audits").select("*")
-    .in("line_id", rows.map((r) => r.id)).order("attempt_no");
+  const [{ data: attempts }, manual] = await Promise.all([
+    supabase.from("sheet_pick_audits").select("*").in("line_id", rows.map((r) => r.id)).order("attempt_no"),
+    // The DOs typed on the Wave page, reached through the file's wave number.
+    manualDosByWaveNo(supabase, date),
+  ]);
 
   const lines: FileLineView[] = rows.map((l) => ({
     id: l.id, seq: l.seq, sku: l.sku, description: l.description, uom: l.uom, from_bin: l.bin_code,
+    do_nos: l.do_nos ?? [],
     picklist: l.picklist, picker_name: l.picker_name, state: l.line_state, attempts: l.attempts,
     expected: l.line_state === "TODO" ? undefined : { qty: Number(l.qty), batch: l.batch, expiry: l.expiry },
   }));
@@ -44,7 +49,10 @@ export default async function FileShipmentAuditPage({ params, searchParams }: {
     <main>
       <PageHeader title={`Audit shipment ${ship}`} live={["sheet_pick_lines", "sheet_pick_audits"]} />
       <div className="p-4 lg:p-8">
-        <FileAuditClient date={date} shipment={ship} waveNo={rows[0].wave_no} source={rows[0].source} lines={lines} attempts={tries}
+        <FileAuditClient date={date} shipment={ship} waveNo={rows[0].wave_no} source={rows[0].source}
+          destination={rows[0].destination} shipToLocation={rows[0].ship_to_location}
+          paperDos={rows[0].wave_no ? manual.get(`${rows[0].wave_no}|${ship}`) ?? [] : []}
+          lines={lines} attempts={tries}
           canCorrect={user.role !== "operator"} />
       </div>
     </main>

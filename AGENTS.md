@@ -133,6 +133,13 @@ waves by *earliest* slot then NO, shipments by slot then number, then printed wa
 order is the print order, the task-numbering order, and the Wave-page reprint order. Change it in
 one place or the picklists disagree with each other.
 
+**A pick line's DO is split once** (`lib/allocator/orders.ts`, 0124): demand is one line per
+shipment + SKU, but it keeps each Schedule `Order No`'s cartons (`orders`); lines in printed order
+fill the DOs in Schedule row order. `save_plan` stores it in `pick_task_orders`, and
+`task_do_nos(task)` is the only reader (audit views, `pick_task_detail` reprint; a move follows the
+pick at `seq - 1`). K_ONE rows listing several DOs are split by the same rule from the Schedule.
+Manual DOs (`shipment_do_no`) are shipment paperwork: header only, never on an item.
+
 **Replenishment runs after allocation**, against stock left after today's orders are reserved, so it
 never takes a carton an order needs. **A pickface bin is never a replenishment source** — it is
 topped up, never drawn from, even when it holds another SKU.
@@ -313,6 +320,19 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
   `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`. Outstanding before production.
 - **Direct thermal printers are black-only.** Label colour mode needs pre-printed labels, a colour
   printer, or the B/W mode in the Label menu.
+- **The Alokasi page also takes the raw "Planning Outbound" workbook** (one sheet per day, e.g.
+  `1 Oktober 2026`, header on row 4, `TOTAL` rows between shipments, no `WMS`/`MASTER DATA`).
+  `pickScheduleSheet` (`browser-input.ts`) picks the run date's sheet (name, else the date cell);
+  demand `upp` stays 0 there and is filled from database stock — never default it to 1, the
+  allocator would treat every carton as a full pallet. Stock source must be the database.
+  `tests/planning-outbound.test.ts`.
+- **SheetJS time cells (`cellDates`) are local clock time with Jakarta's 1899 offset (+7:07:12)** —
+  read them with `sheetTimeHHMM` (`excel-date.ts`), never `toISOString()` (08:00 became `00:52`
+  on the page until 1 Nov 2026). ExcelJS (CLI) returns UTC instead.
+- **Putaway also takes the raw "Rekap inbound <yyyymm>" workbook** (sheets `01`..`31`, plus
+  `Pallet ID`). The day sheet sets the arrival date; distinct Pallet IDs into one bin are summed
+  into one line (`pallet_lines`); a Pallet ID with no `BIN Location` is still in staging and only
+  counted. The WMS `data putaway` sheet keeps its old rules. `tests/putaway-rekap.test.ts`.
 - **Data issues are real, not hypothetical** — `docs/DATA_ISSUES.md`: bin CC01C01 holds `#VALUE!`,
   CE08A01 expired in 1930, batches CD39C01/C02 that Excel read as dates, 129 bins with qty 0, 57
   duplicate `Lokasi` rows. Column mapping is `docs/DATA_MAPPING.md`. Import

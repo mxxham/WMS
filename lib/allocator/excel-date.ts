@@ -16,6 +16,23 @@ export function excelCalendarDay(d: Date): { y: number; m: number; d: number } {
   return { y: r.getFullYear(), m: r.getMonth() + 1, d: r.getDate() };
 }
 
+/**
+ * 'HH:MM' of a time cell read by SheetJS (`cellDates: true`). SheetJS builds the time from
+ * LOCAL components on 1899-12-30, using that day's historical offset (Jakarta LMT +7:07:12),
+ * so the local clock reads 08:00 while toISOString() says 00:52. Read the local clock,
+ * rounded to the nearest minute. (ExcelJS returns UTC instead: adapters/excel-input.ts.)
+ */
+export function sheetTimeHHMM(d: Date): string {
+  const mins = Math.round((d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000) / 60) % 1440;
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+
+/** 'HH:MM' of a time stored as a plain day fraction (0.3333 = 08:00). */
+export function fractionTimeHHMM(f: number): string {
+  const mins = Math.round((f - Math.floor(f)) * 1440) % 1440;
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+
 /** 'YYYY-MM-DD' for a date-only cell value. */
 export function excelDateIso(d: Date): string {
   const { y, m, d: day } = excelCalendarDay(d);

@@ -1,3 +1,4 @@
+import { ordersAfter } from './orders';
 import type { DemandLine } from './types';
 
 /**
@@ -138,6 +139,8 @@ export function planRemainders(
           newDemand.push({
             ...origDemand,
             qtyCartons: remainder,
+            // The picked cartons filled the first DOs (orders.ts): the remainder is the rest.
+            orders: ordersAfter(origDemand.orders, origDemand.qtyCartons - remainder),
             waveNo: freshWaveNo,
           });
         }

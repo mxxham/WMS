@@ -17,12 +17,16 @@ import {
   type LineState, type PickError, type Resolution,
 } from "@/lib/pick-audit";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { mergeDos } from "@/lib/audit-do";
+import { DoLine } from "../../do-line";
 import { StateBadge, type ShipmentRow } from "../../shipment-list";
 
 export type LineView = {
   task_id: string; seq: number; sku: string; description: string; uom: string | null; from_bin: string;
   /** current stock of this SKU in from_bin, all batches */
   bin_qty: number;
+  /** the item's own DO (delivery order) numbers (task_do_nos, 0124); "–" when none */
+  do_nos: string[];
   picked_by_name: string | null; bulk_posted: boolean; state: LineState; attempts: number;
   /** how the bin was confirmed at posting (0068): rack label scanned, typed, or none */
   confirm: "scan" | "ketik" | null;
@@ -52,8 +56,11 @@ const LINE_TONE: Record<LineState, string> = {
  * reported; the database compares. A mismatch is fixed on the floor and
  * audited again, or accepted by a supervisor. Loading needs every line passed.
  */
-export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }: {
-  shipment: ShipmentRow; lines: LineView[]; attempts: AttemptView[]; supervisor: boolean;
+export function ShipmentAuditClient({ shipment: s, lines, paperDos = [], attempts, supervisor }: {
+  shipment: ShipmentRow; lines: LineView[];
+  /** the DOs typed on the Wave page (0079): shipment paperwork, shown in the header only */
+  paperDos?: string[];
+  attempts: AttemptView[]; supervisor: boolean;
 }) {
   const [audit, setAudit] = useState<{ line: LineView; flash?: string; correct?: boolean } | null>(null);
   const [resolve, setResolve] = useState<{ line: LineView; attempt: AttemptView; action: Resolution } | null>(null);
@@ -63,6 +70,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
   const frozen = s.state === "LOADED" || s.state === "CANCELLED";
   const byTask = new Map<string, AttemptView[]>();
   for (const a of attempts) byTask.set(a.task_id, [...(byTask.get(a.task_id) ?? []), a]);
+  // Every DO this shipment carries, then the ones typed on the Wave page, so the header names the paperwork once.
+  const shipmentDos = mergeDos(...lines.map((l) => l.do_nos), paperDos);
 
   /** Marks `from` as saved and returns the next line still to audit (after it, wrapping round), if any. */
   function nextTodo(from: LineView): { line: LineView; left: number } | null {
@@ -81,6 +90,9 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
           <div className="space-y-1">
             <div className="flex items-center gap-2"><h2 className="font-cond text-2xl font-semibold">SH {s.shipment_number}</h2><StateBadge state={s.state} /></div>
             <p className="text-sm text-steel-500">NO {s.wave_no} · {fmtDate(s.planned_date)} · truk {s.truck ?? s.planned_truck ?? "–"}</p>
+            {/* 0123: the shipment's destination and ship-to city, when the plan or file named them */}
+            {(s.destination || s.ship_to_location) && <p className="text-sm">Tujuan: {[s.destination, s.ship_to_location].filter((v): v is string => !!v).join(" — ")}</p>}
+            <DoLine dos={shipmentDos} className="text-sm" />
             <p className="text-sm">{fmtNum(s.ok + s.resolved)}/{fmtNum(s.lines)} baris lolos
               {s.todo > 0 && ` · ${fmtNum(s.todo)} belum diaudit`}{s.mismatch > 0 && <span className="text-bad"> · {fmtNum(s.mismatch)} selisih</span>}
               {s.open_tasks > 0 && ` · ${fmtNum(s.open_tasks)} tugas belum dipick`}</p>
@@ -107,7 +119,8 @@ export function ShipmentAuditClient({ shipment: s, lines, attempts, supervisor }
               return (
                 <tr key={l.task_id} className={cn(l.state === "MISMATCH" && "bg-bad/5")}>
                   <Td className="tabular">{l.seq}</Td>
-                  <Td><span className="font-semibold">{l.sku}</span><br /><span className="text-xs text-steel-500">{l.description}</span></Td>
+                  <Td><span className="font-semibold">{l.sku}</span><br /><span className="text-xs text-steel-500">{l.description}</span>
+                    <DoLine dos={l.do_nos} /></Td>
                   <Td className="font-semibold">{l.from_bin}</Td>
                   <Td className="tabular">{fmtNum(l.bin_qty)} {l.uom ?? ""}</Td>
                   <Td className="text-xs">{l.picked_by_name ?? "(tidak tercatat)"}

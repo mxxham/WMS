@@ -15,9 +15,8 @@ export function DownloadAudit({ date, zone }: { date: string; zone?: string }) {
     setBusy(true); setError(null);
     try {
       const db = createClient();
-      const { data, error } = await db.from("sheet_pick_line_state")
-        .select("id, shipment_number, wave_no, picklist, seq, bin_code, sku, description, uom, batch, expiry, qty, bin_remaining, line_state")
-        .eq("pick_date", date);
+      // "*": the file's own per-line DOs (0121) and destination / city (0123) too.
+      const { data, error } = await db.from("sheet_pick_line_state").select("*").eq("pick_date", date);
       if (error) throw error;
       const lines = ((data ?? []) as ExportLine[]).filter((l) => !zone || sheetZone(l.bin_code) === zone);
       if (!lines.length) throw new Error("Belum ada baris untuk diunduh.");

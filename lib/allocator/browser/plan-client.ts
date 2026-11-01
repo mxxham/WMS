@@ -132,6 +132,8 @@ export async function savePlan(
 
 type OutboundDemandRow = {
   wave_id: string; shipment_number: string; sku: string; description: string; order_nos: string[];
+  /** 0124; absent on a row saved before it */
+  order_qtys?: { order_no: string; qty: number }[] | null;
   truck: string | null; destination: string; quantity_requested: number; items: { upp: number | null } | null;
 };
 
@@ -149,7 +151,7 @@ export async function replanRemaining(
   const waveById = new Map(ctx.replaceable.map((w) => [w.id, w]));
 
   const { data, error } = await db.from('outbound')
-    .select('wave_id, shipment_number, sku, description, order_nos, truck, destination, quantity_requested, items(upp)')
+    .select('wave_id, shipment_number, sku, description, order_nos, order_qtys, truck, destination, quantity_requested, items(upp)')
     .in('wave_id', [...waveById.keys()]);
   if (error) throw new Error(error.message);
 
@@ -159,6 +161,8 @@ export async function replanRemaining(
       shipmentNumber: o.shipment_number,
       waveNo: w.wave_no,
       orderNos: o.order_nos ?? [],
+      // Each DO's cartons as saved (0124); a plan saved before has none, and splits only a single-DO line.
+      orders: (o.order_qtys ?? []).map((x) => ({ orderNo: x.order_no, qty: Number(x.qty) })),
       sku: o.sku,
       description: o.description,
       qtyCartons: Number(o.quantity_requested),

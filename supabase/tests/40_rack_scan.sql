@@ -210,10 +210,13 @@ set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select unpost_task((select p1 from b), 'Supervisor', 'salah posting') \g /dev/null
 select pg_temp.check('unpost clears the bin confirmation and its method',
   (select status = 'PLANNED' and scanned_code is null and scan_method is null from pick_tasks where id = (select p1 from b)));
--- 0091 appended items.volume_l after scan_method (append-only rule); the
--- last column is now volume_l and scan_method is second-to-last.
-select pg_temp.check('pick_audit_line ends with scan_method then volume_l',
-  (select (a[1] = 'volume_l' and a[2] = 'scan_method') from (
+-- 0091 appended items.volume_l after scan_method, 0121 appended do_nos after
+-- volume_l and 0123 appended destination after do_nos, then ship_to_location
+-- (append-only rule): the last column is ship_to_location, then destination,
+-- then do_nos, then volume_l, then scan_method.
+select pg_temp.check('pick_audit_line ends with ship_to_location after destination after do_nos after volume_l after scan_method',
+  (select (a[1] = 'ship_to_location' and a[2] = 'destination' and a[3] = 'do_nos'
+           and a[4] = 'volume_l' and a[5] = 'scan_method') from (
      select array_agg(attname order by attnum desc) as a from pg_attribute
      where attrelid = 'public.pick_audit_line'::regclass and attnum > 0 and not attisdropped) t)
   and (select scan_method = 'ketik' from pick_audit_line where task_id = (select p2 from a)));

@@ -1,3 +1,4 @@
+import { mergeDos } from "@/lib/audit-do";
 import type { createClient } from "@/lib/supabase/server";
 import type { LineState } from "@/lib/pick-audit";
 
@@ -16,6 +17,8 @@ export const RACK_STATE_TONE: Record<RackState, string> = { TODO: "bg-steel-100 
 export type RackBin = {
   bin_code: string; zone: string; sku: string; description: string; uom: string | null;
   lines: number; shipments: string[]; pickers: string[]; state: BinState;
+  /** the DO numbers of every line picked out of this bin for the SKU, first-seen order; "–" when none */
+  do_nos: string[];
   /** what the system holds of the SKU in the bin now, all batches (only when one rack is loaded) */
   bin_qty: number | null;
   /** open to a count: still has lines to audit on a shipment that is not loaded */
@@ -31,9 +34,13 @@ export type RackSummary = {
 };
 
 type Line = {
-  task_id: string; from_bin: string; zone: string; sku: string; description: string; uom: string | null; shipment_number: string;
-  picked_by_name: string | null; line_state: LineState; loaded: boolean;
+  task_id: string; from_bin: string; zone: string; sku: string; description: string; uom: string | null;
+  shipment_number: string; picked_by_name: string | null; line_state: LineState; loaded: boolean;
+  /** the item's own DOs (task_do_nos, 0124); only read when one rack is loaded */
+  do_nos?: string[] | null;
 };
+
+const LINE_COLS = "task_id, from_bin, zone, sku, description, uom, shipment_number, picked_by_name, line_state, loaded";
 
 // Walking order inside an aisle: rack, then position, then level (CC15A02 -> 15, 02, A).
 export function walkKey(bin: string): string {
@@ -44,11 +51,12 @@ export function walkKey(bin: string): string {
 /** Every bin + SKU picked on `date` (cancelled waves and 0-picks left out), in walking order. */
 export async function rackBins(supabase: Awaited<ReturnType<typeof createClient>>, date: string, zone?: string): Promise<RackBin[]> {
   let q = supabase.from("pick_audit_line")
-    .select("task_id, from_bin, zone, sku, description, uom, shipment_number, picked_by_name, line_state, loaded")
+    // The DOs are only shown on one rack's page (like `bin_qty`): the index page lists racks, not items.
+    .select(zone ? `${LINE_COLS}, do_nos` : LINE_COLS)
     .eq("planned_date", date).neq("wave_status", "CANCELLED").neq("line_state", "AUTO_PASS");
   if (zone) q = q.eq("zone", zone);
   const { data } = await q;
-  const lines = (data ?? []) as Line[];
+  const lines = (data ?? []) as unknown as Line[];
   if (!lines.length) return [];
 
   const { data: counts } = await supabase.from("pick_audits")
@@ -60,12 +68,14 @@ export async function rackBins(supabase: Awaited<ReturnType<typeof createClient>
     const k = `${l.from_bin}|${l.sku}`;
     const g = byBin.get(k) ?? {
       bin: { bin_code: l.from_bin, zone: l.zone, sku: l.sku, description: l.description, uom: l.uom, lines: 0,
-             shipments: [], pickers: [], state: "OK" as BinState, bin_qty: null, countable: false, correctable: false, last: null },
+             shipments: [], pickers: [], state: "OK" as BinState, do_nos: [], bin_qty: null, countable: false, correctable: false, last: null },
       states: [], open: false, fixable: false,
     };
     g.bin.lines += 1;
     if (!g.bin.shipments.includes(l.shipment_number)) g.bin.shipments.push(l.shipment_number);
     if (l.picked_by_name && !g.bin.pickers.includes(l.picked_by_name)) g.bin.pickers.push(l.picked_by_name);
+    // One bin + SKU can serve several DOs (one line each): the union, first-seen order.
+    g.bin.do_nos = mergeDos(g.bin.do_nos, l.do_nos);
     g.states.push(l.line_state);
     if (!l.loaded && (l.line_state === "TODO" || l.line_state === "MISMATCH")) g.open = true;
     if (!l.loaded && (l.line_state === "OK" || l.line_state === "MISMATCH")) g.fixable = true;

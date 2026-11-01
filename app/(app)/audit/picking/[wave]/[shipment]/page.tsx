@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
 import { binConfirm, type LineState, type PickError } from "@/lib/pick-audit";
 import type { ShipmentRow } from "../../shipment-list";
+import { doKey, manualDos } from "../../do-data";
 import { ShipmentAuditClient, type AttemptView, type LineView } from "./shipment-audit-client";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ type LineRow = {
   task_id: string; seq: number; sku: string; description: string; uom: string | null; from_bin: string; batch_lot: string;
   expiry_date: string | null; planned_qty: number; picked_qty: number; deviation_reason: string | null;
   picked_by_name: string | null; bulk_posted: boolean; scanned_code: string | null; scan_method: string | null; line_state: LineState; attempts: number;
+  /** the item's own DOs (task_do_nos, 0124) */
+  do_nos: string[] | null;
 };
 
 /** One shipment's lines. A line's picked qty / batch / expiry is not sent to the browser until it has been audited. */
@@ -27,7 +30,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
   const [{ data: s }, { data: lines }, { data: attempts }, { count: moves }] = await Promise.all([
     supabase.from("pick_audit_shipment").select("*").eq("wave_id", wave).eq("shipment_number", ship).maybeSingle(),
     supabase.from("pick_audit_line")
-      .select("task_id, seq, sku, description, uom, from_bin, batch_lot, expiry_date, planned_qty, picked_qty, deviation_reason, picked_by_name, bulk_posted, scanned_code, scan_method, line_state, attempts")
+      .select("task_id, seq, sku, description, uom, from_bin, batch_lot, expiry_date, planned_qty, picked_qty, deviation_reason, picked_by_name, bulk_posted, scanned_code, scan_method, line_state, attempts, do_nos")
       .eq("wave_id", wave).eq("shipment_number", ship).order("seq"),
     supabase.from("pick_audits").select("*, pick_tasks!inner(wave_id, shipment_number)")
       .eq("pick_tasks.wave_id", wave).eq("pick_tasks.shipment_number", ship).order("attempt_no"),
@@ -45,9 +48,12 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
     inBin.set(`${r.bin_code}|${r.sku}`, (inBin.get(`${r.bin_code}|${r.sku}`) ?? 0) + Number(r.quantity));
   }
 
+  // The DOs typed on the Wave page (0079) are shipment paperwork: shown on the shipment, never on an item.
+  const manual = await manualDos(supabase, [wave]);
+
   const view: LineView[] = rows.map((l) => ({
     task_id: l.task_id, seq: l.seq, sku: l.sku, description: l.description, uom: l.uom, from_bin: l.from_bin,
-    bin_qty: inBin.get(`${l.from_bin}|${l.sku}`) ?? 0,
+    bin_qty: inBin.get(`${l.from_bin}|${l.sku}`) ?? 0, do_nos: l.do_nos ?? [],
     picked_by_name: l.picked_by_name, bulk_posted: l.bulk_posted, confirm: binConfirm(l), state: l.line_state, attempts: l.attempts,
     picked: l.line_state === "TODO" ? undefined : {
       qty: Number(l.picked_qty), planned_qty: Number(l.planned_qty), batch: l.batch_lot, expiry: l.expiry_date, deviation: l.deviation_reason,
@@ -70,7 +76,7 @@ export default async function ShipmentAuditPage({ params }: { params: Promise<{ 
             Pindahan bin (Bin To Bin) di wave ini: {moves} baris. Cek bin asal dan tujuan
           </Link>
         )}
-        <ShipmentAuditClient shipment={s as ShipmentRow} lines={view} attempts={tries} supervisor={user.role !== "operator"} />
+        <ShipmentAuditClient shipment={s as ShipmentRow} lines={view} paperDos={manual.get(doKey(wave, ship)) ?? []} attempts={tries} supervisor={user.role !== "operator"} />
       </div>
     </main>
   );

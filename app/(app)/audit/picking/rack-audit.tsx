@@ -14,6 +14,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import { CountBinHero } from "@/components/audit/count-bin-hero";
 import { BIN_STATE_LABEL, BIN_STATE_TONE, RACK_STATE_LABEL, RACK_STATE_TONE, type RackBin, type RackSummary } from "./rack-data";
+import { DoLine } from "./do-line";
 
 type SaveResult = { result: "OK" | "MISMATCH"; system: number; counted: number; diff: number; lines: number; found_sku: string | null };
 const key = (b: RackBin) => `${b.bin_code}|${b.sku}`;
@@ -128,7 +129,7 @@ export function RackAudit({ zone, date, bins, summary, rpc = "record_rack_audit"
                   </span>
                 </Td>
                 <Td><span className="font-semibold">{b.sku}</span><br /><span className="text-xs text-steel-500">{b.description}</span></Td>
-                <Td className="text-xs">{b.shipments.join(", ")}</Td>
+                <Td className="text-xs">{b.shipments.join(", ")}<DoLine dos={b.do_nos} /></Td>
                 <Td className="text-xs">{b.pickers.join(", ") || "(tidak tercatat)"}</Td>
                 <Td className="tabular">{fmtNum(b.lines)}</Td>
                 <Td className="text-lg tabular font-bold">{b.bin_qty === null ? "–" : `${fmtNum(b.bin_qty)} ${b.uom ?? ""}`}</Td>
@@ -271,6 +272,7 @@ function CountDialog({ bin, date, rpc, flash, correct, next, onOpen, onClose, pr
               amount={{ label: rpc === "record_rack_audit" ? "Sisa di sistem" : "Sisa di file", value: fmtNum(bin.bin_qty ?? 0), unit: bin.uom }}>
               <div className="font-semibold">{bin.sku}</div>
               <p className="text-xs text-steel-700">{bin.description} · SH {bin.shipments.join(", ")}</p>
+              <DoLine dos={bin.do_nos} />
             </CountBinHero>
             {flash && <p role="status" className="flex items-center gap-1 rounded-md bg-ok/10 p-2 text-sm font-semibold text-ok"><CheckCircle2 className="h-4 w-4" />{flash}</p>}
             {correct && (

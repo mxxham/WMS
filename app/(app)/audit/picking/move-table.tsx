@@ -3,6 +3,7 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { fmtDate, fmtNum, cn } from "@/lib/utils";
 import { type LineState, type PickError, PICK_ERROR_LABEL } from "@/lib/pick-audit";
 import { MoveBinCheck } from "./move-bin-check";
+import { DoLine } from "./do-line";
 
 /** One posted Bin To Bin (REPLENISH) line from `pick_audit_move` (0088). */
 export type MoveRow = {
@@ -17,6 +18,8 @@ export type MoveRow = {
   from_state?: "TODO" | "OK" | "MISMATCH" | "AUTO_PASS"; from_attempts: number;
   from_checker: string | null; from_system: number | null; from_counted: number | null;
   from_found_sku: string | null; from_note: string | null; from_correction: boolean | null; from_audited_at: string | null;
+  /** the shipment and DOs of the pick this move is the pallet rest of (task_do_nos, 0124) */
+  shipment_numbers?: string[] | null; do_nos?: string[] | null;
 };
 
 /** One audit attempt of a move's destination (pick_audits): a blind audit (0088) or a rack count (0115). */
@@ -102,6 +105,8 @@ export function MoveTable({ rows, attempts, binQty, supervisor, zone, showWave =
           const fromHere = !zone || l.zone === zone, showTo = !zone || l.to_zone === zone;
           const showFrom = fromHere && l.from_state !== undefined;
           const qty = binQty.get(`${l.from_bin}|${l.sku}`) ?? 0, toQty = binQty.get(`${l.to_bin}|${l.sku}`) ?? 0;
+          // 0122: empty on a database before 0122, so the cell falls back to today's two lines.
+          const ships = l.shipment_numbers ?? [], dos = l.do_nos ?? [];
           return (
             <tr key={l.task_id} className={cn((l.line_state === "MISMATCH" && showTo || l.from_state === "MISMATCH" && showFrom) && "bg-bad/5")}>
               {showWave && <Td className="tabular text-xs">{l.wave_no}</Td>}
@@ -110,6 +115,15 @@ export function MoveTable({ rows, attempts, binQty, supervisor, zone, showWave =
                 <span className="font-semibold">{l.sku}</span>
                 <br />
                 <span className="text-xs text-steel-500">{l.description}</span>
+                {(ships.length > 0 || dos.length > 0) && (
+                  <div className="mt-0.5">
+                    {ships.length > 0 && (
+                      <span className="block text-xs"><span className="text-steel-500">SH</span>{" "}
+                        <span className="tabular font-medium">{ships.join(", ")}</span></span>
+                    )}
+                    <DoLine dos={dos} />
+                  </div>
+                )}
               </Td>
               <Td className={cn("space-y-1", !fromHere && "opacity-50")}>
                 <div className="font-cond text-lg font-semibold">{l.from_bin}{l.zone && <span className="text-xs text-steel-500"> · rak {l.zone}</span>}</div>

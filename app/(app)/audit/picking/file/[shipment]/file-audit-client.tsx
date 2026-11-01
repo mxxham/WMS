@@ -6,10 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
+import { mergeDos } from "@/lib/audit-do";
 import { AttemptLine, AuditDialog, type AttemptView } from "../../[wave]/[shipment]/shipment-audit-client";
+import { DoLine } from "../../do-line";
 
 export type FileLineView = {
   id: string; seq: number; sku: string; description: string; uom: string | null; from_bin: string;
+  /** the item's DO (delivery order) numbers, as the file names them (split by the Schedule, 0124); "–" when none */
+  do_nos: string[];
   picklist: string | null; picker_name: string | null; state: "TODO" | "OK" | "MISMATCH"; attempts: number;
   /** only once the line has been audited: what the file says was picked */
   expected?: { qty: number; batch: string; expiry: string | null };
@@ -26,8 +30,13 @@ const STATE: Record<FileLineView["state"], { label: string; tone: string }> = {
  * the pallet without seeing the file's numbers; the database compares.
  * A mismatch is fixed on the floor and audited again.
  */
-export function FileAuditClient({ date, shipment, waveNo, source, lines, attempts, canCorrect }: {
-  date: string; shipment: string; waveNo: string | null; source: "K_ONE" | "ALLOCATOR"; lines: FileLineView[]; attempts: AttemptView[];
+export function FileAuditClient({ date, shipment, waveNo, source, destination, shipToLocation, paperDos = [], lines, attempts, canCorrect }: {
+  date: string; shipment: string; waveNo: string | null; source: "K_ONE" | "ALLOCATOR";
+  /** 0123: the shipment's ship-to party and city from the file (first line that names them) */
+  destination?: string | null; shipToLocation?: string | null;
+  /** the DOs typed on the Wave page (0079): shipment paperwork, shown in the header only */
+  paperDos?: string[];
+  lines: FileLineView[]; attempts: AttemptView[];
   /** supervisor / admin: a passed line can be recorded again (Ubah, 0032) */
   canCorrect: boolean;
 }) {
@@ -53,6 +62,9 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
         <CardContent className="space-y-1">
           <h2 className="font-cond text-2xl font-semibold">SH {shipment}</h2>
           <p className="text-sm text-steel-500">NO {waveNo ?? "–"} · {fmtDate(date)} · dari file WMS ({source === "K_ONE" ? "sheet K_ONE" : "alokasi dari stok WMS"})</p>
+          {/* 0123: the shipment's destination and ship-to city, when the file named them */}
+          {(destination || shipToLocation) && <p className="text-sm">Tujuan: {[destination, shipToLocation].filter((v): v is string => !!v).join(" — ")}</p>}
+          <DoLine dos={mergeDos(...lines.map((l) => l.do_nos), paperDos)} className="text-sm" />
           <p className="text-sm">{fmtNum(ok)}/{fmtNum(lines.length)} baris lolos
             {mismatch > 0 && <span className="text-bad"> · {fmtNum(mismatch)} selisih</span>}</p>
         </CardContent>
@@ -64,7 +76,8 @@ export function FileAuditClient({ date, shipment, waveNo, source, lines, attempt
             <tbody>{lines.map((l) => (
               <tr key={l.id} className={cn(l.state === "MISMATCH" && "bg-bad/5")}>
                 <Td className="tabular">{l.seq}</Td>
-                <Td><span className="font-semibold">{l.sku}</span><br /><span className="text-xs text-steel-500">{l.description}</span></Td>
+                <Td><span className="font-semibold">{l.sku}</span><br /><span className="text-xs text-steel-500">{l.description}</span>
+                  <DoLine dos={l.do_nos} /></Td>
                 <Td className="font-semibold">{l.from_bin}{l.picklist && <span className="block text-xs font-normal text-steel-500">{l.picklist}</span>}</Td>
                 <Td className={cn("text-xs font-semibold", STATE[l.state].tone)}>{STATE[l.state].label}</Td>
                 <Td className="space-y-1 text-xs">

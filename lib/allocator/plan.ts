@@ -30,6 +30,8 @@ export interface PlanTask {
   pick_type: 'PALLET' | 'CASE';
   breaks_pallet: boolean;
   seq: number;
+  /** PICK only: the DOs whose cartons this task carries, in fill order (orders.ts, 0124) */
+  orders?: { order_no: string; qty: number }[];
 }
 
 export interface PlanOutbound {
@@ -38,8 +40,12 @@ export interface PlanOutbound {
   sku: string;
   description: string;
   order_nos: string[];
+  /** each DO's cartons (0124), so a replan can split its tasks the same way */
+  order_qtys: { order_no: string; qty: number }[];
   truck: string | null;
   destination: string;
+  /** the ship-to party's city (0123), kept apart from the company so the audit can name both */
+  ship_to_location: string;
   quantity_requested: number;
   quantity_allocated: number;
   shortage_reason: string | null;
@@ -98,6 +104,7 @@ export function buildPlan(
     tasks.push({
       ...base, shipment_number: l.shipmentNumber, task_type: 'PICK', from_bin: l.location, to_bin: null,
       quantity: l.qtyPick, pick_type: l.pickType, breaks_pallet: l.breaksPallet, seq: seq(),
+      ...(l.orders ? { orders: l.orders.map((o) => ({ order_no: o.orderNo, qty: o.qty })) } : {}),
     });
     if (l.moveQty > 0 && l.moveTo) {
       tasks.push({
@@ -123,8 +130,10 @@ export function buildPlan(
       sku: d.sku,
       description: d.description,
       order_nos: d.orderNos,
+      order_qtys: (d.orders ?? []).filter((o) => o.orderNo !== '').map((o) => ({ order_no: o.orderNo, qty: o.qty })),
       truck: d.truckType,
       destination: d.destination,
+      ship_to_location: d.shipToLocation,
       quantity_requested: d.qtyCartons,
       quantity_allocated: allocated.get(k) ?? 0,
       shortage_reason: shortReason.get(k) ?? null,

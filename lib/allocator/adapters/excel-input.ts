@@ -4,6 +4,7 @@ import { isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
 import { parseLocation } from '../pickpath';
 import type { DemandLine, StockBin, Warning } from '../types';
+import { addOrder } from '../orders';
 import { lookupUom } from '../uom-master';
 import { excelBatchText, excelDateUtc, excelSerialToUtc } from '../excel-date';
 
@@ -189,6 +190,7 @@ export async function loadWorkbook(path: string, config: AllocatorConfig): Promi
     if (existing) {
       existing.qtyCartons += qty;
       existing.orderNos.push(asString(row['Order No']));
+      addOrder(existing.orders!, asString(row['Order No']), qty);
       continue;
     }
 
@@ -196,6 +198,8 @@ export async function loadWorkbook(path: string, config: AllocatorConfig): Promi
       shipmentNumber,
       waveNo,
       orderNos: [asString(row['Order No'])],
+      // Each DO's own cartons, so every pick line can name its real DO (orders.ts).
+      orders: [{ orderNo: asString(row['Order No']), qty }],
       sku,
       description: asString(row['Description']) || master.get(sku)?.description || '',
       qtyCartons: qty,

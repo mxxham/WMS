@@ -9,10 +9,19 @@ export type ShipmentRow = {
   wave_id: string; wave_no: string; planned_date: string; planned_slot: string | null; wave_status: string; planned_truck: string | null;
   shipment_number: string; open_tasks: number; lines: number; todo: number; ok: number; mismatch: number; resolved: number;
   state: ShipmentState; loaded_at: string | null; loaded_by_name: string | null; truck: string | null; load_legacy: boolean;
+  /** 0123: the shipment's ship-to party and city; absent before 0123 is on the database */
+  destination?: string | null; ship_to_location?: string | null;
 };
 
 export function StateBadge({ state }: { state: ShipmentState }) {
   return <span className={cn("rounded px-2 py-0.5 text-xs font-semibold", SHIPMENT_STATE_TONE[state])}>{SHIPMENT_STATE_LABEL[state]}</span>;
+}
+
+/** Ship-to party and city, as one small line (only when the audit knows them). */
+export function destinationLine(s: { destination?: string | null; ship_to_location?: string | null }) {
+  const text = [s.destination, s.ship_to_location].filter((v): v is string => !!v).join(" — ");
+  if (!text) return null;
+  return <span className="block text-xs font-normal text-steel-500">Tujuan: {text}</span>;
 }
 
 export const shipmentHref = (s: { wave_id: string; shipment_number: string }) =>
@@ -32,7 +41,7 @@ export function ShipmentList({ rows, empty, showDate }: { rows: ShipmentRow[]; e
             const passed = s.ok + s.resolved;
             return (
               <tr key={`${s.wave_id}|${s.shipment_number}`} className={cn(s.state === "HAS_MISMATCH" && "bg-bad/5")}>
-                <Td><Link className="font-semibold underline" href={shipmentHref(s)}>{s.shipment_number}</Link></Td>
+                <Td><Link className="font-semibold underline" href={shipmentHref(s)}>{s.shipment_number}</Link>{destinationLine(s)}</Td>
                 {showDate && <Td className="whitespace-nowrap">{fmtDate(s.planned_date)}</Td>}
                 <Td>{s.wave_no}{s.planned_slot ? ` · ${s.planned_slot}` : ""}</Td>
                 <Td className="text-xs">{s.truck ?? s.planned_truck ?? "–"}</Td>

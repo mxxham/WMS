@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { BinScanInput } from "@/components/app/bin-scan-input";
 import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
-import { BinLeftCheck } from "./bin-left-check";
 import { followPick, type SheetLine, type SheetStock } from "@/lib/wave-sheet";
 import { draftNotes, isPlannedSource, linePayload, lineProblem, lineSummary, restAtOpen, samePerson, scanTarget, takeFrom } from "@/lib/pick-line";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
@@ -23,7 +22,7 @@ const REASONS = ["bin kosong / kurang", "palet terhalang", "karton rusak", "pick
 export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, waveId, onPosted }: {
   line: SheetLine; unit: string; stock: SheetStock[]; stockLoaded: boolean; bins: Set<string> | null; person: string; waveId: string; onPosted: () => void;
 }) {
-  const [mode, setMode] = useState<"view" | "edit" | "confirm" | "check">("view");
+  const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
   // Sesuai = the plan as is; Berbeda / Ubah = edited (decides the default reason).
   const [edited, setEdited] = useState(false);
   const [draft, setDraft] = useState<SheetLine>(line);
@@ -95,8 +94,9 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
       return;
     }
     setMessage(r.corrections ? { tone: "warn", text: `Diposting dengan ${r.corrections} koreksi stok kecil; bin ini akan dihitung ulang.` } : null);
-    setMode(line.pick ? "check" : "view");
-    if (!line.pick) onPosted();
+    // Posted: back to the list straight away (the "Cek sisa bin" question was removed 1 Nov 2026).
+    setMode("view");
+    onPosted();
   }
 
   const qtyOf = (l: SheetLine) => l.sources.reduce((n, s) => n + (Number(s.qty) || 0), 0);
@@ -201,10 +201,6 @@ export function PickLineCard({ line, unit, stock, stockLoaded, bins, person, wav
             <Button className="h-14 flex-1 text-base" disabled={busy || !!problem || !rackMatches(scanTarget(draft), rack)} onClick={() => void post(draft)}>{busy ? "Memposting…" : "Posting"}</Button>
           </div>
         </div>
-      )}
-
-      {mode === "check" && line.pick && (
-        <BinLeftCheck taskId={line.pick.id} person={person} unit={unit} onDone={() => { setMode("view"); onPosted(); }} />
       )}
 
       {message && <p role="alert" className={cn("text-sm", message.tone === "bad" ? "text-bad" : "text-warn")}>{message.text}</p>}

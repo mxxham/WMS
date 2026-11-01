@@ -33,6 +33,8 @@ export interface TaskRow {
   actual_from_bin: string | null;
   actual_batch_lot: string | null;
   actual_expiry_date: string | null;
+  /** the task's own DOs (pick_task_detail.do_nos, 0124: the one task_do_nos rule); absent before 0124 */
+  do_nos?: string[] | null;
   deviation_reason: string | null;
   /** typed name of the posting (0024; on pick_task_detail since 0067) */
   picked_by_name?: string | null;
@@ -193,7 +195,8 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
         return {
         shipmentNumber: shipment,
         waveNo: w.wave_no,
-        orderNos,
+        // The line's own DOs, as the first print and the audit show them; the shipment's list before 0124.
+        orderNos: t.do_nos ?? orderNos,
         sku: t.sku,
         description: t.description,
         location: a.bin,

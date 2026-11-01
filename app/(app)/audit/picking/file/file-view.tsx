@@ -56,7 +56,13 @@ export function FileView({ date, shipments, racks, view, source }: {
               <thead><tr><Th>Shipment</Th><Th>NO</Th><Th>Lolos audit</Th><Th>Status</Th></tr></thead>
               <tbody>{shipments.map((s) => (
                 <tr key={s.shipment_number} className={cn(s.mismatch > 0 && "bg-bad/5")}>
-                  <Td><Link className="font-semibold underline" href={sheetShipmentHref(date, s.shipment_number)}>{s.shipment_number}</Link></Td>
+                  <Td><Link className="font-semibold underline" href={sheetShipmentHref(date, s.shipment_number)}>{s.shipment_number}</Link>
+                    {(s.destination || s.ship_to_location) && (
+                      <span className="block text-xs font-normal text-steel-500">
+                        Tujuan: {[s.destination, s.ship_to_location].filter((v): v is string => !!v).join(" — ")}
+                      </span>
+                    )}
+                  </Td>
                   <Td>{s.wave_no ?? "–"}</Td>
                   <Td className="min-w-40">
                     <div className="text-xs tabular">{fmtNum(s.ok)}/{fmtNum(s.lines)} baris

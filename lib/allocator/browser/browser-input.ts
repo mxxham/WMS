@@ -4,8 +4,10 @@ import { isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
 import { parseLocation } from '../pickpath';
 import type { DemandLine, StockBin, Warning } from '../types';
+import { addOrder } from '../orders';
 import { lookupUom } from '../uom-master';
-import { excelBatchText, excelDateUtc, excelSerialToUtc } from '../excel-date';
+import { excelBatchText, excelDateUtc, excelSerialToUtc, fractionTimeHHMM, sheetTimeHHMM } from '../excel-date';
+import { fileDate } from '../earlier-waves';
 
 export const SHEETS = {
   stock: 'WMS',
@@ -20,6 +22,57 @@ export interface LoadedData {
   stagedBySku: Map<string, number>;
   master: Map<string, { description: string; upp: number; uom: string }>;
   warnings: Warning[];
+  /** the sheet the demand was read from: "Schedule of the day", or one day's sheet of a planning file */
+  scheduleSheet: string | null;
+  /** false when the workbook has no WMS stock sheet (a planning-outbound file): stock must come from the database */
+  hasStock: boolean;
+}
+
+/** A sheet the demand can be read from: its name, header row (1-based) and day, when known. */
+export interface ScheduleSheet { name: string; headerRow: number; day: string | null }
+
+const SCHEDULE_COLUMNS = ['Shipment Number', 'Material', 'Delivery quantity'];
+
+/**
+ * Every sheet holding outbound demand. The WMS file has one, "Schedule of the day".
+ * The raw "Planning Outbound" file has one sheet per day ("1 Oktober 2026", ...): a title,
+ * the day as a date cell in column A, then the same columns as "Schedule of the day" on row 4.
+ */
+export function scheduleSheets(wb: XLSX.WorkBook): ScheduleSheet[] {
+  const found: ScheduleSheet[] = [];
+  for (const name of wb.SheetNames) {
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, raw: true, defval: null, range: 0 }).slice(0, 10);
+    const idx = aoa.findIndex((r) => SCHEDULE_COLUMNS.every((c) => (r ?? []).some((v) => String(v ?? '').trim() === c)));
+    if (idx < 0) continue;
+    // The day: the sheet name ("20 Oktober 2026 "), else a date cell above the header.
+    let day = fileDate(name);
+    if (!day) {
+      const cell = aoa.slice(0, idx).map((r) => r?.[0]).find((v) => v instanceof Date || (typeof v === 'number' && v > 20000));
+      const d = cell === undefined ? null : asDate(cell);
+      day = d ? d.toISOString().slice(0, 10) : null;
+    }
+    found.push({ name, headerRow: idx + 1, day });
+  }
+  return found;
+}
+
+/**
+ * The demand sheet for a run on `asOf`: "Schedule of the day" when present, the only
+ * schedule sheet, or the planning file's sheet for that day. Throws (Indonesian, shown on
+ * the page) when none fits, naming the days the file does have.
+ */
+export function pickScheduleSheet(wb: XLSX.WorkBook, asOf: Date): ScheduleSheet {
+  const all = scheduleSheets(wb);
+  const named = all.find((s) => s.name === SHEETS.demand);
+  if (named) return named;
+  if (all.length === 1) return all[0];
+  const day = asOf.toISOString().slice(0, 10);
+  const match = all.filter((s) => s.day === day);
+  if (match.length === 1) return match[0];
+  if (all.length === 0) throw new Error('Tidak ada sheet jadwal di file ini (kolom "Shipment Number", "Material", "Delivery quantity" tidak ditemukan).');
+  if (match.length > 1) throw new Error(`File ini punya ${match.length} sheet untuk ${day}: ${match.map((s) => `"${s.name.trim()}"`).join(', ')}.`);
+  const days = all.map((s) => s.day ?? s.name.trim()).join(', ');
+  throw new Error(`File perencanaan ini tidak punya sheet untuk tanggal ${day}. Tanggal yang ada: ${days}.`);
 }
 
 /** Same field mapping and rules as adapters/excel-input.ts, for the in-browser workbook. */
@@ -28,7 +81,7 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
   const warnings: Warning[] = [];
 
   const master = new Map<string, { description: string; upp: number; uom: string }>();
-  for (const row of sheetRows(wb, SHEETS.master, 1)) {
+  for (const row of wb.Sheets[SHEETS.master] ? sheetRows(wb, SHEETS.master, 1) : []) {
     const sku = asSku(row['Material']);
     if (!sku) continue;
     master.set(sku, { description: asString(row['Material Description']), upp: asNumber(row['UPP']) || 1, uom: asString(row['UOM']) || 'CAR' });
@@ -38,7 +91,9 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
   const stagedBySku = new Map<string, number>();
   const seenBins = new Map<string, number>();
 
-  for (const row of sheetRows(wb, SHEETS.stock, SHEETS.stockHeaderRow)) {
+  // A planning-outbound file has no stock sheet: the page then plans against the database only.
+  const hasStock = Boolean(wb.Sheets[SHEETS.stock]);
+  for (const row of hasStock ? sheetRows(wb, SHEETS.stock, SHEETS.stockHeaderRow) : []) {
     const location = asString(row['Lokasi']).toUpperCase();
     if (!location) continue;
 
@@ -114,7 +169,8 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
 
   const merged = new Map<string, DemandLine>();
   // NO per shipment: filled down within a shipment, never across shipments (wave-numbers.ts).
-  const demandRows = [...sheetRows(wb, SHEETS.demand, 1)];
+  const schedule = pickScheduleSheet(wb, config.asOf);
+  const demandRows = [...sheetRows(wb, schedule.name, schedule.headerRow)];
   const waves = assignWaves(demandRows.map((row) => ({ shipment: asString(row['Shipment Number']), no: asString(row['NO']) })));
   const waveByShipment = waves.waveByShipment;
   warnings.push(...waves.warnings);
@@ -133,16 +189,20 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
     if (existing) {
       existing.qtyCartons += qty;
       existing.orderNos.push(asString(row['Order No']));
+      addOrder(existing.orders!, asString(row['Order No']), qty);
       continue;
     }
     merged.set(key, {
       shipmentNumber,
       waveNo,
       orderNos: [asString(row['Order No'])],
+      // Each DO's own cartons, so every pick line can name its real DO (orders.ts).
+      orders: [{ orderNo: asString(row['Order No']), qty }],
       sku,
       description: asString(row['Description']) || master.get(sku)?.description || '',
       qtyCartons: qty,
-      upp: asNumber(row['upp']) || master.get(sku)?.upp || 1,
+      // 0 when neither the row nor a master knows it (planning file): the allocator then takes the bin's UPP.
+      upp: asNumber(row['upp']) || master.get(sku)?.upp || (master.size ? 1 : 0),
       destination: asString(row['Destination']),
       shipToLocation: asString(row['Location of the ship-to party']),
       transport: asString(row['TRANSPORT']) || null,
@@ -169,7 +229,7 @@ export function loadWorkbookFromBuffer(buffer: ArrayBuffer, config: AllocatorCon
     }
   }
 
-  return { stock, demand: [...merged.values()], stagedBySku, master, warnings };
+  return { stock, demand: [...merged.values()], stagedBySku, master, warnings, scheduleSheet: schedule.name, hasStock };
 }
 
 type Row = Record<string, unknown>;
@@ -225,7 +285,9 @@ function asDate(v: unknown): Date | null {
 }
 
 function asTime(v: unknown): string | null {
-  if (v instanceof Date) return v.toISOString().slice(11, 16);
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : sheetTimeHHMM(v);
+  // A time cell without a time format arrives as the bare day fraction.
+  if (typeof v === 'number') return v > 0 && v < 1 ? fractionTimeHHMM(v) : null;
   const s = asString(v);
   if (!s) return null;
   const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(s);

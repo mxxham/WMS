@@ -99,7 +99,8 @@ export function AllocateClient() {
         pickfaceTargetQty: target === "upp" ? "upp" : Number(target),
       });
       const wb = loadWorkbookFromBuffer(file.buf, config);
-      if (wb.demand.length === 0) throw new Error('Sheet "Schedule of the day" kosong atau tidak ditemukan.');
+      if (wb.demand.length === 0) throw new Error(`Sheet "${wb.scheduleSheet?.trim() ?? "Schedule of the day"}" tidak berisi order.`);
+      if (source === "file" && !wb.hasStock) throw new Error('File ini tidak punya sheet "WMS" (file Planning Outbound). Pilih stok dari database.');
       let stock = wb.stock, staged = wb.stagedBySku, warnings = wb.warnings, demand = wb.demand;
       const supabase = createClient();
       // Stock net of what open tasks of other waves will still take or bring in.
@@ -133,6 +134,7 @@ export function AllocateClient() {
 
       // Build status lines for run summary (Indonesian)
       const statusLines: string[] = [];
+      if (wb.scheduleSheet && wb.scheduleSheet !== "Schedule of the day") statusLines.push(`jadwal dibaca dari sheet "${wb.scheduleSheet.trim()}"`);
       // For each ordinary-carry remainder planned, show items+cartons
       for (const match of carry) {
         if (match.mode !== 'carry' || match.ambiguous) continue;
@@ -161,6 +163,10 @@ export function AllocateClient() {
         const db = inventoryToStock(await loadPlanningStock(supabase, asOf, release), config);
         // The workbook's stock-sheet warnings do not apply here; its order warnings (a shipment without NO) do.
         stock = db.stock; staged = db.stagedBySku; warnings = [...db.warnings, ...wb.warnings.filter((w) => w.code === "SHIPMENT_WITHOUT_NO")];
+        // A planning file has no UPP column or MASTER DATA: take each SKU's UPP from the database stock.
+        const uppBySku = new Map<string, number>();
+        for (const b of stock) if (b.upp > 0 && !uppBySku.has(b.sku)) uppBySku.set(b.sku, b.upp);
+        demand = demand.map((d) => (d.upp > 0 ? d : { ...d, upp: uppBySku.get(d.sku) ?? 1 }));
       }
       const result = runPipeline(stock, demand, staged, config, warnings);
       // The file's picklist becomes the waves only where the database holds the same stock.
@@ -222,7 +228,7 @@ export function AllocateClient() {
         <CardHeader><CardTitle>1. Jadwal & opsi</CardTitle></CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
           <div className="md:col-span-3">
-            <Label htmlFor="wb">File WMS harian (.xlsx) — dipakai sheet &ldquo;Schedule of the day&rdquo;</Label>
+            <Label htmlFor="wb">File WMS harian atau Planning Outbound (.xlsx) — dipakai sheet &ldquo;Schedule of the day&rdquo;, atau sheet tanggal alokasi</Label>
             <label htmlFor="wb" className="mt-1 flex cursor-pointer items-center gap-3 rounded-md border-2 border-dashed border-steel-300 bg-paper p-4 hover:border-ckb">
               <FileSpreadsheet className="h-6 w-6 text-steel-500" />
               <span className="text-sm">{file ? file.name : "Pilih atau seret file"}</span>

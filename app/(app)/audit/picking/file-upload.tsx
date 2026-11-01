@@ -12,7 +12,7 @@ import { withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
 import { loadDispatchRules, loadPickfaceOverrides } from "@/lib/allocator/browser/plan-client";
 import { runPipeline } from "@/lib/allocator/pipeline";
-import { allocatorLines, K_ONE_SHEET, kOneLines, skuBatches, stagedLines, withBinRemaining, type SheetPickLine } from "@/lib/sheet-picklist";
+import { allocatorLines, K_ONE_SHEET, kOneLines, scheduleMeta, skuBatches, stagedLines, withBinRemaining, type SheetPickLine } from "@/lib/sheet-picklist";
 import { fmtNum } from "@/lib/utils";
 
 type Parsed = {
@@ -40,7 +40,9 @@ export function FileUpload({ date, existing }: { date: string; existing: number 
       const buf = await file.arrayBuffer();
       const XLSX = await import("xlsx");
       const book = XLSX.read(buf, { type: "array", cellDates: true });
-      const lines = kOneLines(book);
+      // Ship-to party and city per shipment (0123): the K_ONE sheet has no such columns, so both paths read them here.
+      const meta = scheduleMeta(book);
+      const lines = kOneLines(book, meta);
       if (lines.length) return setParsed({ file: file.name, source: "K_ONE", lines, short: [] });
 
       // K_ONE is empty: plan the picks the way the Alokasi page does, from this file's stock.
@@ -52,9 +54,10 @@ export function FileUpload({ date, existing }: { date: string; existing: number 
       });
       const wb = loadWorkbookFromBuffer(buf, config);
       if (!wb.demand.length) throw new Error(`Sheet ${K_ONE_SHEET} dan "Schedule of the day" kosong: tidak ada pick untuk diaudit.`);
+      if (!wb.hasStock) throw new Error('File ini tidak punya sheet "WMS" (file Planning Outbound): pakai file WMS harian.');
       const { allocation } = runPipeline(wb.stock, wb.demand, wb.stagedBySku, config, wb.warnings);
       const waveOf = new Map(wb.demand.map((d) => [d.shipmentNumber, d.waveNo]));
-      setParsed({ file: file.name, source: "ALLOCATOR", lines: allocatorLines(allocation), short: stagedLines(allocation.shortages, skuBatches(book), waveOf) });
+      setParsed({ file: file.name, source: "ALLOCATOR", lines: allocatorLines(allocation, meta), short: stagedLines(allocation.shortages, skuBatches(book), waveOf, meta) });
     } catch (e) {
       setError((e as Error).message);
     } finally { setBusy(false); }

@@ -9,6 +9,8 @@ export type PutawayRow = {
   error: string | null; // set when the row cannot be sent at all
   /** set when the row was sent to another bin than the sheet says ("Pindah ke bin lain", 0042) */
   sheet_bin?: string;
+  /** Rekap inbound: several pallets (distinct Pallet IDs) into this bin, summed into this line; their Excel rows */
+  pallet_lines?: number[];
 };
 
 /** Resolution of a conflict, chosen per row by the supervisor. "fix": the sheet is right, the bin is corrected (0066). */
@@ -122,8 +124,11 @@ type Col = keyof typeof COLUMNS;
 
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
+/** Optional: the raw "Rekap inbound" file has it, the WMS "data putaway" sheet does not. */
+const PALLET_ID = ["pallet id"];
+
 /** Finds the header row (within the first 10 rows) and each column's index. */
-function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, number> } | null {
+function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, number>; pallet: number } | null {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const cells = (rows[r] ?? []).map(norm);
     const cols = {} as Record<Col, number>;
@@ -131,21 +136,41 @@ function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, n
       const idx = aliases.map((a) => cells.indexOf(a)).find((i) => i >= 0);
       if (idx !== undefined) cols[col] = idx;
     }
-    if (Object.keys(cols).length === Object.keys(COLUMNS).length) return { headerRow: r, cols };
+    if (Object.keys(cols).length === Object.keys(COLUMNS).length) return { headerRow: r, cols, pallet: cells.findIndex((c) => PALLET_ID.includes(c)) };
   }
   return null;
 }
 
 /** Reads the sheet into rows. Throws when the expected columns are missing. */
 export function parsePutawaySheet(data: SheetRows): PutawayRow[] {
+  return parsePutawayDetail(data).rows;
+}
+
+/**
+ * The sheet's rows plus what a raw "Rekap inbound" day sheet adds (it has a Pallet ID column):
+ * - pallets with a Pallet ID but no BIN Location are still waiting in staging: not rows, only counted;
+ * - two pallets with different Pallet IDs into one bin with the same batch + expiry are one
+ *   putaway of their summed qty (24 Oct: two drums into CB18A02), not a duplicate.
+ *   The same Pallet ID twice, or no Pallet ID column, stays a duplicate error.
+ */
+export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pending: { pallets: number; quantity: number } } {
   const h = findHeader(data.rows);
   if (!h) throw new Error("Kolom tidak ditemukan. Sheet putaway butuh: BIN Location, Item Code, ACTUAL QTY, Batch No, Expired Date.");
   const out: PutawayRow[] = [];
   const seen = new Map<string, number>();
+  const firstOf = new Map<string, { row: PutawayRow; pallets: Set<string> }>();
+  const pending = { pallets: 0, quantity: 0 };
   for (let i = h.headerRow + 1; i < data.rows.length; i++) {
     const r = data.rows[i];
     const get = (c: Col) => r[h.cols[c]];
     const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === "";
+    const pallet = h.pallet >= 0 ? String(r[h.pallet] ?? "").trim() : "";
+    if (pallet && blank(get("bin_code"))) {
+      pending.pallets++;
+      const q = Number(get("quantity"));
+      if (Number.isFinite(q) && q > 0) pending.quantity += q;
+      continue;
+    }
     if (blank(get("bin_code")) && blank(get("sku")) && blank(get("quantity"))) continue;
 
     const bin_code = String(get("bin_code") ?? "").trim().toUpperCase();
@@ -162,10 +187,51 @@ export function parsePutawaySheet(data: SheetRows): PutawayRow[] {
     else if (!exp.iso) error = `Tanggal expired ${exp.problem === "kosong" ? "kosong" : `tidak valid: ${exp.problem}`}`;
     else {
       const key = `${bin_code}|${sku}|${batch_lot}|${exp.iso}`;
-      if (seen.has(key)) error = `Duplikat dengan baris ${seen.get(key)}`;
+      const first = firstOf.get(key);
+      if (first && pallet && first.pallets.size > 0 && !first.pallets.has(pallet)) {
+        // Another pallet into the same bin: one putaway of the summed qty.
+        first.pallets.add(pallet);
+        first.row.quantity = (first.row.quantity ?? 0) + quantity!;
+        first.row.pallet_lines = [...(first.row.pallet_lines ?? [first.row.line]), data.lines[i]];
+        continue;
+      }
+      if (seen.has(key)) error = `Duplikat dengan baris ${seen.get(key)}${pallet ? ` (Pallet ID ${pallet} sama)` : ""}`;
       else seen.set(key, data.lines[i]);
     }
-    out.push({ line: data.lines[i], bin_code, sku, batch_lot, quantity, expiry_date: exp.iso, error });
+    const row: PutawayRow = { line: data.lines[i], bin_code, sku, batch_lot, quantity, expiry_date: exp.iso, error };
+    if (!error) {
+      const key = `${bin_code}|${sku}|${batch_lot}|${exp.iso}`;
+      if (!firstOf.has(key)) firstOf.set(key, { row, pallets: new Set(pallet ? [pallet] : []) });
+    }
+    out.push(row);
   }
-  return out;
+  return { rows: out, pending };
+}
+
+/** "01".."31": a day sheet of the raw "Rekap inbound <yyyymm>" file. */
+const DAY_SHEET = /^\s*(\d{1,2})\s*$/;
+
+/** The calendar day a sheet stands for: a day sheet of a file named "...<yyyymm>...". */
+export function sheetDay(sheet: string, fileName: string): string | null {
+  const d = DAY_SHEET.exec(sheet);
+  const ym = /(20\d{2})(0[1-9]|1[0-2])(?!\d)/.exec(fileName);
+  if (!d || !ym) return null;
+  const day = Number(d[1]);
+  const iso = `${ym[1]}-${ym[2]}-${String(day).padStart(2, "0")}`;
+  // 31 in a 30-day month etc.: not a real day.
+  return day >= 1 && new Date(`${iso}T00:00:00Z`).getUTCDate() === day ? iso : null;
+}
+
+/**
+ * The sheet to open first: the WMS file's "data putaway"; in a "Rekap inbound" file the day sheet
+ * of `arrival` (the goods' arrival day), else its last day sheet up to that day, else the first sheet.
+ */
+export function pickPutawaySheet(sheets: string[], fileName: string, arrival: string): string {
+  const named = sheets.find((n) => PUTAWAY_SHEET.test(n));
+  if (named) return named;
+  const days = sheets.map((n) => ({ n, day: sheetDay(n, fileName) })).filter((x): x is { n: string; day: string } => x.day !== null);
+  const exact = days.find((x) => x.day === arrival);
+  if (exact) return exact.n;
+  const before = days.filter((x) => x.day <= arrival).sort((a, b) => a.day.localeCompare(b.day)).pop();
+  return before?.n ?? sheets[0];
 }
