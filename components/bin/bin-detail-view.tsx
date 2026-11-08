@@ -9,6 +9,9 @@ import type { Role } from "@/lib/types";
 import Link from "next/link";
 import { HOLD_REASONS, REASON_CODES, type HoldReason, type ReasonCode } from "@/lib/inventory-control";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { changeText, dayKey, emptiedToday, type DayRow } from "@/lib/bin-day-stock";
 
 const rowTone: Record<ExpiryStatus, string> = {
   // A wash only: the ExpiryBadge in each row carries the state in words (DESIGN.md §5).
@@ -17,11 +20,34 @@ const rowTone: Record<ExpiryStatus, string> = {
   ok: "",
   unknown: "",
 };
+/**
+ * Today's Laporan WMS harian rows of one bin (wms_day_report, 0055), so Isi bin can show this morning's on hand next
+ * to the current quantity. Re-read whenever the bin's stock changes. null while loading or when it cannot be read:
+ * the table then shows the current quantity only.
+ */
+function useBinDay(code: string, version: unknown): DayRow[] | null {
+  const [rows, setRows] = useState<DayRow[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    createClient().rpc("wms_day_report", { p_date: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }) })
+      .select("bin_code, sku, description, uom, batch_lot, expiry_date, on_hand, pick, b_out, b_in, remain").eq("bin_code", code)
+      .then(({ data, error }) => { if (live) setRows(error ? null : ((data ?? []) as DayRow[])); });
+    return () => { live = false; };
+  }, [code, version]);
+  return rows;
+}
+
 const moveLabel: Record<string, string> = { inbound: "Terima", putaway: "Putaway", picking: "Pick", transfer: "Transfer", adjustment: "Adjust" };
 
 export function BinDetailView({ detail, role, onChanged, compact = false }: { detail: BinDetail; role: Role; onChanged: () => void; compact?: boolean }) {
   const { bin, inventory, movements, fillRatio } = detail;
   const pct = fillRatio === null ? null : Math.round(fillRatio * 100);
+  const day = useBinDay(bin.bin_code, inventory);
+  const dayOf = new Map((day ?? []).map((r) => [dayKey(r), r]));
+  const keyOf = (r: (typeof inventory)[number]) => dayKey({ sku: r.items?.sku ?? "", batch_lot: r.batch_lot, expiry_date: r.expiry_date });
+  const gone = day ? emptiedToday(day, new Set(inventory.map(keyOf))) : [];
+  /** This morning's on hand of a current line; without a report row (not loaded) the column shows a dash. */
+  const morning = (r: (typeof inventory)[number]) => { const d = dayOf.get(keyOf(r)); return d ? fmtNum(Number(d.on_hand)) : "–"; };
 
   return (
     <div className="space-y-5">
@@ -43,8 +69,10 @@ export function BinDetailView({ detail, role, onChanged, compact = false }: { de
       <MovementActions bin={bin} inventory={inventory} role={role} onDone={onChanged} />
 
       <section>
-        <h2 className="mb-2 font-cond text-lg font-semibold">Isi bin <span className="text-sm font-normal text-steel-500">urut FEFO</span></h2>
-        {inventory.length === 0 ? (
+        <h2 className="font-cond text-lg font-semibold">Isi bin <span className="text-sm font-normal text-steel-500">urut FEFO</span></h2>
+        <p className="mb-2 text-xs text-steel-500">On hand pagi = stok pagi ini setelah putaway, sebelum picking. Sekarang = sisa saat ini (Remain).
+          Sama dengan Laporan WMS harian.</p>
+        {inventory.length === 0 && gone.length === 0 ? (
           <p className="rounded-md border border-dashed border-steel-300 p-4 text-sm text-steel-500">Bin kosong. Gunakan Putaway untuk mengisi.</p>
         ) : (
           <>
@@ -58,30 +86,51 @@ export function BinDetailView({ detail, role, onChanged, compact = false }: { de
                       <div><div className="font-semibold tabular">{r.items?.sku}</div><div className="text-xs text-steel-500">{r.items?.description}</div></div>
                       <ExpiryBadge status={st} />
                     </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs tabular">
+                    <div className="mt-1 text-sm tabular">
+                      On hand pagi <span className="font-semibold">{morning(r)}</span> · sekarang <span className="text-base font-semibold">{fmtNum(r.quantity)}</span> {r.items?.uom}
+                      {changeText(dayOf.get(keyOf(r))) && <span className="block text-xs text-steel-500">Hari ini: {changeText(dayOf.get(keyOf(r)))}</span>}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs tabular">
                       <div><div className="text-steel-500">Batch</div>{r.batch_lot || "–"}</div>
-                      <div><div className="text-steel-500">Qty</div><span className="text-base font-semibold">{fmtNum(r.quantity)}</span> {r.items?.uom}</div>
                       <div><div className="text-steel-500">Expired</div>{fmtDate(r.expiry_date)}{d !== null && <div>{d} hari</div>}</div>
                     </div>
                     {!!r.held && <HeldNote held={r.held} reasons={r.hold_reasons} />}
                   </li>
                 );
               })}
+              {gone.map((g) => (
+                <li key={dayKey(g)} className="rounded-md border border-dashed border-steel-300 p-3 text-sm">
+                  <span className="font-semibold tabular">{g.sku}</span> · {g.batch_lot || "tanpa batch"}
+                  <div className="tabular">On hand pagi <span className="font-semibold">{fmtNum(Number(g.on_hand))}</span> · sekarang <span className="font-semibold">0</span></div>
+                  <div className="text-xs text-steel-500">Hari ini: {changeText(g)}</div>
+                </li>
+              ))}
             </ul>
             <div className="hidden sm:block">
               <Table>
-                <thead><tr><Th>SKU</Th><Th>Deskripsi</Th><Th>Batch/Lot</Th><Th className="text-right">Qty</Th><Th>UoM</Th><Th>Expired</Th><Th className="text-right">Sisa hari</Th><Th>Status</Th></tr></thead>
+                <thead><tr><Th>SKU</Th><Th>Deskripsi</Th><Th>Batch/Lot</Th><Th>Expired</Th><Th className="text-right">Sisa hari</Th>
+                  <Th className="text-right">On hand pagi</Th><Th>Hari ini</Th><Th className="text-right">Sekarang</Th><Th>UoM</Th><Th>Status</Th></tr></thead>
                 <tbody>
                   {inventory.map((r) => {
                     const st = expiryStatus(r.expiry_date);
                     return (
                       <tr key={r.id} className={rowTone[st]}>
                         <Td>{r.items?.sku}</Td><Td>{r.items?.description}</Td><Td>{r.batch_lot || "–"}</Td>
+                        <Td>{fmtDate(r.expiry_date)}</Td><Td className="text-right">{daysUntil(r.expiry_date) ?? "–"}</Td>
+                        <Td className="text-right tabular">{morning(r)}</Td>
+                        <Td className="text-xs text-steel-500">{changeText(dayOf.get(keyOf(r))) || "–"}</Td>
                         <Td className="text-right font-semibold">{fmtNum(r.quantity)}{!!r.held && <HeldNote held={r.held} reasons={r.hold_reasons} />}</Td><Td>{r.items?.uom ?? "–"}</Td>
-                        <Td>{fmtDate(r.expiry_date)}</Td><Td className="text-right">{daysUntil(r.expiry_date) ?? "–"}</Td><Td><ExpiryBadge status={st} /></Td>
+                        <Td><ExpiryBadge status={st} /></Td>
                       </tr>
                     );
                   })}
+                  {gone.map((g) => (
+                    <tr key={dayKey(g)} className="text-steel-500">
+                      <Td>{g.sku}</Td><Td>{g.description}</Td><Td>{g.batch_lot || "–"}</Td><Td>{fmtDate(g.expiry_date)}</Td><Td />
+                      <Td className="text-right tabular">{fmtNum(Number(g.on_hand))}</Td><Td className="text-xs">{changeText(g) || "–"}</Td>
+                      <Td className="text-right font-semibold">0</Td><Td>{g.uom ?? "–"}</Td><Td>habis hari ini</Td>
+                    </tr>
+                  ))}
                 </tbody>
               </Table>
             </div>

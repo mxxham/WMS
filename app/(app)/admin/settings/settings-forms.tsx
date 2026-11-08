@@ -3,7 +3,8 @@ import { ActionForm } from "@/components/app/action-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { Layout } from "@/lib/warehouse-types";
-import { recomputeAbcAction, saveLayoutAction, setBinStatusAction } from "../actions";
+import Link from "next/link";
+import { saveLayoutAction } from "../actions";
 
 export function SettingsForms({ layout }: { layout: Layout & { _note?: string } }) {
   const f = (name: keyof Layout, label: string) => (
@@ -38,23 +39,19 @@ export function SettingsForms({ layout }: { layout: Layout & { _note?: string } 
       </Card>
       <Card>
         <CardHeader><CardTitle>Status & kelas bin</CardTitle></CardHeader>
-        <CardContent>
-          <ActionForm action={setBinStatusAction} submit="Perbarui bin">
-            <div><Label htmlFor="codes">Kode bin</Label><textarea id="codes" name="codes" rows={3} className="w-full rounded-md border border-steel-300 p-2 font-mono text-sm" placeholder="CC19A01 CC19A02" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label htmlFor="status">Status</Label><Select id="status" name="status"><option value="active">Aktif</option><option value="blocked">Diblokir</option></Select></div>
-              <div><Label htmlFor="abc">Kelas ABC lokasi</Label><Select id="abc" name="abc"><option value="">Tidak diubah</option><option>A</option><option>B</option><option>C</option><option value="clear">Kosongkan</option></Select></div>
-            </div>
-          </ActionForm>
+        <CardContent className="space-y-2 text-sm">
+          {/* 0132: blocking, bins that do not exist, lending racks to CKB 3PL, new racks and ABC per bin have one page. */}
+          <p className="text-steel-500">Blokir bin, tandai bin tidak ada, pinjamkan rak ke CKB 3PL, tambah rak baru, dan kelas ABC lokasi
+            diatur di Rak &amp; Lokasi, dengan alasan dan riwayat.</p>
+          <Link href="/racks" className="inline-block rounded-md bg-ckb px-4 py-2 font-semibold text-white">Buka Rak &amp; Lokasi</Link>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Hitung ulang kelas ABC SKU</CardTitle></CardHeader>
-        <CardContent>
-          <ActionForm action={recomputeAbcAction} submit="Hitung ulang">
-            <p className="text-sm text-steel-500">A = SKU yang menyumbang 80% baris picking pertama, B = 15% berikutnya, C = sisanya dan SKU tanpa picking.</p>
-            <div><Label htmlFor="days">Periode (hari)</Label><Input id="days" name="days" type="number" min={7} defaultValue={90} /></div>
-          </ActionForm>
+        <CardHeader><CardTitle>Kelas ABC SKU</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-steel-500">Kelas ABC dihitung otomatis tiap awal bulan dari baris picking bulan lalu, dengan riwayat per bulan.
+            Batas A dan B ada di Aturan inventory di atas.</p>
+          <Link href="/abc" className="inline-block rounded-md bg-ckb px-4 py-2 font-semibold text-white">Buka Kelas ABC</Link>
         </CardContent>
       </Card>
     </div>

@@ -64,7 +64,7 @@ create or replace function pg_temp.rack_bins() returns table (zone text, level t
 language sql stable as $$
   select b.zone, b.level, coalesce(sum(i.quantity), 0) > 0
   from public.bins b left join public.inventory i on i.bin_id = b.id
-  where b.rack is not null and b.rack <> '' and b.zone not in ('CG', 'CH')
+  where b.rack is not null and b.rack <> '' and b.status = 'active' and b.owner = 'SHELL'  -- 0132: Shell's usable racks
   group by b.id
 $$;
 
@@ -73,8 +73,8 @@ select pg_temp.check('bins.total counts every bin',
 select pg_temp.check('bins.occupied counts bins holding stock',
   pg_temp.f('bins', 'occupied')::int = (select count(*) from public.bin_summary where total_qty > 0));
 select pg_temp.check('bins.blocked counts blocked bins',
-  pg_temp.f('bins', 'blocked')::int = (select count(*) from public.bin_summary where status = 'blocked'));
-select pg_temp.check('bins.rack_total keeps floor + CKB 3PL aisles out',
+  pg_temp.f('bins', 'blocked')::int = (select count(*) from public.bin_summary where block_kind = 'BLOCKED'));  -- 0132: pillars, plans apart
+select pg_temp.check('bins.rack_total counts Shell usable rack positions only (0132)',
   pg_temp.f('bins', 'rack_total')::int = (select count(*) from pg_temp.rack_bins()));
 select pg_temp.check('bins.rack_occupied counts occupied rack positions only',
   pg_temp.f('bins', 'rack_occupied')::int = (select count(*) from pg_temp.rack_bins() where occupied));

@@ -6,10 +6,14 @@ import type { LineItem, LineProps } from "./line-menu";
 import type { ProblemCounts } from "./problems-summary";
 import type { OutboundDetail, Rpc, TaskWait } from "./wave-parts";
 
-/** Search: free text on SKU / bin / description, only open lines, only lines with a problem. */
-export type RowFilter = { q: string; onlyOpen: boolean; onlyProblems: boolean };
-export const NO_FILTER: RowFilter = { q: "", onlyOpen: false, onlyProblems: false };
-export const filterActive = (f: RowFilter) => f.q.trim() !== "" || f.onlyOpen || f.onlyProblems;
+/** Search: free text on SKU / bin / description, only open lines, only lines with a problem, only finished waves. */
+export type RowFilter = { q: string; onlyOpen: boolean; onlyProblems: boolean; onlyDone: boolean };
+export const NO_FILTER: RowFilter = { q: "", onlyOpen: false, onlyProblems: false, onlyDone: false };
+export const filterActive = (f: RowFilter) => f.q.trim() !== "" || f.onlyOpen || f.onlyProblems || f.onlyDone;
+/** The wave-level half of the filter (onlyDone is about the wave, not its lines): a finished wave is one the day closed. */
+export function waveMatches(w: WaveRow, f: RowFilter): boolean {
+  return !f.onlyDone || w.status === "COMPLETED";
+}
 export function rowMatches(it: LineItem, f: RowFilter, short: Set<string>, waits: Record<string, TaskWait>): boolean {
   const ts = it.kind === "pair" ? [it.pick, it.move] : [it.task];
   const q = f.q.trim().toUpperCase();
@@ -39,6 +43,8 @@ export type WaveModel = {
   short: Set<string>; waits: Record<string, TaskWait>; audit: Record<string, ShipmentState>; rest: Map<string, string>;
   /** manual DO numbers per wave+shipment (0079), keyed `${wave_id}|${shipment_number}` */
   dos: Record<string, string[]>;
+  /** manual loading number per shipment of the day (Urutan muat, 0128), keyed by shipment number */
+  loadNos: Record<string, number>;
   /** pick id → its pallet's relokasi when that relokasi is already posted (0073): cancelling finishes the pallet break */
   postedMoveOf: Map<string, TaskRow>;
   facts: Map<string, WaveFacts>; ordered: WaveRow[]; step: DayStep; problems: ProblemCounts;

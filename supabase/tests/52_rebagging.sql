@@ -94,6 +94,11 @@ select id, role::text::ckb_role from profiles
 where id in (current_setting('t.op')::uuid, current_setting('t.sup')::uuid, current_setting('t.adm')::uuid)
 on conflict (user_id) do update set role = excluded.role;
 
+-- 0132: rebagging works on CKB 3PL racks; the fixture bins are lent to CKB after their stock is booked.
+update public.bins set owner = 'CKB' where bin_code in ('CA01A01','CA01A02','CB01B01','CB01B02');
+-- Every movement this file writes directly is CKB 3PL stock on those racks.
+select set_config('app.ckb_movement', 'on', false);
+
 set role authenticated;
 
 -- =====================================================================
@@ -120,6 +125,12 @@ select set_rebagging_outputs(current_setting('t.job1')::uuid,
     {"bin_code":"CB01B02","quantity":50,"unit":"CAR","pkg_count":2}]'::jsonb,
   'Operator Satu');
 select pg_temp.check('set_rebagging_outputs ok', true);
+select pg_temp.check('rebagging output refused on a Shell rack bin (0132)',
+  pg_temp.fails($q$select set_rebagging_outputs(current_setting('t.job1')::uuid,
+    '[{"bin_code":"CA02A01","quantity":50,"unit":"CAR","pkg_count":2}]'::jsonb, 'Operator Satu')$q$, 'bukan rak CKB'));
+select pg_temp.check('rebagging source refused on a Shell rack bin (0132)',
+  pg_temp.fails($q$select set_rebagging_sources(current_setting('t.job1')::uuid,
+    '[{"source_type":"STOCK","bin_code":"CA01C01","quantity":1,"unit":"CAR","pkg_count":1}]'::jsonb, 'Operator Satu')$q$, 'bukan rak CKB'));
 
 -- 1d. Open job
 select open_rebagging_job(current_setting('t.job1')::uuid, 'Operator Satu');
@@ -136,9 +147,10 @@ select pg_temp.check('hold on CA01A02 qty 40', exists(select 1 from stock_holds 
 
 -- 1g. Picking movement digging into held stock NOW FAILS (guard_held_stock):
 --     CA01A01 holds 60 of 100; only 40 unheld carts remain, so a 50-cart pick
---     must be refused.
+--     must be refused. (0132: CA01A01 is a CKB rack here, so the pick is posted as a CKB movement;
+--     a Shell pick would be refused by ownership before the hold is even checked.)
 select pg_temp.check('picking held stock in CA01A01 FAILS',
-  pg_temp.fails($q$insert into movements (user_id, type, item_id, batch_lot, quantity, from_bin_id, expiry_date, note, by_name) values (current_setting('t.op')::uuid, 'picking', (select id from items where sku='RBTEST001'), 'B1', 50, (select id from bins where bin_code='CA01A01'), '2030-12-31', 'held pick test', 'Picker')$q$, 'ditahan'));
+  pg_temp.fails($q$select set_config('app.ckb_movement', 'on', true); insert into movements (user_id, type, item_id, batch_lot, quantity, from_bin_id, expiry_date, note, by_name) values (current_setting('t.op')::uuid, 'picking', (select id from items where sku='RBTEST001'), 'B1', 50, (select id from bins where bin_code='CA01A01'), '2030-12-31', 'held pick test', 'Picker')$q$, 'ditahan'));
 
 -- =====================================================================
 -- TEST 2: Record -> Submit blocked without evidence

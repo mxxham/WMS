@@ -30,6 +30,9 @@ const homes: Home[] = [
   { label: 'Batalkan wave', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'MenuDanger' },
   { label: 'Buka lagi', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'ReopenWaveButton' },
   { label: 'Pulihkan wave', file: 'wave-menu.tsx', host: 'wave-menu.tsx', uses: 'RestoreWaveButton' },
+  // shipment paperwork: folded into Lainnya so the wave header keeps two controls
+  { label: 'Urutan muat', file: 'load-no-dialog.tsx', host: 'wave-menu.tsx', uses: 'LoadNoButton' },
+  { label: 'DO no', file: 'do-dialog.tsx', host: 'wave-menu.tsx', uses: 'DoButton' },
   // line level
   { label: 'Posting', file: 'task-post-dialog.tsx', host: 'line-menu.tsx', uses: 'TaskPostDialog' },
   { label: 'Posting', file: 'pair-post-dialog.tsx', host: 'line-menu.tsx', uses: 'PairPostDialog' },

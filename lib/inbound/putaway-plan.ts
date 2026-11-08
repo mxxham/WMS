@@ -1,5 +1,6 @@
 import { lookupUom } from "@/lib/allocator/uom-master";
 import { RACK_BIN_REGEX } from "@/config/warehouse";
+import { DEFAULT_CONFIG } from "@/lib/allocator/config";
 
 /**
  * Auto putaway for a checked receipt (spec docs/superpowers/specs/2026-10-28-inbound-plan-autoputaway-design.md).
@@ -50,49 +51,83 @@ const parse = (code: string): Bin | null => {
   return m ? { code, aisle: m[1], rack: Number(m[2]), level: m[3], position: m[4] } : null;
 };
 
+/** A stable number per text, so ties between racks are broken without favouring a name (FNV-1a). */
+function hash(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
 /**
  * Split each line into pallets (`floor(qty / upp)` full + one partial) and choose a bin for each:
  * - partial pallet (below UPP): the SKU's pickface (level A); else an empty level-A bin;
- * - full pallet: an empty allowed bin, grouped per rack: the SKU fills one rack (nearest its pickface, or
- *   the rack with the most free room) before the nearest next one; levels B..E before A. A bin is used once.
+ * - full pallet: an empty allowed bin; levels B..E before A; a bin is used once.
+ *
+ * Grouping by SKU (a rack = aisle + bay, e.g. CB01). A SKU keeps filling the rack it started in; a new rack is,
+ * in this order: 1. a rack that already holds the SKU (stock, or chosen by a receipt not posted yet), the one
+ * holding most of it first; 2. a rack with no other SKU; 3. any rack. Inside each step: nearest the SKU's own
+ * stock or pickface, then the most free room, then a tie-break by hash, so no aisle or bay wins by its name.
  */
-export function planPutaway(input: { lines: PutawayLine[]; emptyBins: string[]; pickfaces: Map<string, string> }):
-  { pallets: PalletPlan[]; warnings: string[] } {
+export function planPutaway(input: {
+  lines: PutawayLine[]; emptyBins: string[]; pickfaces: Map<string, string>;
+  /** where each SKU already is: bins with stock and bins other receipts have chosen */
+  occupied?: { bin: string; sku: string }[];
+}): { pallets: PalletPlan[]; warnings: string[] } {
   const pickfaceBins = new Set(input.pickfaces.values());
   const free = input.emptyBins.map(parse).filter((b): b is Bin => !!b && !pickfaceBins.has(b.code));
   const used = new Set<string>();
   const warnings: string[] = [];
   const pallets: PalletPlan[] = [];
 
-  // Grouping: each SKU keeps filling its current rack (aisle + bay, e.g. CB01) until no allowed bin is left
-  // there, then moves to the nearest rack. The first rack is the one nearest the SKU's pickface; without a
-  // pickface, the rack with the most free allowed bins, so no aisle or bay is favoured by its name.
-  const current = new Map<string, string>();
   const rackKey = (b: Bin) => `${b.aisle}${String(b.rack).padStart(2, "0")}`;
-  const distance = (from: { aisle: string; rack: number }, to: Bin) =>
-    from.aisle === to.aisle ? Math.abs(to.rack - from.rack)
-      : 1000 + Math.abs(to.aisle.charCodeAt(1) - from.aisle.charCodeAt(1)) * 100 + Math.abs(to.rack - from.rack);
+  // What each rack holds: SKU -> pallets of it. Updated as this plan places pallets, so two SKUs of one
+  // receipt avoid each other's rack too.
+  const holds = new Map<string, Map<string, number>>();
+  const hold = (rack: string, sku: string) => {
+    const m = holds.get(rack) ?? holds.set(rack, new Map()).get(rack)!;
+    m.set(sku, (m.get(sku) ?? 0) + 1);
+  };
+  for (const o of input.occupied ?? []) { const b = parse(o.bin); if (b) hold(rackKey(b), o.sku); }
 
-  const choose = (sku: string, levels: string[], order: string[]): Bin | null => {
+  // Bays 01..20 face one side and 21..40 the other, back to back (bay 21 behind bay 01): compare by position along the aisle.
+  const side = DEFAULT_CONFIG.baysPerSide;
+  const along = (rack: number) => (side > 0 && rack > side ? rack - side : rack);
+  const distance = (from: { aisle: string; rack: number }, to: { aisle: string; rack: number }) => {
+    const d = Math.abs(along(to.rack) - along(from.rack)) + (side > 0 && (to.rack > side) !== (from.rack > side) ? 1 : 0);
+    return from.aisle === to.aisle ? d : 1000 + Math.abs(to.aisle.charCodeAt(1) - from.aisle.charCodeAt(1)) * 100 + d;
+  };
+  const rackPos = (rack: string) => ({ aisle: rack.slice(0, 2), rack: Number(rack.slice(2)) });
+
+  const current = new Map<string, string>();
+  /** `key` is the SKU, or `<sku>|sisa` for its leftovers, which group on their own (level A). */
+  const choose = (key: string, sku: string, levels: string[], order: string[]): Bin | null => {
     const rank = (l: string) => order.indexOf(l);
     const cands = free.filter((b) => !used.has(b.code) && levels.includes(b.level));
     if (!cands.length) return null;
     const byRack = new Map<string, Bin[]>();
     for (const b of cands) byRack.set(rackKey(b), [...(byRack.get(rackKey(b)) ?? []), b]);
 
-    let rack = current.get(sku);
+    let rack = current.get(key);
     if (!rack || !byRack.has(rack)) {
-      const pf = parse(input.pickfaces.get(sku) ?? "");
-      const anchor = rack ? { aisle: rack.slice(0, 2), rack: Number(rack.slice(2)) } : pf;
+      const own = (r: string) => holds.get(r)?.get(sku) ?? 0;
+      const others = (r: string) => [...(holds.get(r)?.keys() ?? [])].filter((k) => k !== sku).length;
+      // Anchor: the rack just filled, else the rack holding most of the SKU, else its pickface.
+      const home = [...holds.keys()].filter((r) => own(r) > 0).sort((a, b) => own(b) - own(a) || a.localeCompare(b))[0];
+      const anchor = rack ? rackPos(rack) : home ? rackPos(home) : parse(input.pickfaces.get(sku) ?? "");
+      const step = (r: string) => (own(r) > 0 ? 0 : others(r) === 0 ? 1 : 2);
       const racks = [...byRack.entries()];
-      racks.sort(([ka, a], [kb, b]) => anchor
-        ? distance(anchor, a[0]) - distance(anchor, b[0]) || b.length - a.length || ka.localeCompare(kb)
-        : b.length - a.length || ka.localeCompare(kb));
+      racks.sort(([ka, a], [kb, b]) =>
+        step(ka) - step(kb)
+        || (step(ka) === 0 ? own(kb) - own(ka) : 0)
+        || (anchor ? distance(anchor, a[0]) - distance(anchor, b[0]) : 0)
+        || b.length - a.length
+        || hash(`${sku}|${ka}`) - hash(`${sku}|${kb}`));
       rack = racks[0][0];
-      current.set(sku, rack);
+      current.set(key, rack);
     }
     const pick = byRack.get(rack)!.sort((a, b) => rank(a.level) - rank(b.level) || a.position.localeCompare(b.position))[0];
     used.add(pick.code);
+    hold(rack, sku);
     return pick;
   };
 
@@ -113,11 +148,11 @@ export function planPutaway(input: { lines: PutawayLine[]; emptyBins: string[]; 
         const rest = LEFTOVER_LEVELS[pack];
         const pf = parse(input.pickfaces.get(l.sku) ?? "");
         if (pf && rest.includes(pf.level)) { pallets.push({ ...base, bin: pf.code, why: null }); return; }
-        const bin = choose(`${l.sku}|sisa`, rest, LEVEL_ORDER);
+        const bin = choose(`${l.sku}|sisa`, l.sku, rest, LEVEL_ORDER);
         pallets.push({ ...base, bin: bin?.code ?? null, why: bin ? null : `Tidak ada bin kosong level ${rest.join("/")}` });
         return;
       }
-      const bin = choose(l.sku, allowed, LEVEL_ORDER);
+      const bin = choose(l.sku, l.sku, allowed, LEVEL_ORDER);
       pallets.push({ ...base, bin: bin?.code ?? null, why: bin ? null : `Tidak ada bin kosong level ${allowed.join("/")}` });
     });
   }

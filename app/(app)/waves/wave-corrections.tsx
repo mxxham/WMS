@@ -16,6 +16,7 @@ import { ImpactNote } from "./impact-note";
 import { reopened } from "./sku-context";
 import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
 import { pgrstValue } from "@/lib/postgrest";
+import { usableForShell } from "@/lib/racks";
 
 /** A dialog with the person's name, a reason and an action; closes and refreshes on success. */
 function CorrectionDialog({ trigger, title, children, confirmLabel, run, ready = true }: {
@@ -281,8 +282,6 @@ export function AddMoveButton({ task: t }: { task: TaskRow }) {
 }
 
 type Target = { bin: string; note: string };
-/** Pillars, not bins (config blockedBins): some still exist as empty bins in the database, never suggest them. */
-const PHANTOM = new Set(DEFAULT_CONFIG.blockedBins);
 
 /** Where a pallet's rest can go: the SKU's pickface, then the nearest empty Level-A bins. */
 async function moveTargets(from: string, sku: string, except?: string | null): Promise<Target[]> {
@@ -292,7 +291,7 @@ async function moveTargets(from: string, sku: string, except?: string | null): P
     db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
   ]);
   const src = parseBin(from);
-  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[]).filter((b) => !PHANTOM.has(b.bin_code))
+  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[])
     .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
     .map(({ b }) => ({ bin: b.bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
   const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from).map((p) => ({ bin: p.bin_code, note: "pickface SKU ini" }));
@@ -350,31 +349,42 @@ export function SplitButton({ task: t }: { task: TaskRow }) {
 
 /** One bin + batch + expiry row of a SKU; `others` is what other open tasks (not this row) already take from it. */
 /** `by`: those other open rows, e.g. "NO 7 #8 ambil 1", "NO 7 #9 pindah 5 → CC14A01". */
-type SourceRow = { bin: string; batch: string; expiry: string | null; qty: number; others: number; by: string[] };
+/** `later`: those that are PICKs after this pick in execution order (date, slot, NO, seq), e.g. "NO 7 #3 ambil 16". */
+type SourceRow = { bin: string; batch: string; expiry: string | null; qty: number; others: number; by: string[];
+  later: { label: string; qty: number }[] };
 const sourceKey = (bin: string, batch: string, expiry: string | null) => `${bin}|${batch}|${expiry ?? ""}`;
 
 /** Every row of the SKU in the database, with what OTHER open tasks take — this pick and its own move excluded. */
-async function loadSourceRows(sku: string, exclude: string[]): Promise<SourceRow[]> {
+async function loadSourceRows(sku: string, exclude: string[], self?: string): Promise<SourceRow[]> {
   const db = createClient();
   const [{ data: inv }, { data: open }] = await Promise.all([
     db.from("inventory_detail").select("bin_code, batch_lot, expiry_date, quantity").eq("sku", sku).range(0, 2999),
-    db.from("pick_task_detail").select("id, wave_no, seq, task_type, from_bin, to_bin, batch_lot, expiry_date, quantity")
+    db.from("pick_task_detail").select("id, wave_no, planned_date, planned_slot, seq, task_type, from_bin, to_bin, batch_lot, expiry_date, quantity")
       .eq("sku", sku).eq("status", "PLANNED").in("wave_status", ["PENDING", "RESCHEDULED"]).range(0, 2999),
   ]);
-  const taken = new Map<string, { q: number; by: string[] }>();
-  for (const o of (open ?? []) as { id: string; wave_no: string; seq: number; task_type: string; from_bin: string; to_bin: string | null;
-    batch_lot: string; expiry_date: string | null; quantity: number }[]) {
+  type Open = { id: string; wave_no: string; planned_date: string; planned_slot: string | null; seq: number; task_type: string;
+    from_bin: string; to_bin: string | null; batch_lot: string; expiry_date: string | null; quantity: number };
+  const list = (open ?? []) as Open[];
+  // Execution order as move_rest_with_picks (0127) reads it: date, slot, NO number, seq.
+  const order = (o: Open) => [o.planned_date, o.planned_slot ?? "99:99",
+    String(Number(o.wave_no.replace(/\D/g, "")) || 0).padStart(12, "0"), String(o.seq).padStart(6, "0")].join("|");
+  const own = list.find((o) => o.id === self);
+  const taken = new Map<string, { q: number; by: string[]; later: SourceRow["later"] }>();
+  for (const o of [...list].sort((a, b) => order(a).localeCompare(order(b)))) {
     if (exclude.includes(o.id)) continue;
     const k = sourceKey(o.from_bin, o.batch_lot, o.expiry_date);
-    const e = taken.get(k) ?? { q: 0, by: [] };
+    const e = taken.get(k) ?? { q: 0, by: [], later: [] };
     e.q += Number(o.quantity);
-    e.by.push(`NO ${o.wave_no} #${o.seq} ${o.task_type === "PICK" ? `ambil ${fmtNum(Number(o.quantity))}` : `pindah ${fmtNum(Number(o.quantity))} → ${o.to_bin}`}`);
+    const label = `NO ${o.wave_no} #${o.seq} ${o.task_type === "PICK" ? `ambil ${fmtNum(Number(o.quantity))}` : `pindah ${fmtNum(Number(o.quantity))} → ${o.to_bin}`}`;
+    e.by.push(label);
+    if (own && o.task_type === "PICK" && order(o) > order(own)) e.later.push({ label, qty: Number(o.quantity) });
     taken.set(k, e);
   }
   const rows = new Map<string, SourceRow>();
   for (const r of (inv ?? []) as { bin_code: string; batch_lot: string; expiry_date: string | null; quantity: number }[]) {
     const k = sourceKey(r.bin_code, r.batch_lot, r.expiry_date);
-    const e = rows.get(k) ?? { bin: r.bin_code, batch: r.batch_lot, expiry: r.expiry_date, qty: 0, others: taken.get(k)?.q ?? 0, by: taken.get(k)?.by ?? [] };
+    const e = rows.get(k) ?? { bin: r.bin_code, batch: r.batch_lot, expiry: r.expiry_date, qty: 0, others: taken.get(k)?.q ?? 0,
+      by: taken.get(k)?.by ?? [], later: taken.get(k)?.later ?? [] };
     e.qty += Number(r.quantity);
     rows.set(k, e);
   }
@@ -406,10 +416,12 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
   const [moveTo, setMoveTo] = useState(move?.to_bin ?? "");
   const [moveQty, setMoveQty] = useState<string | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
+  // Pindah sisa + pick berikutnya (0127); null = the default below.
+  const [followPick, setFollowPick] = useState<boolean | null>(null);
 
   function reset() {
-    setSel(null); setTyped(""); setMoveTo(move?.to_bin ?? ""); setMoveQty(null); setTaken(String(planned));
-    void loadSourceRows(pick.sku, [pick.id, ...(move ? [move.id] : [])]).then(setRows);
+    setSel(null); setTyped(""); setMoveTo(move?.to_bin ?? ""); setMoveQty(null); setTaken(String(planned)); setFollowPick(null);
+    void loadSourceRows(pick.sku, [pick.id, ...(move ? [move.id] : [])], pick.id).then(setRows);
   }
 
   // The source: a chosen row, else a typed bin (its row of this batch, else its only row), else the plan's own.
@@ -431,19 +443,26 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
   // Sisa: the plan's own while the source stays, else what the new source keeps; a typed number wins.
   // Posting fewer cartons than planned leaves more on the pallet: the sisa then follows what is really left.
   const defaultQty = move && !srcChanged && qty === planned ? String(Number(move.quantity)) : leftover !== null && leftover > 0 ? String(leftover) : "";
-  const sisa = moveQty ?? defaultQty;
   const to = moveTo.trim().toUpperCase();
+  // The rest is already planned for later picks of this pallet: the move can take it and those picks follow it
+  // to the destination. Offered on the plan's own source only; on by default when nothing is free.
+  const later = !posting && !srcChanged && srcRow ? srcRow.later : [];
+  const laterQty = later.reduce((a, l) => a + l.qty, 0);
+  const canFollow = to !== "" && to !== srcBin && later.length > 0;
+  const follow = canFollow && (followPick ?? (leftover !== null && leftover <= 0));
+  const sisa = follow ? String(Math.max(leftover ?? 0, 0) + laterQty) : moveQty ?? defaultQty;
   const sisaN = Number(sisa);
   const moveErr = !to ? null
     : !/^[A-Z0-9_]{3,20}$/.test(to) ? "Format bin tujuan tidak valid."
     : to === srcBin ? `Tujuan sama dengan bin sumber ${srcBin}.`
+    : follow ? null
     : !Number.isInteger(sisaN) || sisaN <= 0
       ? (leftover !== null && leftover <= 0 && srcRow && srcRow.by.length
         ? `Tidak ada sisa bebas di ${srcBin}: ${fmtNum(srcRow.qty)} karton = pick ini ${fmtNum(qty)} + ${srcRow.by.join(", ")}. Sisanya sudah direncanakan; isi jumlah hanya bila picklist cetak memang berbeda.`
         : "Isi jumlah sisa (lebih dari 0).")
       : null;
   const moveChanged = move ? to !== move.to_bin || sisaN !== Number(move.quantity) : to !== "";
-  const ready = rows !== null && !ambiguous && !unknownBin && moveErr === null && !takenErr && (posting || srcChanged || moveChanged);
+  const ready = rows !== null && !ambiguous && !unknownBin && moveErr === null && !takenErr && (posting || srcChanged || moveChanged || follow);
 
   useEffect(() => {
     let live = true;
@@ -451,7 +470,7 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
     return () => { live = false; };
   }, [srcBin, pick.sku]);
 
-  const later = srcChanged && !!srcExpiry && !!curExpiry && srcExpiry > curExpiry;
+  const laterExpiry = srcChanged && !!srcExpiry && !!curExpiry && srcExpiry > curExpiry;
   // The plan's own row first, so "rencana" is always in view; the rest stay in FEFO order.
   const chips = (rows ?? []).filter((r) => !bin || r.bin === bin)
     .sort((a, b) => Number(sourceKey(b.bin, b.batch, b.expiry) === curKey) - Number(sourceKey(a.bin, a.batch, a.expiry) === curKey));
@@ -467,6 +486,12 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
           });
           return error?.message ?? null;
         }
+        if (follow) {
+          const { error } = await createClient().rpc("move_rest_with_picks", {
+            p_task_id: pick.id, p_move_id: move?.id ?? null, p_move_to: to, p_by_name: person, p_reason: reason,
+          });
+          return error?.message ?? null;
+        }
         const { error } = await createClient().rpc("edit_pick_row", {
           p_task_id: pick.id, p_move_id: move?.id ?? null, p_from_bin: srcBin, p_batch_lot: srcBatch, p_expiry_date: srcExpiry,
           p_move_to: to || null, p_move_qty: to ? sisaN : null, p_by_name: person, p_reason: reason,
@@ -477,7 +502,7 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
         #{pick.seq}: {posting ? "diambil" : "ambil"} <b>{fmtNum(qty)}</b>{posting && qty !== planned && <> (rencana {fmtNum(planned)})</>} {pick.uom ?? ""} SKU {pick.sku} dari <b>{srcBin}</b> batch {srcBatch || "–"} exp {srcExpiry ? fmtDate(srcExpiry) : "–"}
         {srcChanged && <> (rencana {curBin} {curBatch || "–"})</>}
         {moveErr ? <>.</>
-          : to ? <>, sisa <b>{fmtNum(sisaN)}</b> dipindah ke <b>{to}</b>.</>
+          : to ? <>, sisa <b>{fmtNum(sisaN)}</b> dipindah ke <b>{to}</b>{follow && <>; {later.map((l) => l.label.replace(/ ambil.*/, "")).join(", ")} ambil dari <b>{to}</b></>}.</>
           : move ? <>, <b>Bin To Bin ke {move.to_bin} dihapus</b>.</> : <>, tanpa Bin To Bin.</>}
       </p>
       {posting && (
@@ -509,7 +534,7 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
           onChange={(e) => { const v = e.target.value.toUpperCase(); setTyped(v); setSel(null); setMoveQty(null); if (v.trim() && v.trim() === to) setMoveTo(""); }} />
         {ambiguous && <p className="rounded-md bg-warn/10 p-2 text-sm">{bin} menyimpan {atBin.length} batch SKU ini: pilih salah satu di atas.</p>}
         {unknownBin && <p className="rounded-md bg-bad/10 p-2 text-sm text-bad">Menurut database {bin} tidak menyimpan SKU ini. Koreksi stok dulu (Adjust stok), atau posting dengan Berbeda → Bin lain.</p>}
-        {later && <p className="rounded-md bg-warn/10 p-2 text-sm">FEFO dilewati: exp {fmtDate(srcExpiry!)} lebih lama dari rencana {fmtDate(curExpiry!)}. Boleh bila picklist cetak memang begitu; tulis alasannya.</p>}
+        {laterExpiry && <p className="rounded-md bg-warn/10 p-2 text-sm">FEFO dilewati: exp {fmtDate(srcExpiry!)} lebih lama dari rencana {fmtDate(curExpiry!)}. Boleh bila picklist cetak memang begitu; tulis alasannya.</p>}
         {srcChanged && free !== null && free < qty && (
           <p className="rounded-md bg-warn/10 p-2 text-sm">Bebas di {srcBin} batch ini {fmtNum(Math.max(free, 0))}, kurang {fmtNum(qty - Math.max(free, 0))} dari {fmtNum(qty)}: tugas tampil stok kurang sampai stok dikoreksi.</p>
         )}
@@ -531,12 +556,19 @@ export function EditRowButton({ pick, move, mode = "edit" }: { pick: TaskRow; mo
         )}
         <div className="grid grid-cols-[1fr_6rem_auto] items-end gap-2">
           <div><Input id="er-to" value={moveTo} autoCapitalize="characters" placeholder="ketik bin tujuan" onChange={(e) => setMoveTo(e.target.value.toUpperCase())} /></div>
-          <div><Input aria-label="Jumlah sisa" type="number" inputMode="numeric" min={1} value={sisa} disabled={!to}
+          <div><Input aria-label="Jumlah sisa" type="number" inputMode="numeric" min={1} value={sisa} disabled={!to || follow}
             onChange={(e) => setMoveQty(e.target.value)} placeholder="sisa" /></div>
           <Button size="sm" variant="ghost" disabled={!moveTo} onClick={() => { setMoveTo(""); setMoveQty(null); }}>Hapus</Button>
         </div>
+        {canFollow && (
+          <label className="flex items-start gap-2 rounded-md bg-plate/30 p-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={follow} onChange={(e) => setFollowPick(e.target.checked)} />
+            <span>Pick berikutnya dari {srcBin} ikut pindah ke <b>{to}</b>: {later.map((l) => l.label).join(", ")}.
+              Sisa palet {fmtNum(sisaN)} dipindah semua; batch dan exp tetap (FEFO aman).</span>
+          </label>
+        )}
         {moveErr && <p className="rounded-md bg-bad/10 p-2 text-xs text-bad">{moveErr}</p>}
-        {to && leftover !== null && sisaN > Math.max(leftover, 0) && (
+        {to && !follow && leftover !== null && sisaN > Math.max(leftover, 0) && (
           <p className="rounded-md bg-warn/10 p-2 text-xs">Sisa {fmtNum(sisaN)} lebih dari yang tersisa di {srcBin} setelah pick ({fmtNum(Math.max(leftover, 0))}).</p>
         )}
         {!to && leftover !== null && leftover > 0 && <p className="text-xs text-steel-500">Sisa {fmtNum(leftover)} tetap di {srcBin}.</p>}
@@ -574,13 +606,14 @@ export function FixButton({ pick, move }: { pick: TaskRow; move?: TaskRow | null
     setProposal(null); setError(null);
     const db = createClient();
     const [{ data: inv, error: e1 }, { data: tasks, error: e2 }] = await Promise.all([
-      db.from("inventory_detail").select("bin_code, bin_status, batch_lot, expiry_date, quantity").eq("sku", pick.sku).range(0, 2999),
+      db.from("inventory_detail").select("bin_code, bin_status, bin_owner, batch_lot, expiry_date, quantity").eq("sku", pick.sku).range(0, 2999),
       db.from("pick_task_detail").select("id, from_bin, to_bin, batch_lot, expiry_date, quantity")
         .eq("sku", pick.sku).eq("status", "PLANNED").in("wave_status", ["PENDING", "RESCHEDULED"]).range(0, 2999),
     ]);
     if (e1 || e2) return setError((e1 ?? e2)!.message);
-    const stock: FixStock[] = ((inv ?? []) as { bin_code: string; bin_status: string; batch_lot: string; expiry_date: string | null; quantity: number }[])
-      .map((r) => ({ bin: r.bin_code, batch: r.batch_lot, expiry: r.expiry_date, qty: Number(r.quantity), blocked: r.bin_status === "blocked" }));
+    const stock: FixStock[] = ((inv ?? []) as { bin_code: string; bin_status: "active" | "blocked"; bin_owner: "SHELL" | "CKB" | null; batch_lot: string; expiry_date: string | null; quantity: number }[])
+      // 0132: a CKB 3PL rack is as unusable for Shell as a blocked one.
+      .map((r) => ({ bin: r.bin_code, batch: r.batch_lot, expiry: r.expiry_date, qty: Number(r.quantity), blocked: !usableForShell({ status: r.bin_status, owner: r.bin_owner }) }));
     const claims: FixClaim[] = ((tasks ?? []) as { id: string; from_bin: string; to_bin: string | null; batch_lot: string; expiry_date: string | null; quantity: number }[])
       .filter((t) => t.id !== pick.id && t.id !== move?.id)
       .map((t) => ({ from: t.from_bin, to: t.to_bin, batch: t.batch_lot, expiry: t.expiry_date, qty: Number(t.quantity) }));

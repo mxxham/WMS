@@ -36,8 +36,10 @@ select pg_temp.check('every CG/CH rack bin has 3D coordinates (pos_x)',
    where (bin_code like 'CG%' or bin_code like 'CH%')
      and rack is not null and pos_x is null) = 0);
 
-select pg_temp.check('CG and CH bins show in Bin kosong (empty, not hidden)',
-  exists (select 1 from empty_bins where bin_code like 'CG%')
-  and exists (select 1 from empty_bins where bin_code like 'CH%'));
+-- 0132: CG and CH are CKB 3PL racks: active bins (rebagging uses them), but not Shell's free space.
+select pg_temp.check('CG and CH bins are active CKB racks, kept out of Shell''s Bin kosong (0132)',
+  not exists (select 1 from bins where (bin_code like 'CG%' or bin_code like 'CH%') and rack is not null
+              and (status <> 'active' or owner <> 'CKB'))
+  and not exists (select 1 from empty_bins where bin_code like 'CG%' or bin_code like 'CH%'));
 
 rollback;

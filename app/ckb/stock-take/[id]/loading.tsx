@@ -30,7 +30,8 @@ export default function Loading() {
         <CkbTableSkeleton columns={9} rows={12} delayMs={200} className="rounded-none border-0" />
       </section>
 
-      {/* Penyesuaian dari sesi ini: ref · material · bin · batch · selisih · status · keputusan. */}
+      {/* Penyesuaian dari sesi ini: ref · material · bin · batch · selisih · status · keputusan. Selisih
+          is hidden with qty SAP when the viewer may not see the baseline, as in the task table. */}
       <section aria-hidden className="rounded-lg border border-steel-100 bg-white">
         <div className="border-b border-steel-100 px-4 py-3">
           <Bone className={cn("h-5 w-44 rounded", PULSE)} style={pulseDelay(240)} />

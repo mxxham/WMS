@@ -25,7 +25,7 @@ export const LEGENDS: Record<ColorMode, { label: string; color: string }[]> = {
 };
 
 /** Colour of one bin in the selected mode. Empty bins stay pale so stock stands out; fill is a teal scale (light = partly, the button teal = full). */
-export function binColor(b: BinSummary, mode: ColorMode): string {
+export function binColor(b: Pick<BinSummary, "total_qty" | "abc_class" | "fill_ratio" | "min_expiry">, mode: ColorMode): string {
   const empty = Number(b.total_qty) === 0;
   if (mode === "abc") {
     if (empty || !b.abc_class) return "#E0E7ED";

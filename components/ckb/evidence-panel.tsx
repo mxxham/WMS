@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { RpcButton } from "./rpc-button";
 import { EVIDENCE_KINDS, EVIDENCE_KIND_LABEL, type EvidenceEntity, type EvidenceKind } from "@/lib/ckb/evidence";
 import { fmtDateTime } from "@/lib/utils";
+import { offlineFetch } from "@/lib/net";
 
 export type EvidenceRow = {
   id: string; kind: EvidenceKind; mime: string; size_bytes: number; description: string | null;
@@ -30,11 +31,17 @@ export function EvidencePanel({ entityType, entityId, rows, canUpload, me, lead,
   async function upload(files: FileList | null) {
     if (!files?.length) return;
     setBusy(true); setError(null);
-    for (const f of Array.from(files)) {
-      const fd = new FormData();
-      fd.set("entity_type", entityType); fd.set("entity_id", entityId); fd.set("kind", kind); fd.set("description", desc); fd.set("file", f);
-      const res = await fetch("/api/ckb/evidence", { method: "POST", body: fd });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); setError(`${f.name}: ${b.error ?? "gagal diunggah"}`); break; }
+    let last: File | null = null;
+    try {
+      for (const f of Array.from(files)) {
+        last = f;
+        const fd = new FormData();
+        fd.set("entity_type", entityType); fd.set("entity_id", entityId); fd.set("kind", kind); fd.set("description", desc); fd.set("file", f);
+        const res = await offlineFetch("/api/ckb/evidence", { method: "POST", body: fd });
+        if (!res.ok) { const b = await res.json().catch(() => ({})); setError(`${f.name}: ${b.error ?? "gagal diunggah"}`); break; }
+      }
+    } catch (e) {
+      setError(`${last?.name ?? "Berkas"}: ${(e as Error).message}`);
     }
     setBusy(false); setDesc("");
     if (input.current) input.current.value = "";

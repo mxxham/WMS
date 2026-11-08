@@ -39,7 +39,8 @@ export function NewStocktakeForm({ customers, imports, counters, warehouses, bli
     });
     setBusy(false);
     if (err) { setError(err); return; }
-    router.push(`/ckb/stock-take/${id}`);
+    // 0133: straight on to who counts which locations.
+    router.push(`/ckb/stock-take/${id}/assign`);
   }
 
   const chosen = imports.find((i) => i.id === snapshot);

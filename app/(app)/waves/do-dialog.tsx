@@ -10,7 +10,7 @@ import type { Rpc } from "./wave-parts";
 
 /**
  * DoButton + dialog for recording manual DO numbers per shipment in a wave.
- * One dialog for the whole wave (designer decision), opened from the wave header
+ * One dialog for the whole wave (designer decision), opened from the Lainnya menu
  * on both desktop and phone.
  */
 export function DoButton({

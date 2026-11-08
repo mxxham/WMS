@@ -52,7 +52,7 @@ export function ReceiptDetail({ receipt: r, actuals, compare, supervisor, shelfL
           {r.sales_order && ` · SO ${r.sales_order}`}</p>
       )}
 
-      {editable && setup && <PlanCheck receiptId={r.id} setup={setup} actuals={actuals} onDone={() => setChecking(false)} />}
+      {editable && setup && <PlanCheck receiptId={r.id} setup={setup} actuals={actuals} shelfLife={shelfLife} defaultShelfLife={defaultShelfLife} onDone={() => setChecking(false)} />}
       {r.source === "PLAN" && (r.status === "CHECKED" || r.status === "POSTED") && actuals.some((a) => Number(a.quantity) > 0) && (
         <a className="inline-block rounded-md bg-ckb px-4 py-2 text-sm font-semibold text-white" href={`/api/receiving/${r.id}/cards`} target="_blank" rel="noreferrer">
           Cetak kartu palet ({fmtNum(actuals.filter((a) => Number(a.quantity) > 0).length)})</a>

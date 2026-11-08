@@ -66,6 +66,9 @@ select id, role::text::ckb_role from profiles
 where id in (current_setting('t.op')::uuid, current_setting('t.sup')::uuid, current_setting('t.adm')::uuid)
 on conflict (user_id) do update set role = excluded.role;
 
+-- 0132: rebagging works on CKB 3PL racks; the fixture bins are lent to CKB after their stock is booked.
+update public.bins set owner = 'CKB' where bin_code in ('CA01A01','CA01A02','CB01B01','CB01B02');
+
 set role authenticated;
 
 -- =====================================================================

@@ -10,8 +10,10 @@ export function auditDate(raw: string | undefined): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw ?? "") ? raw! : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 }
 
-export function AuditHeader({ title, date, active, live = ["audits", "movements", "pick_tasks"], putaway = true }: {
+export function AuditHeader({ title, date, active, live = ["audits", "movements", "pick_tasks"], putaway = true, keep }: {
   title: string; date: string; active: "picking" | "putaway"; live?: LiveTable[];
+  /** query parameters the date form keeps (the open tab) */
+  keep?: Record<string, string>;
   /** show the picking / putaway switch */
   putaway?: boolean;
 }) {
@@ -29,6 +31,7 @@ export function AuditHeader({ title, date, active, live = ["audits", "movements"
           </nav>
         )}
         <form className="flex items-center gap-2">
+          {Object.entries(keep ?? {}).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
           <Input type="date" name="date" defaultValue={date} className="w-auto" aria-label="Tanggal" />
           <Button type="submit" variant="outline">Tampilkan</Button>
         </form>

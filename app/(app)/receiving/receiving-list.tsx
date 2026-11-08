@@ -26,7 +26,12 @@ export type ReceiptSummary = {
 type DocDraft = { sku: string; batch_lot: string; quantity: string };
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
-export function ReceivingList({ receipts, supervisor }: { receipts: ReceiptSummary[]; supervisor: boolean }) {
+export function ReceivingList({ date, receipts, unfinished, supervisor }: {
+  date: string; receipts: ReceiptSummary[];
+  /** OPEN / CHECKED receipts listed on another day */
+  unfinished: ReceiptSummary[]; supervisor: boolean;
+}) {
+  const [showOthers, setShowOthers] = useState(false);
   return (
     <div className="space-y-6 p-4 lg:p-8">
       <p className="max-w-3xl text-sm text-steel-500">
@@ -36,30 +41,46 @@ export function ReceivingList({ receipts, supervisor }: { receipts: ReceiptSumma
       </p>
       {supervisor && <PlanUpload />}
       {supervisor && <NewReceipt />}
+      {unfinished.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md bg-warn/10 p-3 text-sm">
+          <span><b>{fmtNum(unfinished.length)} penerimaan dari tanggal lain</b> belum selesai (belum diperiksa atau belum diposting).</span>
+          <Button size="sm" variant="outline" onClick={() => setShowOthers((v) => !v)}>{showOthers ? "Sembunyikan" : "Tampilkan"}</Button>
+        </div>
+      )}
+      {showOthers && unfinished.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Belum selesai dari tanggal lain</CardTitle></CardHeader>
+          <CardContent><ReceiptTable receipts={unfinished} /></CardContent>
+        </Card>
+      )}
       <Card>
-        <CardHeader><CardTitle>Penerimaan</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Penerimaan {fmtDate(date)}{date === today() && " (hari ini)"}</CardTitle></CardHeader>
         <CardContent>
-          {receipts.length === 0 ? <p className="text-sm text-steel-500">Belum ada penerimaan.</p> : (
-            <Table>
-              <thead><tr><Th>Dokumen</Th><Th>Tanggal</Th><Th>Status</Th><Th className="text-right">Dokumen</Th><Th className="text-right">Baik</Th><Th className="text-right">Rusak</Th><Th className="text-right">Selisih</Th><Th>Orang</Th></tr></thead>
-              <tbody>{receipts.map((r) => (
-                <tr key={r.id} className={cn(r.status === "OPEN" && "bg-plate/10")}>
-                  <Td><Link className="font-semibold underline" href={`/receiving/${r.id}`}>{r.doc_no}</Link><div className="text-xs">{r.supplier}{r.vehicle && ` · ${r.vehicle}`}
-                    {r.source === "PLAN" && <> · rencana{r.slot_time && `, slot ${r.slot_time}`}{r.shipment_no && `, SH ${r.shipment_no}`}</>}</div></Td>
-                  <Td className="whitespace-nowrap text-xs">{fmtDate(r.doc_date)}<div>dibuat {fmtDateTime(r.created_at)}</div></Td>
-                  <Td className="text-xs">{RECEIPT_STATUS[r.status]}</Td>
-                  <Td className="text-right tabular">{fmtNum(Number(r.expected_qty))}</Td>
-                  <Td className="text-right tabular">{r.status === "OPEN" ? "–" : fmtNum(Number(r.good_qty))}</Td>
-                  <Td className="text-right tabular">{r.status === "OPEN" ? "–" : Number(r.damaged_qty) ? fmtNum(Number(r.damaged_qty)) : "–"}</Td>
-                  <Td className={cn("text-right tabular", r.issues > 0 && r.status !== "OPEN" && "font-semibold text-warn")}>{r.status === "OPEN" ? "–" : fmtNum(r.issues)}</Td>
-                  <Td className="text-xs">{r.created_by_name}{r.checked_by_name && ` → ${r.checked_by_name}`}{r.posted_by_name && ` → ${r.posted_by_name}`}</Td>
-                </tr>
-              ))}</tbody>
-            </Table>
-          )}
+          {receipts.length === 0 ? <p className="text-sm text-steel-500">Tidak ada penerimaan di tanggal ini.</p> : <ReceiptTable receipts={receipts} />}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ReceiptTable({ receipts }: { receipts: ReceiptSummary[] }) {
+  return (
+    <Table>
+      <thead><tr><Th>Dokumen</Th><Th>Tanggal</Th><Th>Status</Th><Th className="text-right">Dokumen</Th><Th className="text-right">Baik</Th><Th className="text-right">Rusak</Th><Th className="text-right">Selisih</Th><Th>Orang</Th></tr></thead>
+      <tbody>{receipts.map((r) => (
+        <tr key={r.id} className={cn(r.status === "OPEN" && "bg-plate/10")}>
+          <Td><Link className="font-semibold underline" href={`/receiving/${r.id}`}>{r.doc_no}</Link><div className="text-xs">{r.supplier}{r.vehicle && ` · ${r.vehicle}`}
+            {r.source === "PLAN" && <> · rencana{r.slot_time && `, slot ${r.slot_time}`}{r.shipment_no && `, SH ${r.shipment_no}`}</>}</div></Td>
+          <Td className="whitespace-nowrap text-xs">{r.source === "PLAN" && r.plan_date ? <>rencana {fmtDate(r.plan_date)}</> : fmtDate(r.doc_date)}<div>dibuat {fmtDateTime(r.created_at)}</div></Td>
+          <Td className="text-xs">{RECEIPT_STATUS[r.status]}</Td>
+          <Td className="text-right tabular">{fmtNum(Number(r.expected_qty))}</Td>
+          <Td className="text-right tabular">{r.status === "OPEN" ? "–" : fmtNum(Number(r.good_qty))}</Td>
+          <Td className="text-right tabular">{r.status === "OPEN" ? "–" : Number(r.damaged_qty) ? fmtNum(Number(r.damaged_qty)) : "–"}</Td>
+          <Td className={cn("text-right tabular", r.issues > 0 && r.status !== "OPEN" && "font-semibold text-warn")}>{r.status === "OPEN" ? "–" : fmtNum(r.issues)}</Td>
+          <Td className="text-xs">{r.created_by_name}{r.checked_by_name && ` → ${r.checked_by_name}`}{r.posted_by_name && ` → ${r.posted_by_name}`}</Td>
+        </tr>
+      ))}</tbody>
+    </Table>
   );
 }
 

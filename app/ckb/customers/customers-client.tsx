@@ -12,6 +12,8 @@ import { callRpc } from "@/components/ckb/rpc-button";
 export type CustomerRow = {
   id: string; code: string; name: string; active: boolean; notes: string | null; sap_customer_code: string | null;
   sap_plant: string | null; sap_storage_location: string | null; snapshot: string | null; reps: string[]; updated_at: string;
+  /** 0133: a photo is required on every stock-take count of this customer */
+  count_photo_required?: boolean;
 };
 
 export function CustomersClient({ rows, canEdit }: { rows: CustomerRow[]; canEdit: boolean }) {
@@ -35,7 +37,7 @@ export function CustomersClient({ rows, canEdit }: { rows: CustomerRow[]; canEdi
       </ul>
       <div className="hidden rounded-lg border border-steel-100 bg-white md:block">
         <Table>
-          <thead><tr><Th>Kode</Th><Th>Nama</Th><Th>Status</Th><Th>Kode SAP / plant / SLoc</Th><Th>Snapshot aktif</Th><Th>Perwakilan</Th>{canEdit && <Th />}</tr></thead>
+          <thead><tr><Th>Kode</Th><Th>Nama</Th><Th>Status</Th><Th>Kode SAP / plant / SLoc</Th><Th>Snapshot aktif</Th><Th>Perwakilan</Th><Th>Foto wajib di setiap hitungan</Th>{canEdit && <Th />}</tr></thead>
           <tbody>
             {rows.map((c) => (
               <tr key={c.id}>
@@ -45,6 +47,7 @@ export function CustomersClient({ rows, canEdit }: { rows: CustomerRow[]; canEdi
                 <Td>{[c.sap_customer_code, c.sap_plant, c.sap_storage_location].map((v) => v ?? "–").join(" / ")}</Td>
                 <Td>{c.snapshot ?? <span className="text-steel-500">belum ada</span>}</Td>
                 <Td>{c.reps.join(", ") || "–"}</Td>
+                <Td><CountPhotoSwitch id={c.id} name={c.name} on={!!c.count_photo_required} canEdit={canEdit} /></Td>
                 {canEdit && <Td className="text-right"><CustomerDialog row={c} /></Td>}
               </tr>
             ))}
@@ -97,6 +100,45 @@ function CustomerDialog({ row }: { row?: CustomerRow }) {
             <Button type="submit" disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Button>
           </div>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "Foto wajib di setiap hitungan" (0133): admins switch it, with one confirmation. */
+function CountPhotoSwitch({ id, name, on, canEdit }: { id: string; name: string; on: boolean; canEdit: boolean }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!canEdit) return <span className="text-sm">{on ? "Ya" : "Tidak"}</span>;
+  async function run() {
+    setBusy(true); setError(null);
+    const [, err] = await callRpc("ckb_set_customer_count_photo", { p_customer: id, p_required: !on });
+    setBusy(false);
+    if (err) return setError(err);
+    setOpen(false); router.refresh();
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); setError(null); }}>
+      <DialogTrigger asChild>
+        <button type="button" role="switch" aria-checked={on} aria-label={`Foto wajib di setiap hitungan untuk ${name}`}
+          className={`relative h-6 w-11 rounded-full transition-colors ${on ? "bg-ckb" : "bg-steel-300"}`}>
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] ${on ? "left-[22px]" : "left-0.5"}`} />
+        </button>
+      </DialogTrigger>
+      <DialogContent title="Foto wajib di setiap hitungan">
+        <div className="space-y-4">
+          <p className="rounded-md bg-plate/30 p-3 text-base">
+            {on ? `Foto tidak lagi wajib di setiap hitungan ${name}; tetap wajib untuk hitungan 0, barang temuan dan hitung ulang.`
+                : `Setiap hitungan stock take ${name} wajib disertai foto, mulai sekarang.`}
+          </p>
+          {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" size="lg" onClick={() => setOpen(false)}>Batal</Button>
+            <Button size="lg" onClick={run} disabled={busy}>{busy ? "Menyimpan…" : on ? "Matikan" : "Wajibkan foto"}</Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, SearchCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { Button } from "@/components/ui/button";
@@ -51,8 +51,10 @@ function GapBar({ gap, max }: { gap: number; max: number }) {
   );
 }
 
-export function StockCompare({ run, lines, moves, prev, prevAsOf, person }: {
+export function StockCompare({ run, lines, moves, prev, prevAsOf, person, onInvestigate }: {
   run: ReconSummary; lines: ReconLine[]; moves: SapMove[]; prev: PrevGap | null; prevAsOf: string | null; person: string;
+  /** opens Investigasi selisih (0129) for one SKU */
+  onInvestigate: (sku: string) => void;
 }) {
   const router = useRouter();
   const [filter, setFilter] = useState<FilterKey>("diff");
@@ -181,6 +183,7 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person }: {
                           <div className="flex items-center justify-between gap-2"><GapBadge gap={g} /><span className="text-xs tabular text-steel-500">{sapTotal(l) ? `${fmtNum(Math.abs(g) * 100 / sapTotal(l), 1)}%` : ""}</span></div>
                           <GapBar gap={g} max={max} />
                           {gapBlocked(l) !== 0 && <div className="text-xs">bebas {signed(gapUnrestricted(l))} · blok {signed(gapBlocked(l))}</div>}
+                          <FixNote l={l} />
                         </Td>
                         <Td className="text-right tabular">{num(l.sap_blocked) || num(l.wms_blocked) ? `${fmtNum(num(l.sap_blocked))} / ${fmtNum(num(l.wms_blocked))}` : "–"}</Td>
                         {otherSlocs.length > 0 && <Td className="text-right text-xs tabular">{Object.entries(l.sap_other ?? {}).map(([k, v]) => <div key={k}>{k} {fmtNum(num(v))}</div>)}</Td>}
@@ -189,7 +192,7 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person }: {
                       </tr>
                       {isOpen && (
                         <tr><td colSpan={11} className="border-b border-steel-200 bg-paper p-3">
-                          <SkuDetail l={l} moves={movesBySku.get(l.sku) ?? []} run={run} person={person} editable={editable} />
+                          <SkuDetail l={l} moves={movesBySku.get(l.sku) ?? []} run={run} person={person} editable={editable} onInvestigate={onInvestigate} />
                         </td></tr>
                       )}
                     </Fragment>
@@ -216,9 +219,10 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person }: {
                     </div>
                     <div className="mt-2"><GapBar gap={g} max={max} /></div>
                     <FlagChips l={l} />
+                    <FixNote l={l} />
                     <div className="mt-1 text-xs text-steel-500">{RECON_STATUS[l.status]}{l.cause && ` · ${CAUSES[l.cause]}`} · {isOpen ? "tutup" : "detail"}</div>
                   </button>
-                  {isOpen && <div className="mt-3 border-t border-steel-100 pt-3"><SkuDetail l={l} moves={movesBySku.get(l.sku) ?? []} run={run} person={person} editable={editable} /></div>}
+                  {isOpen && <div className="mt-3 border-t border-steel-100 pt-3"><SkuDetail l={l} moves={movesBySku.get(l.sku) ?? []} run={run} person={person} editable={editable} onInvestigate={onInvestigate} /></div>}
                 </div>
               );
             })}
@@ -228,6 +232,14 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person }: {
       )}
     </div>
   );
+}
+
+/** "dikoreksi +48 · sisa 0": what Investigasi selisih already posted for this SKU. */
+function FixNote({ l }: { l: ReconLine }) {
+  const fix = num(l.wms_fix);
+  if (!fix) return null;
+  const rest = gapTotal(l) + fix;
+  return <div className="text-xs font-semibold text-steel-700">dikoreksi {signed(fix)} · sisa {rest ? signed(rest) : "0"}</div>;
 }
 
 function FlagChips({ l }: { l: ReconLine }) {
@@ -245,7 +257,9 @@ type WmsMove = { created_at: string; type: string; quantity: number; batch_lot: 
   from_bin: { bin_code: string } | null; to_bin: { bin_code: string } | null };
 
 /** One SKU opened: the numbers, our bins, the SAP and WMS transactions, and the handling. */
-function SkuDetail({ l, moves, run, person, editable }: { l: ReconLine; moves: SapMove[]; run: ReconSummary; person: string; editable: boolean }) {
+function SkuDetail({ l, moves, run, person, editable, onInvestigate }: {
+  l: ReconLine; moves: SapMove[]; run: ReconSummary; person: string; editable: boolean; onInvestigate: (sku: string) => void;
+}) {
   const [bins, setBins] = useState<BinLine[] | null>(null);
   const [wms, setWms] = useState<WmsMove[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -287,6 +301,12 @@ function SkuDetail({ l, moves, run, person, editable }: { l: ReconLine; moves: S
         ))}
       </div>
       {h && <p className="rounded-md bg-plate/30 p-2">{h.text}</p>}
+      {l.item_id && (hasGap(l) || num(l.wms_fix) !== 0) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-ckb/40 bg-ckb/5 p-2">
+          <Button size="sm" onClick={() => onInvestigate(l.sku)}><SearchCheck className="h-4 w-4" />Investigasi &amp; koreksi stok</Button>
+          <span className="text-xs text-steel-700">Bin yang paling dicurigai, cek isi bin, lalu Bin To Bin atau adjustment langsung dari sini.</span>
+        </div>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <div>

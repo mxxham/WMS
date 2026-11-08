@@ -89,16 +89,19 @@ select pg_temp.check('pick_audit_line volume_l = 208 for 550099999',
   (select volume_l = 208 from pick_audit_line where task_id = pg_temp.task('VOL3', 1)));
 
 -- ---- Assertions on volume_out_daily ----
--- The view groups by Asia/Jakarta date of movements.created_at.
+-- The view groups a pick by its wave's planned_date (0131); a pick without a task by the
+-- Asia/Jakarta date of movements.created_at.
 -- Verify the view exists, has correct grants, and its math matches
 -- a manual calculation on the movements table for the same day.
 -- The fixture's picks land on "the newest picking day", which this file
 -- derives from movements itself (posting stamps created_at = now(); a
 -- hardcoded date would fail whenever the suite runs on a later day).
 
--- The latest day with posted picks in this scratch database.
+-- The day of the newest posted pick in this scratch database: its wave's day (0131), else its posting day.
 create or replace function pg_temp.vol_day() returns date language sql stable as $$
-  select (max(created_at) at time zone 'Asia/Jakarta')::date from public.movements where type = 'picking'
+  select coalesce(w.planned_date, (m.created_at at time zone 'Asia/Jakarta')::date)
+  from public.movements m left join public.pick_tasks t on t.id = m.task_id left join public.waves w on w.id = t.wave_id
+  where m.type = 'picking' order by m.created_at desc, m.id desc limit 1
 $$;
 
 select pg_temp.check('volume_out_daily exists',
@@ -115,10 +118,12 @@ create or replace function pg_temp.manual_vol(p_day date) returns table(boxes nu
     count(*)::int as picks
   from public.movements m
   join public.items it on it.id = m.item_id
+  left join public.pick_tasks t on t.id = m.task_id
+  left join public.waves w on w.id = t.wave_id
   where m.type = 'picking'
     and m.quantity > 0
     and it.volume_l is not null
-    and (m.created_at at time zone 'Asia/Jakarta')::date = p_day;
+    and coalesce(w.planned_date, (m.created_at at time zone 'Asia/Jakarta')::date) = p_day;
 $$;
 
 -- Compare view output with manual calculation for the fixture's day

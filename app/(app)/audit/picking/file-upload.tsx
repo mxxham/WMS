@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
-import { loadDispatchRules, loadPickfaceOverrides } from "@/lib/allocator/browser/plan-client";
+import { loadDispatchRules, loadPickfaceOverrides, loadShellBinRules } from "@/lib/allocator/browser/plan-client";
 import { runPipeline } from "@/lib/allocator/pipeline";
 import { allocatorLines, K_ONE_SHEET, kOneLines, scheduleMeta, skuBatches, stagedLines, withBinRemaining, type SheetPickLine } from "@/lib/sheet-picklist";
 import { fmtNum } from "@/lib/utils";
@@ -51,6 +51,7 @@ export function FileUpload({ date, existing }: { date: string; existing: number 
         asOf: new Date(`${date}T00:00:00Z`),
         pickfaceOverrides: await loadPickfaceOverrides(supabase),
         ...(await loadDispatchRules(supabase)),
+        ...(await loadShellBinRules(supabase)),
       });
       const wb = loadWorkbookFromBuffer(buf, config);
       if (!wb.demand.length) throw new Error(`Sheet ${K_ONE_SHEET} dan "Schedule of the day" kosong: tidak ada pick untuk diaudit.`);

@@ -6,10 +6,34 @@ import type { StocktakeStatus, TaskStatus } from "./stocktake";
 export type Session = {
   id: string; ref_no: string; customer_id: string; baseline_import_id: string; scope_type: "FULL" | "BINS" | "MATERIALS";
   scope_values: string[]; warehouse: string; blind: boolean; status: StocktakeStatus; notes: string | null;
+  /** 0133: the photo rules apply (sessions created after 0133) */
+  photo_rules?: boolean;
   created_by_name: string; created_at: string; started_at: string | null; review_started_at: string | null;
   closed_at: string | null; closed_by_name: string | null; cancelled_at: string | null; cancel_reason: string | null;
   customer_name: string; baseline_ref: string; baseline_date: string; baseline_verified: boolean;
 };
+
+/** One row of the session list: the header as the list prints it, never the whole session record. */
+export type SessionListRow = {
+  id: string; ref_no: string; customer_id: string; scope_type: Session["scope_type"]; status: StocktakeStatus;
+  blind: boolean; warehouse: string; created_by_name: string; created_at: string; closed_at: string | null;
+};
+
+/**
+ * Every session the viewer may see, newest first, narrowed by the filters. Read in full through
+ * fetchAll: a customer's history outgrows one PostgREST answer, and a fixed cap silently dropped
+ * the oldest sessions from the list.
+ */
+export async function loadSessionList(f: { customer?: string; status?: string }): Promise<SessionListRow[]> {
+  const db = await createClient();
+  return fetchAll<SessionListRow>((a, b) => {
+    let q = db.from("ckb_stocktakes").select("id, ref_no, customer_id, scope_type, status, blind, warehouse, created_by_name, created_at, closed_at");
+    if (f.customer) q = q.eq("customer_id", f.customer);
+    if (f.status) q = q.eq("status", f.status);
+    // created_at alone is not stable: two sessions saved in one transaction share it.
+    return q.order("created_at", { ascending: false }).order("id").range(a, b);
+  });
+}
 
 /** One row of ckb_stocktake_tasks(): baseline and variance are null when the viewer may not see them. */
 export type TaskRow = {
@@ -61,7 +85,7 @@ export async function loadHistory(taskIds: string[]): Promise<{ counts: CountRow
   return { counts, notes };
 }
 
-export type TaskEvidence = { id: string; entity_id: string; kind: "GENERAL" | "DAMAGE" | "LABEL" | "DOCUMENT" | "DISCREPANCY"; mime: string; size_bytes: number;
+export type TaskEvidence = { id: string; entity_id: string; kind: "GENERAL" | "DAMAGE" | "LABEL" | "DOCUMENT" | "DISCREPANCY" | "COUNT"; round?: number | null; mime: string; size_bytes: number;
   description: string | null; uploaded_by: string; uploaded_by_name: string; uploaded_at: string; legal_hold: boolean };
 
 /** Evidence attached to count tasks, in chunks so the request URL stays short. */
@@ -69,7 +93,7 @@ export async function loadTaskEvidence(taskIds: string[]): Promise<TaskEvidence[
   const db = await createClient();
   const out: TaskEvidence[] = [];
   for (let i = 0; i < taskIds.length; i += 100) {
-    const { data, error } = await db.from("ckb_evidence").select("id, entity_id, kind, mime, size_bytes, description, uploaded_by, uploaded_by_name, uploaded_at, legal_hold")
+    const { data, error } = await db.from("ckb_evidence").select("id, entity_id, kind, round, mime, size_bytes, description, uploaded_by, uploaded_by_name, uploaded_at, legal_hold")
       .eq("entity_type", "COUNT_TASK").in("entity_id", taskIds.slice(i, i + 100)).order("uploaded_at");
     if (error) throw new Error(error.message);
     out.push(...((data ?? []) as TaskEvidence[]));

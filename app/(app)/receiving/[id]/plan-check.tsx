@@ -12,21 +12,29 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { LEFTOVER_LEVELS, LEVELS, packOf, planPutaway } from "@/lib/inbound/putaway-plan";
 import type { PutawaySetup } from "@/lib/inbound/load";
 import { cn, fmtNum } from "@/lib/utils";
-import { batchMfgDate } from "@/lib/batch-code";
+import { applyLot, lotFromBatch, lotFromMfg, type Lot } from "@/lib/inbound/lot";
 import type { Actual } from "./receipt-detail";
 
-type Count = { sku: string; good: string; damaged: string; planned: number };
+/** One SKU of the container; its batch / production date / expiry fill every pallet of it. */
+type Count = Lot & { sku: string; good: string; damaged: string; planned: number };
 type Row = { key: string; sku: string; quantity: number; damaged: number; bin: string; batch: string; expiry: string; mfg: string; why: string | null; full: boolean | null };
 
 /**
  * A planned receipt (0118): 1. what really arrived, per SKU, next to the plan; 2. the pallets with a bin each,
  * proposed by the auto putaway (full pallets: carton B-E, drum B-C, pail A, fluidbag / IBC A–B; leftovers to the pickface, level A),
- * changeable by hand; batch and expiry may wait until posting.
+ * changeable by hand; batch and expiry may wait until posting. Batch, production date and expiry are typed once
+ * per SKU and copied to its pallets; a single pallet can still be changed.
  */
-export function PlanCheck({ receiptId, setup, actuals, onDone }: { receiptId: string; setup: PutawaySetup; actuals: Actual[]; onDone: () => void }) {
+export function PlanCheck({ receiptId, setup, actuals, shelfLife, defaultShelfLife, onDone }: {
+  receiptId: string; setup: PutawaySetup; actuals: Actual[]; shelfLife: Record<string, number>; defaultShelfLife: number; onDone: () => void;
+}) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
-  const [counts, setCounts] = useState<Count[]>(() => setup.items.map((i) => ({ sku: i.sku, good: String(i.expected), damaged: "0", planned: i.expected })));
+  const [counts, setCounts] = useState<Count[]>(() => setup.items.map((i) => {
+    // A saved check: the SKU's lot is its first pallet that has one.
+    const a = actuals.find((x) => x.items?.sku === i.sku && (x.batch_lot || x.mfg_date || x.expiry_date));
+    return { sku: i.sku, good: String(i.expected), damaged: "0", planned: i.expected, batch: a?.batch_lot ?? "", mfg: a?.mfg_date ?? "", expiry: a?.expiry_date ?? "" };
+  }));
   const [rows, setRows] = useState<Row[] | null>(() => actuals.length ? actuals.map((a) => ({
     key: `a${a.line_no}`, sku: a.items?.sku ?? "", quantity: Number(a.quantity), damaged: Number(a.damaged_qty), bin: a.bins?.bin_code ?? "",
     batch: a.batch_lot ?? "", expiry: a.expiry_date ?? "", mfg: a.mfg_date ?? "", why: null, full: null,
@@ -36,24 +44,35 @@ export function PlanCheck({ receiptId, setup, actuals, onDone }: { receiptId: st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const item = (sku: string) => setup.allItems[sku];
-  /** Drum / pail / IBC / fluidbag: the pallet card prints the manufacture date (0119). */
-  const needsMfg = (sku: string) => { const it = item(sku); const p = it ? packOf(sku, it.uom, it.description) : null; return !!p && p !== "Carton"; };
+  const months = (sku: string) => shelfLife[sku.trim()] ?? defaultShelfLife;
+  /** Only drum / pail / IBC / fluidbag need a production date: the pallet card prints it (0119). Cartons never carry one. */
+  const needsMfg = (sku: string) => { const it = item(sku.trim()); const p = it ? packOf(sku.trim(), it.uom, it.description) : null; return !!p && p !== "Carton"; };
+  const mfgFor = <T extends Lot>(sku: string, lot: T): T => (needsMfg(sku) ? lot : { ...lot, mfg: "" });
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const setCount = (i: number, p: Partial<Count>) => setCounts((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));
   const setRow = (k: string, p: Partial<Row>) => setRows((rs) => rs && rs.map((r) => (r.key === k ? { ...r, ...p } : r)));
+  /** The SKU's lot changed: it goes to every pallet of the SKU already proposed. */
+  function setLot(i: number, next: Lot) {
+    const sku = counts[i].sku.trim();
+    const lot: Lot = mfgFor(sku, { batch: next.batch, mfg: next.mfg, expiry: next.expiry });
+    setCount(i, lot);
+    setRows((rs) => rs && applyLot(rs, sku, lot));
+  }
 
   function allocate() {
     setError(null);
+    const lotOf = (sku: string): Lot => { const c = counts.find((x) => x.sku.trim() === sku); return mfgFor(sku, { batch: c?.batch ?? "", mfg: c?.mfg ?? "", expiry: c?.expiry ?? "" }); };
     const bad = counts.find((c) => c.sku.trim() && (!item(c.sku.trim()) || !(Number(c.good) >= 0) || !(Number(c.damaged) >= 0)));
     if (bad) return setError(`SKU ${bad.sku}: tidak ada di Master item atau qty tidak valid.`);
     const lines = counts.filter((c) => c.sku.trim() && Number(c.good) > 0).map((c, i) => {
       const it = item(c.sku.trim());
       return { line: i + 1, sku: c.sku.trim(), uom: it.uom, description: it.description, quantity: Number(c.good), upp: it.upp };
     });
-    const r = planPutaway({ lines, emptyBins: setup.emptyBins, pickfaces: new Map(Object.entries(setup.pickfaces)) });
+    const r = planPutaway({ lines, emptyBins: setup.emptyBins, pickfaces: new Map(Object.entries(setup.pickfaces)), occupied: setup.occupied });
     const out: Row[] = r.pallets.map((p) => ({ key: `${p.sku}-${p.pallet_no}`, sku: p.sku, quantity: p.quantity, damaged: 0, bin: p.bin ?? "",
-      batch: "", expiry: "", mfg: "", why: p.why, full: p.full }));
+      ...lotOf(p.sku), why: p.why, full: p.full }));
     for (const c of counts) if (c.sku.trim() && Number(c.damaged) > 0) {
-      out.push({ key: `${c.sku}-rusak`, sku: c.sku.trim(), quantity: 0, damaged: Number(c.damaged), bin: "", batch: "", expiry: "", mfg: "", why: null, full: null });
+      out.push({ key: `${c.sku}-rusak`, sku: c.sku.trim(), quantity: 0, damaged: Number(c.damaged), bin: "", ...lotOf(c.sku.trim()), why: null, full: null });
     }
     setRows(out); setWarnings(r.warnings); setConfirming(false);
   }
@@ -80,10 +99,12 @@ export function PlanCheck({ receiptId, setup, actuals, onDone }: { receiptId: st
       <CardHeader><CardTitle>Periksa vs rencana · putaway otomatis</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-steel-500">1. Isi yang benar-benar datang per SKU (qty baik dan rusak; tambah SKU bila ada barang lain di kontainer).
+          Isi batch (dan tanggal produksi untuk drum, pail, IBC, fluidbag) <b>sekali per SKU</b>: expired terisi otomatis (dari kode batch Shell, atau tanggal produksi + masa simpan) dan semua palet SKU itu ikut.
           2. Tekan <b>Hitung putaway</b>: sistem membagi per palet dan memilih bin (palet penuh: karton B–E, drum B–C, pail A, fluidbag / IBC A–B;
-          sisa di bawah 1 palet ke pickface level A). Bin bisa diganti. Batch dan expired boleh diisi nanti (expired wajib sebelum posting). Drum, pail, IBC dan fluidbag: isi tanggal produksi untuk kartu palet.</p>
+          sisa di bawah 1 palet ke pickface level A). Bin bisa diganti, dan satu palet yang berbeda batch bisa diubah sendiri. Batch dan expired boleh diisi nanti (expired wajib sebelum posting).
+          Karton tidak perlu tanggal produksi.</p>
         <Table>
-          <thead><tr><Th>SKU</Th><Th>Kemasan</Th><Th className="text-right">Rencana</Th><Th className="text-right">Datang (baik)</Th><Th className="text-right">Rusak</Th><Th className="text-right">Selisih</Th><Th /></tr></thead>
+          <thead><tr><Th>SKU</Th><Th>Kemasan</Th><Th className="text-right">Rencana</Th><Th className="text-right">Datang (baik)</Th><Th className="text-right">Rusak</Th><Th className="text-right">Selisih</Th><Th>Batch</Th><Th>Tgl produksi</Th><Th>Expired</Th><Th /></tr></thead>
           <tbody>{counts.map((c, i) => {
             const it = item(c.sku.trim()), diff = Number(c.good || 0) + Number(c.damaged || 0) - c.planned;
             const pack = it ? packOf(c.sku.trim(), it.uom, it.description) : null;
@@ -99,13 +120,19 @@ export function PlanCheck({ receiptId, setup, actuals, onDone }: { receiptId: st
                 <Td className="text-right"><Input aria-label={`Rusak ${c.sku}`} className="ml-auto w-20 text-right" inputMode="numeric" value={c.damaged}
                   onChange={(e) => setCount(i, { damaged: e.target.value.replace(/[^\d]/g, "") })} /></Td>
                 <Td className={cn("text-right font-semibold tabular", diff < 0 ? "text-bad" : diff > 0 && "text-warn")}>{diff === 0 ? "–" : (diff > 0 ? "+" : "") + fmtNum(diff)}</Td>
+                <Td><Input aria-label={`Batch ${c.sku}`} className="w-28 uppercase" value={c.batch} placeholder="nanti"
+                  onChange={(e) => setLot(i, lotFromBatch(c, e.target.value, months(c.sku)))} /></Td>
+                <Td>{needsMfg(c.sku) ? <Input aria-label={`Tanggal produksi ${c.sku}`} type="date" className="w-40" value={c.mfg} max={today}
+                  onChange={(e) => setLot(i, lotFromMfg(c, e.target.value, months(c.sku)))} /> : <span className="text-xs text-steel-500">–</span>}</Td>
+                <Td><Input aria-label={`Expired ${c.sku}`} type="date" className="w-40" value={c.expiry}
+                  onChange={(e) => setLot(i, { batch: c.batch, mfg: c.mfg, expiry: e.target.value })} /></Td>
                 <Td>{c.planned === 0 && <Button size="icon" variant="ghost" aria-label="Hapus" onClick={() => setCounts((cs) => cs.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>}</Td>
               </tr>
             );
           })}</tbody>
         </Table>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setCounts([...counts, { sku: "", good: "", damaged: "0", planned: 0 }])}><Plus className="h-4 w-4" />Tambah SKU (tidak di rencana)</Button>
+          <Button size="sm" variant="outline" onClick={() => setCounts([...counts, { sku: "", good: "", damaged: "0", planned: 0, batch: "", mfg: "", expiry: "" }])}><Plus className="h-4 w-4" />Tambah SKU (tidak di rencana)</Button>
           <Button onClick={allocate}><Wand2 className="h-4 w-4" />Hitung putaway</Button>
         </div>
         {warnings.map((w) => <p key={w} className="rounded-md bg-warn/10 p-2 text-sm">{w}</p>)}
@@ -123,14 +150,9 @@ export function PlanCheck({ receiptId, setup, actuals, onDone }: { receiptId: st
                     onChange={(e) => setRow(r.key, { bin: e.target.value.toUpperCase(), why: null })} />
                     {r.why && <div className="text-xs text-bad">{r.why}</div>}</> : "KARANTINA"}</Td>
                   <Td><Input aria-label={`Batch palet ${i + 1}`} className="w-28 uppercase" value={r.batch} placeholder="nanti"
-                    onChange={(e) => {
-                      const batch = e.target.value.toUpperCase();
-                      // A Shell date-coded batch (14H26JJ) carries its manufacture date: fill it while the field is empty.
-                      setRow(r.key, { batch, ...(needsMfg(r.sku) && !r.mfg && batchMfgDate(batch) ? { mfg: batchMfgDate(batch)! } : {}) });
-                    }} /></Td>
-                  <Td>{needsMfg(r.sku) ? <Input aria-label={`Tanggal produksi palet ${i + 1}`} type="date" className="w-40" value={r.mfg}
-                    max={new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })} onChange={(e) => setRow(r.key, { mfg: e.target.value })} />
-                    : <span className="text-xs text-steel-500">–</span>}</Td>
+                    onChange={(e) => setRow(r.key, mfgFor(r.sku, lotFromBatch(r, e.target.value, months(r.sku))))} /></Td>
+                  <Td>{needsMfg(r.sku) ? <Input aria-label={`Tanggal produksi palet ${i + 1}`} type="date" className="w-40" value={r.mfg} max={today}
+                    onChange={(e) => setRow(r.key, lotFromMfg(r, e.target.value, months(r.sku)))} /> : <span className="text-xs text-steel-500">–</span>}</Td>
                   <Td><Input aria-label={`Expired palet ${i + 1}`} type="date" className="w-40" value={r.expiry} onChange={(e) => setRow(r.key, { expiry: e.target.value })} /></Td>
                 </tr>
               ))}</tbody>

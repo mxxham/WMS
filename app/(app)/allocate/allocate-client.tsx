@@ -14,7 +14,7 @@ import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { expiryText, withConfig } from "@/lib/allocator/config";
 import { loadWorkbookFromBuffer } from "@/lib/allocator/browser/browser-input";
 import { inventoryToStock } from "@/lib/allocator/adapters/inventory-stock";
-import { keptShipments, loadDispatchRules, loadEarlierWaves, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, loadStockCheckRows, savePlan, type PlanContext } from "@/lib/allocator/browser/plan-client";
+import { keptShipments, loadDispatchRules, loadEarlierWaves, loadPickfaceOverrides, loadPlanContext, loadPlanningStock, loadStockCheckRows, savePlan, type PlanContext, loadShellBinRules } from "@/lib/allocator/browser/plan-client";
 import { checkPlanStock, type StockCheckRow, type StockProblem } from "@/lib/allocator/stock-check";
 import { runPipeline, type PipelineResult } from "@/lib/allocator/pipeline";
 import { buildPlan } from "@/lib/allocator/plan";
@@ -97,6 +97,8 @@ export function AllocateClient() {
         minRemainingShelfLifeDaysBySku: minBySku,
         splitPalletAndCaseTasks: split,
         pickfaceTargetQty: target === "upp" ? "upp" : Number(target),
+        // 0132: bins Shell may not use (CKB 3PL, blocked, missing, planned) and the layout's aisle order, from the database.
+        ...(await loadShellBinRules(createClient())),
       });
       const wb = loadWorkbookFromBuffer(file.buf, config);
       if (wb.demand.length === 0) throw new Error(`Sheet "${wb.scheduleSheet?.trim() ?? "Schedule of the day"}" tidak berisi order.`);

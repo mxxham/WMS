@@ -3,6 +3,8 @@
 \set ON_ERROR_STOP on
 \pset tuples_only on
 begin;
+-- 0132: on the floor these bins are lent to CKB 3PL; this test uses them as Shell bins.
+update public.bins set owner = 'SHELL' where bin_code in ('CF35A02','CF36A01','CF36A02');
 reset role;
 insert into auth.users values ('11111111-1111-1111-1111-111111111111','sup@x','{"name":"Supervisor"}') on conflict do nothing;
 insert into auth.users values ('22222222-2222-2222-2222-222222222222','op@x','{"name":"Operator"}') on conflict do nothing;

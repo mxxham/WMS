@@ -6,6 +6,8 @@ import { Input, Label } from "@/components/ui/input";
 import { loginAction } from "./actions";
 import { Eye, EyeOff, Loader2, User, Lock, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NETWORK_MSG } from "@/lib/net";
+import { useRouter } from "next/navigation";
 
 /**
  * The sign-in form: username stays in state across the server action (React resets the form after
@@ -20,6 +22,29 @@ export function LoginForm({ next }: { next: string }) {
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched] = useState(false); // after first blur / failed native validation
   const [shake, setShake] = useState(false);
+  // No internet: the server action never runs, so the refusal is decided here,
+  // before the request — the same alert slot, the same message the app shows
+  // everywhere else (lib/net).
+  const [netErr, setNetErr] = useState(false);
+  const leaving = !!state.to;
+  const serverMsg = netErr ? NETWORK_MSG : state.error;
+
+  // Signed in. To Home: the login line drives on out to the right (`floor-exit`, globals.css), then
+  // Home opens and its line comes in from the left, the same arrow arriving. Home is prefetched while
+  // the line runs. Anywhere else, or with reduced motion: straight there, as before. The button keeps
+  // its busy state until the page is gone.
+  const router = useRouter();
+  useEffect(() => {
+    const to = state.to;
+    if (!to) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (to !== "/home" || reduce) { window.location.assign(to); return; }
+    router.prefetch(to);
+    document.querySelector("main")?.classList.add("floor-exit");
+    // Navigate while the line is still leaving: by the time Home renders, it is gone.
+    const t = setTimeout(() => router.push(to), 300);
+    return () => clearTimeout(t);
+  }, [state.to, router]);
 
   // A saved username is refilled; the checkbox reflects that.
   useEffect(() => {
@@ -36,14 +61,14 @@ export function LoginForm({ next }: { next: string }) {
     else localStorage.removeItem("wms_remembered_username");
   }, [remember, username]);
 
-  // One small shake when the server refuses the sign-in.
+  // One small shake when the server (or the offline check) refuses the sign-in.
   useEffect(() => {
-    if (state.error) {
+    if (serverMsg) {
       setShake(true);
       const t = setTimeout(() => setShake(false), 400);
       return () => clearTimeout(t);
     }
-  }, [state.error]);
+  }, [serverMsg]);
 
   const usernameEmpty = touched && username.length === 0;
   const passwordEmpty = touched && password.length === 0;
@@ -51,12 +76,22 @@ export function LoginForm({ next }: { next: string }) {
   return (
     <form
       action={run}
+      onSubmit={(e) => {
+        // A form event coexists with the server action: preventDefault drops the
+        // request before it is made. Back online, the next submit clears it.
+        if (!navigator.onLine) {
+          e.preventDefault();
+          setNetErr(true);
+        } else {
+          setNetErr(false);
+        }
+      }}
       className={cn("space-y-5", shake && "animate-shake")}
     >
       <input type="hidden" name="next" value={next} />
 
       {/* Username */}
-      <div className="login-field" style={{ "--d": "140ms" } as React.CSSProperties}>
+      <div>
         <Label htmlFor="username">Nama pengguna</Label>
         <div className="relative">
           <User aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-steel-500" />
@@ -90,7 +125,7 @@ export function LoginForm({ next }: { next: string }) {
       </div>
 
       {/* Password */}
-      <div className="login-field" style={{ "--d": "220ms" } as React.CSSProperties}>
+      <div>
         <div className="flex items-baseline justify-between">
           <Label htmlFor="password">Kata sandi</Label>
         </div>
@@ -133,7 +168,7 @@ export function LoginForm({ next }: { next: string }) {
       </div>
 
       {/* Remember me */}
-      <div className="login-field flex items-center" style={{ "--d": "300ms" } as React.CSSProperties}>
+      <div className="flex items-center">
         <label className="flex cursor-pointer items-center gap-2 text-sm text-steel-700">
           <input
             type="checkbox"
@@ -146,18 +181,21 @@ export function LoginForm({ next }: { next: string }) {
         </label>
       </div>
 
-      {/* Server message */}
-      {state.error && (
+      {/* Server message: the offline refusal or the sign-in refusal */}
+      {serverMsg && (
         <div role="alert" className="animate-fade-in flex items-start gap-2.5 rounded-md bg-bad/10 p-3 text-sm text-bad">
           <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>{state.error}</p>
+          <p>{serverMsg}</p>
         </div>
       )}
 
       {/* Submit */}
-      <div className="login-field" style={{ "--d": "360ms" } as React.CSSProperties}>
-        <Button type="submit" className="h-12 w-full text-base transition-transform hover:-translate-y-px active:translate-y-0 disabled:translate-y-0" disabled={pending} aria-busy={pending}>
-          {pending ? (
+      <div>
+        <Button type="submit" variant="floor" className={cn("floor-door h-12 w-full text-base focus-visible:ring-2 focus-visible:ring-jeir-navy focus-visible:ring-offset-2",
+          // Signed in: the door folds into the line at full colour, not in the faded disabled look.
+          leaving && "disabled:opacity-100")}
+          disabled={pending || leaving} aria-busy={pending || leaving}>
+          {pending || leaving ? (
             <>
               <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
               Masuk…

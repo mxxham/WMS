@@ -1,19 +1,19 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ABOUT } from "@/components/app/about-copy";
 import { homePrimary, sectionsFor, type NavLink } from "@/components/app/nav-config";
 import { Clock } from "@/components/app/clock";
-import type { Job } from "@/lib/jobs";
+import { FloorLine, FloorPhoto, TODAY_BOARD } from "@/components/floor/floor";
+import { FloorDoorLink } from "@/components/floor/floor-door-link";
+import { JOB_LABEL, type Job } from "@/lib/jobs";
 import { BRAND } from "@/config/brand";
 import { cn, fmtNum } from "@/lib/utils";
 
-const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ckb focus-visible:ring-offset-2";
-/** Stagger for the entrance animation (globals.css `.home-rise` reads --d). */
-const delay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
+const FOCUS_NAVY = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-floor focus-visible:ring-offset-2 focus-visible:ring-offset-jeir-navy";
+const FOCUS_PAPER = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ckb focus-visible:ring-offset-2";
 
-/** Four warehouse-wide counts for the status strip, same sources as the dashboard's "Operasi hari ini". */
+/** Four warehouse-wide counts for the board, same sources as the dashboard's "Operasi hari ini". */
 export type HomeStats = {
   masuk: number;
   keluar: number;
@@ -22,147 +22,159 @@ export type HomeStats = {
 };
 
 /**
- * Home (/home, opened from the logo): the welcome banner runs edge to edge (no card), a navy status
- * strip continues the image's own right panel — greeting, today's pulse and the way in — then every
- * module the job can open, and who built the system.
+ * Home (/home, opened from the logo), read like the warehouse floor (components/floor):
+ * 1. the lobby: the floor in navy, the greeting, and one yellow floor line to this person's next step;
+ * 2. today's board: the four counts the floor asks about first;
+ * 3. the directory: every module the job opens, as aisle signs with one line on what each is for;
+ * 4. who built it, in their own photo.
  */
 export function HomePage({ job, greet, dateLine, date, stats }: {
   job: Job; greet: string; dateLine: string; date: string; stats: HomeStats;
 }) {
   return (
     <main>
-      <Hero job={job} greet={greet} dateLine={dateLine} date={date} stats={stats} />
-      <div className="px-4 pb-10 lg:px-10">
-        <Modules job={job} />
-        <Credits />
-      </div>
+      <Lobby job={job} greet={greet} dateLine={dateLine} />
+      <Board date={date} stats={stats} />
+      <Directory job={job} />
+      <Builders />
     </main>
   );
 }
 
-/**
- * The banner image carries the name and "Welcome to" itself, so the heading is for screen readers
- * only. Its right panel is open navy, so the strip under it (`bg-jeir-side`, the sidebar gradient)
- * reads as the image simply continuing: first row greeting and CTAs, second row today's pulse.
- */
-function Hero({ job, greet, dateLine, date, stats }: {
-  job: Job; greet: string; dateLine: string; date: string; stats: HomeStats;
-}) {
+function Lobby({ job, greet, dateLine }: { job: Job; greet: string; dateLine: string }) {
   const primary = homePrimary(job);
-  const buttons = (cls: string) => (
-    <>
-      <Button asChild variant="accent" className={cn(cls, FOCUS, "focus-visible:ring-offset-jeir-navy")} style={delay(500)}>
-        <Link href={primary.href}>{primary.label}<ChevronRight aria-hidden className="h-[1.1em] w-[1.1em]" /></Link>
-      </Button>
-      <a href="#home-modules" style={delay(650)}
-        className={cn(FOCUS, "focus-visible:ring-offset-jeir-navy", "inline-flex items-center justify-center rounded-md bg-white font-semibold text-jeir-navy shadow-sm transition-colors hover:bg-ckb-tint", cls)}>
-        {ABOUT.modulesButton}
-      </a>
-    </>
-  );
   return (
-    <section aria-labelledby="home-title" className="home-shine relative overflow-hidden bg-jeir-navy text-white">
-      <h1 id="home-title" className="sr-only">{ABOUT.name}</h1>
-      <div className="relative">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={BRAND.banner} alt={`Dua pekerja gudang CKB menyambut di lorong rak; tulisan: Welcome to ${BRAND.appName}, Warehouse Management System`}
-          width={1600} height={900} className="home-banner-in block aspect-video w-full object-cover" />
-        {/* The image's own bottom eases into the strip: navy rises from the bottom edge. */}
-        <div aria-hidden className="absolute inset-x-0 bottom-0 h-[22%] bg-gradient-to-t from-jeir-navy via-jeir-navy/30 to-transparent" />
-      </div>
-      {/* Darkest at the sidebar's edge, easing brighter rightward into the banner's own field. */}
-      <div className="relative home-strip">
-        <div className="flex flex-col gap-5 px-4 pb-4 pt-5 lg:flex-row lg:items-center lg:justify-between lg:gap-8 lg:px-10">
-          <div className="home-rise min-w-0" style={delay(200)}>
-            {/* The greeting IS the whole line now (about-copy.ts carries the name inside it). */}
-            <p className="font-cond text-2xl font-semibold tracking-tight lg:text-3xl">{greet}</p>
-            <p className="mt-1 text-sm text-white/60">{dateLine}</p>
-          </div>
-          <div className="home-rise flex flex-wrap items-center gap-3" style={delay(350)}>
-            {/* The same warehouse clock every page's header carries, tinted for the navy strip. */}
-            <Clock className="text-white/70" />
-            {buttons("h-12 px-6 text-base")}
-          </div>
+    <section aria-labelledby="home-greeting" data-floor-stage className="relative isolate overflow-hidden bg-jeir-navy text-white">
+      <FloorPhoto src={BRAND.floorPhoto} alt="" position="50% 62%" />
+      {/* Darkest behind the words, opening up toward the racks on the right. */}
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-jeir-navy via-jeir-navy/80 to-jeir-navy/20" />
+      <div aria-hidden className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-jeir-navy to-transparent" />
+
+      <div className="relative px-4 pb-10 pt-8 sm:px-8 lg:px-12 lg:pb-14 lg:pt-12">
+        <div className="flex items-center justify-between gap-4 text-sm text-white/70">
+          <p>{dateLine}</p>
+          <Clock className="text-white/70" />
         </div>
-        <div className="border-t border-white/10">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 px-4 py-4 sm:grid-cols-4 lg:px-10">
-            <Stat label="Karton masuk hari ini" value={fmtNum(stats.masuk)} href={`/audit/putaway?date=${date}`} />
-            <Stat label="Karton keluar hari ini" value={fmtNum(stats.keluar)} href={`/waves?date=${date}`} />
-            <Stat label="Wave selesai" value={`${fmtNum(stats.waves.done)}/${fmtNum(stats.waves.total)}`} href={`/waves?date=${date}`} />
-            <Stat label="Tugas pick selesai" value={`${fmtNum(stats.picks.done)}/${fmtNum(stats.picks.total)}`} href={`/waves?date=${date}`} />
-          </div>
+
+        <h1 id="home-greeting" className="mt-8 max-w-[22ch] text-balance font-cond text-[clamp(2rem,1.35rem+2.6vw,3.75rem)] font-bold leading-[1.02] tracking-[-0.02em] lg:mt-14">
+          {greet}
+        </h1>
+        <p className="mt-4 max-w-prose text-white/70">
+          {BRAND.appName}, {BRAND.site}. Masuk sebagai {JOB_LABEL[job]}.
+        </p>
+
+        {/* The floor line: from the greeting to this job's first stop. */}
+        <div className="mt-10 flex items-center gap-1 lg:mt-14">
+          <FloorLine className="max-w-[min(56rem,100%)]" />
+          <Button asChild variant="floor" className={cn("floor-door h-14 shrink-0 px-6 text-lg", FOCUS_NAVY)}>
+            <FloorDoorLink href={primary.href}>{primary.label}</FloorDoorLink>
+          </Button>
         </div>
       </div>
     </section>
   );
 }
 
-function Stat({ label, value, href }: { label: string; value: string; href: string }) {
+/** Today's counts as a departure-style board: big tabular numerals, the label under each, every one a link. */
+function Board({ date, stats }: { date: string; stats: HomeStats }) {
+  const items = [
+    { value: fmtNum(stats.masuk), label: "Karton masuk hari ini", href: `/audit/putaway?date=${date}` },
+    { value: fmtNum(stats.keluar), label: "Karton keluar hari ini", href: `/waves?date=${date}` },
+    { value: `${fmtNum(stats.waves.done)}/${fmtNum(stats.waves.total)}`, label: "Wave selesai", href: `/waves?date=${date}` },
+    { value: `${fmtNum(stats.picks.done)}/${fmtNum(stats.picks.total)}`, label: "Tugas pick selesai", href: `/waves?date=${date}` },
+  ];
   return (
-    <Link href={href} className={cn(FOCUS, "-mx-2 rounded-md px-2 py-1.5 transition hover:bg-white/10")}>
-      <span className="block font-cond text-2xl font-semibold tabular">{value}</span>
-      <span className="block text-xs text-white/60">{label}</span>
-    </Link>
-  );
-}
-
-function Modules({ job }: { job: Job }) {
-  const primary = homePrimary(job).href;
-  let i = 0;
-  return (
-    <section aria-labelledby="home-modules-title" id="home-modules" className="relative scroll-mt-6 space-y-6 pt-10">
-      <span aria-hidden className="home-dots pointer-events-none absolute right-0 top-0 hidden h-28 w-56 lg:block" />
-      <h2 id="home-modules-title" className="font-cond text-2xl font-semibold">{ABOUT.modulesTitle}</h2>
-      {sectionsFor(job).map((sec) => (
-        <div key={sec.title ?? "top"} className="space-y-2">
-          {sec.title && <h3 className="text-xs font-semibold uppercase tracking-wide text-steel-500">{sec.title}</h3>}
-          <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
-            {sec.links.map((l) => (
-              <li key={l.href} className="home-rise" style={delay(Math.min(i++ * 40, 600))}>
-                <ModuleCard link={l} primary={l.href === primary} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function ModuleCard({ link: { href, label, icon: Icon }, primary }: { link: NavLink; primary?: boolean }) {
-  return (
-    <Link href={href}
-      className={cn("group relative flex min-h-20 items-center gap-3.5 rounded-xl bg-white p-4 font-medium text-steel transition hover:-translate-y-0.5 hover:shadow-md",
-        primary ? "ring-1 ring-ckb" : "ring-1 ring-steel-100", FOCUS)}>
-      <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ckb-tint text-ckb-dark transition-colors group-hover:bg-ckb group-hover:text-white">
-        <Icon aria-hidden className="h-5 w-5" />
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-      {primary && <span className="absolute right-3 top-2 text-[11px] font-semibold leading-4 text-ckb">Mulai di sini</span>}
-      <ChevronRight aria-hidden className="ml-auto h-4 w-4 shrink-0 text-steel-300 transition group-hover:translate-x-0.5 group-hover:text-ckb" />
-    </Link>
-  );
-}
-
-/** Who built it: a slim navy strip at the end, in the sidebar's gradient. */
-function Credits() {
-  return (
-    <section aria-labelledby="home-credits" className="mt-8 flex flex-col gap-4 rounded-2xl bg-jeir-navy bg-jeir-bar px-6 py-5 text-white sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h2 id="home-credits" className="font-cond text-lg font-semibold text-jeir-teal">{ABOUT.creditTitle}</h2>
-        <p className="text-sm text-white/70">{ABOUT.about}</p>
-      </div>
-      <ul className="flex flex-wrap gap-5">
-        {ABOUT.builders.map((b) => (
-          <li key={b.name} className="flex items-center gap-3">
-            {b.photo
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={b.photo} alt={b.name} width={44} height={44} className="h-11 w-11 rounded-full object-cover ring-2 ring-jeir-teal/60" />
-              : <span aria-hidden className="flex h-11 w-11 items-center justify-center rounded-full bg-jeir-teal font-cond text-xl font-bold text-jeir-navy">{b.name.charAt(0)}</span>}
-            <span className="text-lg font-medium">{b.name}</span>
+    // Opening the Dashboard from the button, this board grows into its "Hari ini" panel (FloorDoorLink).
+    <section aria-labelledby="home-today" className="border-t border-white/10 bg-jeir-navy text-white" style={{ viewTransitionName: TODAY_BOARD }}>
+      <h2 id="home-today" className="sr-only">Hari ini di gudang</h2>
+      {/* 1px gaps over a lighter ground draw the dividers, whatever the column count. */}
+      <ul className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-4">
+        {items.map((it) => (
+          <li key={it.label} className="bg-jeir-navy">
+            <Link href={it.href} className={cn("block px-4 py-5 transition-colors hover:bg-white/5 sm:px-8 lg:px-12", FOCUS_NAVY, "focus-visible:ring-inset")}>
+              <span className="block font-cond text-[clamp(1.75rem,1.4rem+1.4vw,2.75rem)] font-bold leading-none tabular-nums">{it.value}</span>
+              <span className="mt-2 block text-sm text-white/65">{it.label}</span>
+            </Link>
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/**
+ * Every module the job opens, grouped as aisles: each group has a sign (the navy plate at the head of a
+ * rack row) and its modules are rows with one line on what they are for. The job's first stop keeps the
+ * floor line's end on its left edge, so the lobby's line visibly arrives here too.
+ */
+function Directory({ job }: { job: Job }) {
+  const primary = homePrimary(job).href;
+  return (
+    <section aria-labelledby="home-modules-title" id="home-modules" className="scroll-mt-6 bg-paper px-4 pb-6 pt-12 sm:px-8 lg:px-12 lg:pt-16">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <h2 id="home-modules-title" className="font-cond text-3xl font-bold tracking-[-0.01em] text-steel">Semua modul</h2>
+        <p className="text-sm text-steel-500">Yang bisa dibuka {JOB_LABEL[job]}</p>
+      </div>
+      {/* Balanced columns: groups of very different lengths (1 to 7 modules) settle without holes. */}
+      <div className="mt-8 gap-x-10 xl:columns-2">
+        {sectionsFor(job).map((sec) => (
+          <div key={sec.title ?? "ringkasan"} className="mb-10 break-inside-avoid">
+            <h3 className="inline-flex items-center gap-3 rounded-plate bg-jeir-navy px-3 py-1.5 font-cond text-lg font-bold text-white">
+              {sec.title ?? "Ringkasan"}
+              <span className="text-sm font-medium text-white/60 tabular-nums">{fmtNum(sec.links.length)}</span>
+            </h3>
+            <ul className="mt-3 divide-y divide-steel-100 rounded-lg bg-white ring-1 ring-steel-100">
+              {sec.links.map((l) => <li key={l.href}><Row link={l} primary={l.href === primary} /></li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Row({ link: { href, label, blurb, icon: Icon }, primary }: { link: NavLink; primary: boolean }) {
+  return (
+    <Link href={href} className={cn("group relative flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-paper", FOCUS_PAPER, "focus-visible:ring-inset")}>
+      {primary && <span aria-hidden className="absolute inset-y-0 left-0 w-1.5 bg-floor" />}
+      <Icon aria-hidden className="h-5 w-5 shrink-0 text-ckb" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="font-semibold text-steel">{label}</span>
+          {primary && <span className="text-xs font-semibold text-ckb-dark">Mulai di sini</span>}
+        </span>
+        <span className="block text-sm text-steel-500">{blurb}</span>
+      </span>
+      <ArrowRight aria-hidden className="h-4 w-4 shrink-0 text-steel-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ckb" />
+    </Link>
+  );
+}
+
+/** Who built it: the two of them in the warehouse, from their own welcome banner. */
+function Builders() {
+  return (
+    <section aria-labelledby="home-credits" className="bg-paper px-4 pb-12 pt-6 sm:px-8 lg:px-12 lg:pb-16 lg:pt-10">
+      <div className="grid overflow-hidden rounded-lg bg-jeir-navy text-white md:grid-cols-[18rem_minmax(0,1fr)] md:items-center lg:grid-cols-[20rem_minmax(0,1fr)_auto]">
+        {/* A fixed square column: the photo is cropped to the two of them and never stretched wide. */}
+        <div className="relative aspect-square w-full">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={BRAND.builders} alt={`${ABOUT.builders.map((b) => b.name).join(" dan ")} di lorong rak gudang CKB`}
+            width={720} height={720} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
+        </div>
+        <div className="flex flex-col justify-center gap-3 px-6 py-8 md:px-10">
+          <h2 id="home-credits" className="font-cond text-3xl font-bold leading-tight">
+            {ABOUT.creditTitle}{" "}
+            <span className="whitespace-nowrap">{ABOUT.builders.map((b) => b.name).join(" & ")}</span>
+          </h2>
+          <p className="max-w-prose text-white/70">{ABOUT.about} {ABOUT.copyright}.</p>
+        </div>
+        {/* The banner's lettering, back beside the people it was cut from: transparent, so it sits straight
+            on the band's navy with no box around it. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={BRAND.bannerLettering} alt={`Welcome to ${BRAND.appName}, Warehouse Management System`}
+          width={560} height={500} loading="lazy" decoding="async"
+          className="mr-10 hidden h-auto w-60 lg:block xl:w-64" />
+      </div>
     </section>
   );
 }

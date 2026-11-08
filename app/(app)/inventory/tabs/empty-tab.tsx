@@ -5,6 +5,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { binDistance, distanceLabel, parseBin } from "@/lib/bin-distance";
 import { cn, fmtNum } from "@/lib/utils";
+import { EmptyBinsDownload } from "./empty-download";
 
 export type EmptyBin = { bin_code: string; zone: string; rack: string | null; level: string | null; position: string | null; abc_class: string | null };
 
@@ -35,6 +36,15 @@ export function EmptyTab({ bins, near, aisle, level }: { bins: EmptyBin[]; near:
     return `/inventory?${q.toString()}`;
   };
 
+  // The download holds every matching bin in the same order as the table, not only the first SHOW.
+  const rows = sorted.map((b) => ({
+    Bin: b.bin_code, Lorong: b.zone, Rak: b.rack, Level: b.level, Posisi: b.position, "Kelas ABC": b.abc_class,
+    ...(from ? { [`Jarak dari ${near.toUpperCase()}`]: distanceLabel(from, b) } : {}),
+  }));
+  const day = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+  const filename = ["bin_kosong", aisle && `lorong-${aisle}`, level && `level-${level}`, from && `dekat-${near.toUpperCase()}`, day]
+    .filter(Boolean).join("_") + ".xlsx";
+
   const tile = (active: boolean) => cn(
     "min-w-[4.5rem] rounded-md px-3 py-2 text-left ring-1 transition-colors",
     active ? "bg-ckb-tint ring-ckb text-ckb-dark" : "bg-white ring-steel-100 hover:bg-steel-100",
@@ -47,7 +57,10 @@ export function EmptyTab({ bins, near, aisle, level }: { bins: EmptyBin[]; near:
           Bin rak yang aktif, kosong, dan tidak sedang dituju tugas relokasi. Isi <b>dekat bin</b> dengan bin tempat Anda berdiri
           (mis. palet yang sisanya perlu tempat) untuk melihat bin kosong terdekat dulu.
         </p>
-        <span className="text-sm text-steel-500"><b className="font-cond text-lg text-steel tabular">{fmtNum(filtered.length)}</b> bin cocok</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-steel-500"><b className="font-cond text-lg text-steel tabular">{fmtNum(filtered.length)}</b> bin cocok</span>
+          <EmptyBinsDownload rows={rows} filename={filename} />
+        </div>
       </div>
 
       <Card>

@@ -12,6 +12,9 @@ select pg_temp.as_user(pg_temp.u('sup'));
 select ckb_import_sap_snapshot(:'c_fp', date '2026-10-24', '{"name":"fp.xlsx","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","size":10}',
   '[{"line":2,"material_code":"M-1","storage_bin":"CG01A01","uom":"BAG","quantity":10},{"line":3,"material_code":"M-2","storage_bin":"CG01A02","uom":"BAG","quantity":5},{"line":4,"material_code":"M-3","storage_bin":"CG01A03","uom":"BAG","quantity":5}]', '[]', null) as imp \gset
 select ckb_create_stocktake(:'c_fp', :'imp', 'FULL', null, 'Warehouse 5', false, null, null) as st \gset
+-- 0133: this file pins the 0101 rules; the photo rules of 0133 are tested in 97.
+reset role; update ckb_stocktakes set photo_rules = false where id = :'st'; set role authenticated;
+select pg_temp.as_user(pg_temp.u('sup'));
 select ckb_start_stocktake(:'st');
 select pg_temp.as_user(pg_temp.u('op'));
 select ckb_submit_count(t.id, case t.material_code when 'M-1' then 4 when 'M-2' then 7 else 1 end, null, null, null, null, null, gen_random_uuid())

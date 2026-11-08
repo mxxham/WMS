@@ -312,8 +312,8 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
 ## Gotchas
 
 - **Working tree is dirty.** `lib/allocator/config.ts` (phantom-rack `blockedBins`: full CE33 row,
-  CE32 position 02, CE34 position 01 — pillars on the floor, rows deleted from the DB but listed so
-  the engine never picks from or relocates into them) and `tests/stock-adapter.test.ts` have
+  CE32 position 02, CE34 position 01 — pillars on the floor; since 0132 they are `NOT_PRESENT` bins in the
+  database and the list is only the offline CLI fallback) and `tests/stock-adapter.test.ts` have
   uncommitted edits. `.vercel.bak-allocator/` and `.vercel.bak-ckb-warehouse/` are untracked. Do not
   revert or overwrite them.
 - **`npm` `xlsx@0.18.5` has advisories** (prototype pollution / ReDoS) fixed in the official CDN build:
@@ -329,10 +329,68 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
 - **SheetJS time cells (`cellDates`) are local clock time with Jakarta's 1899 offset (+7:07:12)** —
   read them with `sheetTimeHHMM` (`excel-date.ts`), never `toISOString()` (08:00 became `00:52`
   on the page until 1 Nov 2026). ExcelJS (CLI) returns UTC instead.
+- **`Penerimaan` lists one day** (`?date=`): a planned receipt on its `plan_date`, a manual one on its Jakarta creation
+  day; unfinished receipts of other days are only counted in a notice. On a planned check, batch / production date /
+  expiry are typed once per SKU and copied to its pallets (`lib/inbound/lot.ts`). Production date only for
+  drum / pail / IBC / fluidbag (`packOf` != Carton); cartons never carry one.
+- **Auto putaway groups by SKU, never by rack name** (`planPutaway`): a rack already holding the SKU first, then a rack
+  with no other SKU, then any; ties by distance, free room, then a hash. A rack still never belongs to one SKU.
+  Outbound overflow, Bin To Bin and the Putaway upload do not yet respect bins a checked receipt reserved.
+- **ABC is a monthly run with history** (0126, `/abc`, `lib/abc.ts`): `abc_ensure_monthly()` computes and applies the
+  previous Jakarta month on the first Dashboard or `Kelas ABC` visit of a month (idempotent; a month without picking is
+  skipped). Basis = picking lines; the SKU crossing a limit stays in the class below (`classify` mirrors
+  `abc_compute`). `abc_runs`/`abc_run_items` are append-only; a run is only ever marked applied. Limits
+  `abc_a_pct`/`abc_b_pct` live in `inventory_policy`. `recompute_abc` (0002) is no longer called from the UI.
+- **SQL test 82 fails in the full `scripts/sql-test.sh` run** (passes alone, also on 4161365): tests 02/03 do not roll
+  back and leave stock in CF21A01/CF39A01, which re-running 0120 refuses. Pre-existing, not a regression.
+- **Login and Home are the "floor" screens** (`components/floor`, `.floor-*` in globals.css): navy photo, one yellow
+  floor line (`floor` #F5C518 = "the way in" only: the line and its one button; the banner cyan was tried on 1 Nov and
+  the user preferred the yellow. Keep it apart from `warn` amber, which means "warning"). Sign-in (Shell WMS, no `next`)
+  now lands on `/home`, not `/scan`/`/dashboard`: the login line exits right (`floor-exit`) and the Masuk button folds
+  flat into it (`.floor-door`; on a phone it just folds away), then Home's line enters from the left.
+  Home's loading skeleton must not draw the line (it would run twice). Module blurbs live in `nav-config.ts`.
+- **A Tailwind theme change (`tailwind.config.ts`) needs a dev-server restart AND a recompile of `app/globals.css`**
+  (`touch app/globals.css`, or `rm -rf .next/cache`): the webpack cache in `.next` keeps the old compiled CSS across
+  restarts (1 Nov: cyan stayed after switching back to yellow and restarting).
+- **Never run a second `next dev` in this folder** while the user's is running: both write `.next` and break each
+  other (sign-in failed mid-test, 1 Nov). Test from a copy (rsync without `.env*`, symlinked `node_modules`).
+- **Putaway is posted the morning after it happens**, so `Tanggal barang datang` defaults to yesterday. Anything
+  counting inflow per day (dashboard/home `Karton masuk`, `volume_in_daily`, Buku stok) books a putaway on
+  `putaway_arrival_moves.arrival_date`, not `created_at` — use `lib/inbound-day.ts` (0125).
 - **Putaway also takes the raw "Rekap inbound <yyyymm>" workbook** (sheets `01`..`31`, plus
   `Pallet ID`). The day sheet sets the arrival date; distinct Pallet IDs into one bin are summed
   into one line (`pallet_lines`); a Pallet ID with no `BIN Location` is still in staging and only
   counted. The WMS `data putaway` sheet keeps its old rules. `tests/putaway-rekap.test.ts`.
+- **Investigasi selisih (0129, `recon/investigate.tsx`, `lib/recon-investigate.ts`)** corrects today's on hand from a
+  `Rekonsiliasi SAP` line: `recon_suspect_bins` scores every bin the SKU is in / was ever in (balances walked back from
+  today's stock), `recon_check_bin` records a look (append-only), `recon_fix_plan` nets per batch + expiry into Bin To
+  Bin + residual FOUND/LOST, `recon_apply_fix` posts it (above the limit: not by a checker). Preview and apply share
+  `recon_fix_plan`. A check is stale when the bin's system lines differ from its snapshot (not by timestamps: one
+  transaction has one `now()`). The line keeps the day's numbers; `wms_fix` holds what was posted. SQL test 90.
+- **Perubahan lokasi (0130, `Audit picking` tab `lokasi`, `lib/location-changes.ts`)**: a trigger on `pick_tasks` writes
+  one append-only `pick_location_changes` row whenever a task's effective location (actual-or-planned bin + batch + expiry,
+  or a Bin To Bin destination) changes, so a new path that moves a pick is caught without editing it. Copied data, no FK:
+  the history outlives a re-planned wave. Who/why come from the `execution_events` sentence of the same transaction
+  (joined on `now()` in `pick_location_change_list`), so keep logging that sentence in any new path. Changes before 0130
+  were read back from those sentences (source `LOG`); Isi dari picklist ones before 0130 are not recoverable. SQL test 91.
+- **Volume keluar counts a pick on its wave's day** (`volume_out_daily`, 0131): a posted task's litres go to
+  `waves.planned_date`, not the posting day (yesterday's wave posted today stayed on today until 8 Nov). Only a picking
+  movement without a task falls back to its posting day. Buku stok still books stock on the posting day. SQL test 92.
+- **Rak & Lokasi (0132, `/racks`, `lib/racks.ts`, spec `docs/superpowers/specs/2026-11-08-racks-and-locations-design.md`)**:
+  every rack bin has a state (`status` + `block_kind`: Aktif / `BLOCKED` / `NOT_PRESENT` pillar / `PLANNED` not built) and
+  an owner (`SHELL` / `CKB`; floor locations have none and are shared). "May Shell use this bin" is `bin_usable()` in SQL and
+  `usableForShell` in TS — never a zone list or regex again. Changes only through `apply_bin_change` / `set_bin_attrs` /
+  `plan_racks` / `activate_planned` / `cancel_planned` (preview twins, reason, `bin_changes` history); `bins` has no write
+  policy. `movements_a_bin_guard` refuses stock into NOT_PRESENT/PLANNED bins and any movement on the other side's rack
+  (CKB side = `app.ckb_movement` on, or a rebagging job's `ref_id`). The import skips + reports CKB / missing / planned rows
+  (`skipped`) and full_sync never zeroes CKB racks. The app passes the database's unusable bins to the engine per run
+  (`loadShellBinRules`); `rackLocationPattern` is `C[A-Z]`. SQL tests that use CG / CF21-40A as Shell bins declare
+  `owner = 'SHELL'` at their top. SQL tests 93-96, `tests/racks*.test.ts`.
+- **CKB blind count (0133, `/ckb/count`, `/ckb/stock-take/[id]/assign`, `lib/ckb/count-rules.ts`)**: lines are assigned to
+  counters per location; the `operator` CKB role never reads SAP quantities, adjustments, counts or notes (RLS +
+  `ckb_stocktake_tasks`); photo rules per round are enforced by triggers on `ckb_counts` / `ckb_evidence` /
+  `ckb_count_tasks` (only sessions with `photo_rules`, i.e. created after 0133). CKB SQL tests that pin 0101 behaviour set
+  `photo_rules = false` on their session. `docs/CKB_3PL.md` §5.4b, SQL test 97.
 - **Data issues are real, not hypothetical** — `docs/DATA_ISSUES.md`: bin CC01C01 holds `#VALUE!`,
   CE08A01 expired in 1930, batches CD39C01/C02 that Excel read as dates, 129 bins with qty 0, 57
   duplicate `Lokasi` rows. Column mapping is `docs/DATA_MAPPING.md`. Import

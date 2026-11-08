@@ -14,6 +14,7 @@ const bins: string[] = [];
 for (const a of ['CA', 'CB']) for (let r = 1; r <= 5; r++) for (const l of 'ABCDE') bins.push(`${a}${String(r).padStart(2, '0')}${l}01`);
 const line = (o: Partial<PutawayLine>): PutawayLine => ({ line: 1, sku: '550070614', uom: 'CAR', description: 'Hlx_4*4L', quantity: 72, upp: 36, ...o });
 const levelOf = (b: string | null) => b?.[4];
+const rackOf = (b: string | null) => b?.slice(0, 4);
 
 test('packaging: master list first, then UoM / description', () => {
   assert.equal(packOf('550070614', 'CAR', ''), 'Carton');
@@ -66,9 +67,12 @@ test('550062285 (Gadus 770 kg, fluidbag, 1 per pallet): full pallets may use lev
   assert.deepEqual(r.pallets.map((p) => p.bin), ['CC05B01', 'CC05A01', 'CC05A02'], 'B first, then A; never C-E');
 });
 
-test('no pickface: the leftover goes to the first empty level-A bin', () => {
+test('no pickface: the leftover goes to an empty level-A bin (not by name: CA01 is not the default)', () => {
   const r = planPutaway({ lines: [line({ quantity: 10 })], emptyBins: bins, pickfaces: new Map() });
-  assert.equal(r.pallets[0].bin, 'CA01A01');
+  assert.equal(levelOf(r.pallets[0].bin), 'A');
+  const starts = new Set(['550000001', '550000002', '550000003', '550000004', '550000005', '550000006'].map((sku) =>
+    rackOf(planPutaway({ lines: [line({ sku, quantity: 10 })], emptyBins: bins, pickfaces: new Map() }).pallets[0].bin)));
+  assert.ok(starts.size > 1, 'equal racks: different SKUs start in different racks');
 });
 
 test('no free bin left: the pallet has no bin and says why', () => {
@@ -93,8 +97,6 @@ test('two lines never get the same bin', () => {
   const used = r.pallets.map((p) => p.bin);
   assert.equal(new Set(used).size, used.length);
 });
-
-const rackOf = (b: string | null) => b?.slice(0, 4);
 
 test('level A is only for leftovers: a full carton or drum pallet never goes to A, even when A is the only free bin', () => {
   const onlyA = ['CE20A01', 'CE20A02', 'CE18A01'];
@@ -155,6 +157,52 @@ test('spread over many sample layouts: the start rack follows free room, never o
   }
   assert.equal(starts.size, 6);
   assert.ok(!starts.has('CA01'));
+});
+
+// ---- Grouping by where the SKU already is ----------------------------------------------------------------
+const rackBins = (rack: string, levels = 'BCDE', positions = ['01', '02']) => levels.split('').flatMap((l) => positions.map((p) => `${rack}${l}${p}`));
+
+test('a SKU goes to the rack that already holds it, even when another rack has more room or is nearer its pickface', () => {
+  const free = [...rackBins('CD08', 'CD', ['02']), ...rackBins('CB04'), ...rackBins('CA01')];
+  const r = planPutaway({ lines: [line({ quantity: 36 * 2 })], emptyBins: free, pickfaces: new Map([['550070614', 'CB04A01']]),
+    occupied: [{ bin: 'CD08B01', sku: '550070614' }, { bin: 'CD08C01', sku: '550070614' }] });
+  assert.deepEqual(r.pallets.map((p) => rackOf(p.bin)), ['CD08', 'CD08']);
+});
+
+test('of two racks holding the SKU, the one holding most of it first', () => {
+  const free = [...rackBins('CC02', 'E', ['02']), ...rackBins('CF30', 'E', ['02'])];
+  const r = planPutaway({ lines: [line({ quantity: 36 })], emptyBins: free, pickfaces: new Map(),
+    occupied: [{ bin: 'CC02B01', sku: '550070614' }, { bin: 'CF30B01', sku: '550070614' }, { bin: 'CF30C01', sku: '550070614' }] });
+  assert.equal(rackOf(r.pallets[0].bin), 'CF30');
+});
+
+test('its rack full: the next rack is near its stock, and a rack with no other SKU beats a mixed one', () => {
+  const free = [...rackBins('CC05', 'BC'), ...rackBins('CC06', 'BC'), ...rackBins('CC09', 'BC')];
+  const r = planPutaway({ lines: [line({ quantity: 36 * 2 })], emptyBins: free, pickfaces: new Map(),
+    occupied: [{ bin: 'CC04B01', sku: '550070614' }, { bin: 'CC05D01', sku: '550099001' }, { bin: 'CC06D01', sku: '550099002' }] });
+  assert.deepEqual(r.pallets.map((p) => rackOf(p.bin)), ['CC09', 'CC09'], 'CC05 and CC06 are nearer but hold other SKUs');
+});
+
+test('only mixed racks left: the nearest one is used rather than no bin', () => {
+  const free = [...rackBins('CC05', 'B'), ...rackBins('CC20', 'B')];
+  const r = planPutaway({ lines: [line({ quantity: 36 })], emptyBins: free, pickfaces: new Map([['550070614', 'CC04A01']]),
+    occupied: [{ bin: 'CC05D01', sku: '550099001' }, { bin: 'CC20D01', sku: '550099002' }] });
+  assert.equal(rackOf(r.pallets[0].bin), 'CC05');
+});
+
+test('two SKUs of one receipt with neighbouring pickfaces get a rack each, not one shared rack', () => {
+  const free = [...rackBins('CC03'), ...rackBins('CC04'), ...rackBins('CC02')];
+  const r = planPutaway({ lines: [line({ quantity: 36 * 3 }), line({ line: 2, sku: '550038021', quantity: 36 * 3 })], emptyBins: free,
+    pickfaces: new Map([['550070614', 'CC03A01'], ['550038021', 'CC03A02']]) });
+  const a = new Set(r.pallets.filter((p) => p.sku === '550070614').map((p) => rackOf(p.bin)));
+  const b = new Set(r.pallets.filter((p) => p.sku === '550038021').map((p) => rackOf(p.bin)));
+  assert.deepEqual([...a], ['CC03']); assert.equal(b.size, 1); assert.ok(!b.has('CC03'));
+});
+
+test('bay 21 is behind bay 01: it counts as next to it, not 20 bays away', () => {
+  const free = [...rackBins('CB21', 'B'), ...rackBins('CB05', 'B')];
+  const r = planPutaway({ lines: [line({ quantity: 36 })], emptyBins: free, pickfaces: new Map([['550070614', 'CB01A01']]) });
+  assert.equal(rackOf(r.pallets[0].bin), 'CB21');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

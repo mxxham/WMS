@@ -98,9 +98,11 @@ calls, reading the same table. Sub-routes follow their parent (`/audit/picking/.
 | Pickface | | | | ✓ | | ✓ | ✓ |
 | Inventory | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Gudang 3D | | | | ✓ | ✓ | ✓ | ✓ |
+| Rak & Lokasi (0132) | ✓ | ✓ | | ✓ | | ✓ | ✓ |
 | Adjust stok | | | | ✓ | | ✓ | ✓ |
 | Mutasi | ✓ | | | ✓ | | ✓ | ✓ |
 | Buku stok (0116, 28 Oct 2026) | | | | ✓ | | ✓ | ✓ |
+| Kelas ABC (0126, 1 Nov 2026) | | ✓ | | ✓ | | ✓ | ✓ |
 | Cycle count | | | | ✓ | | ✓ | ✓ |
 | Audit picking | | ✓ | ✓ | | | ✓ | ✓ |
 | Audit putaway | ✓ | | ✓ | | | ✓ | ✓ |

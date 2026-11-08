@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { TODAY_BOARD, TODAY_PANEL_ATTR } from "@/components/floor/floor";
 
 /**
  * The skeleton kit — every `loading.tsx` in the app is built from these pieces, so the wait looks
@@ -28,8 +29,9 @@ import { cn } from "@/lib/utils";
 export const SKELETON_CARD =
   "overflow-hidden rounded-xl bg-white shadow-[0_1px_2px_rgba(3,39,65,0.05)] ring-1 ring-steel-100";
 
-/** Pulse the group, not each block: the eye reads one wave, and there are far fewer animations. */
-export const PULSE = "animate-pulse motion-reduce:animate-none";
+/** Kept for the 60 skeleton files that pass it: the motion now lives on each block (`skel`, one shared
+ *  left-to-right sweep in globals.css), so a group no longer pulses on its own. */
+export const PULSE = "";
 
 /**
  * One loading block. Light surfaces use the palette's own rule colour (steel-100); the navy band
@@ -39,7 +41,7 @@ export function Bone({ className, onNavy = false, style }: {
   className?: string; onNavy?: boolean; style?: CSSProperties;
 }) {
   return (
-    <div aria-hidden data-skeleton className={cn(onNavy ? "bg-white/15" : "bg-steel-100", className)} style={style} />
+    <div aria-hidden data-skeleton className={cn("skel", onNavy ? "skel-navy bg-white/15" : "bg-steel-100", className)} style={style} />
   );
 }
 
@@ -69,7 +71,7 @@ export function PageSkeleton({ label = "Memuat halaman", header = true, mainClas
   label?: string; header?: boolean; mainClassName?: string; className?: string; children: ReactNode;
 }) {
   return (
-    <main aria-busy="true" className={mainClassName}>
+    <main aria-busy="true" className={cn("skel-in", mainClassName)}>
       <div role="status">
         {/* The only words on the screen, for screen readers: the blocks themselves say nothing. */}
         <span className="sr-only">{label}</span>
@@ -101,14 +103,16 @@ export function CardHeadSkeleton({ className, titleClass = "h-5 w-36", subClass 
 }
 
 /** The navy "Operasi hari ini" band: eyebrow, heading, status pill, plan gauges, then the stat strip. */
-export function StatBandSkeleton({ gauges = 2, stats = 4, desktopOnly = false, style, className }: {
+export function StatBandSkeleton({ gauges = 2, stats = 4, desktopOnly = false, style, className, todayPanel = false }: {
   gauges?: number; stats?: number;
   /** the group skeleton hides the band on a phone: most pages do not open with a hero */
   desktopOnly?: boolean;
   style?: CSSProperties; className?: string;
+  /** the Dashboard's "Hari ini" band: Home's board can land on it at once (components/floor/floor-door-link.tsx) */
+  todayPanel?: boolean;
 }) {
   return (
-    <section aria-hidden className={cn(
+    <section aria-hidden {...(todayPanel ? { [TODAY_PANEL_ATTR]: "", style: { viewTransitionName: TODAY_BOARD } } : {})} className={cn(
       "relative overflow-hidden rounded-2xl bg-jeir-side ring-1 ring-jeir-navy/30",
       desktopOnly ? "hidden lg:block" : "block", className)}>
       {/* The band's own dot cloud, so the navy block has depth instead of reading as a slab. */}

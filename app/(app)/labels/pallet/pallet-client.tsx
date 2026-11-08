@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PALLET_CARD } from "@/config/warehouse";
+import { offlineFetch } from "@/lib/net";
 
 type Summary = {
   cards: number; shipments: number; itemCodes: number;
@@ -408,7 +409,7 @@ export function PalletClient() {
   const busy = state === "analyzing" || state === "printing";
 
   async function send(fd: FormData) {
-    return fetch("/api/labels/pallet-cards", { method: "POST", body: fd });
+    return offlineFetch("/api/labels/pallet-cards", { method: "POST", body: fd });
   }
 
   // Print never leaves this page: after a print the view returns to the

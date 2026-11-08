@@ -19,7 +19,9 @@ type Adj = { material_code: string; storage_bin: string; batch: string; expiry_d
  * §9): approved stock-take adjustments are shown beside the snapshot, never folded into it.
  */
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireCkb("/ckb/inventory");
+  const user = await requireCkb("/ckb/inventory");
+  // 0133: a counter (operator) never sees SAP quantities: locations and materials only.
+  const counter = user.ckbRole === "operator";
   const sp = await searchParams;
   const db = await createClient();
   const { data: customers } = await db.from("ckb_customers").select("id, name, active_snapshot_id").order("name");
@@ -28,7 +30,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 
   let rows: Row[] = [], adjustments: Adj[] = [];
   let snap: { ref_no: string; snapshot_date: string; mapping_verified: boolean } | null = null;
-  if (customer?.active_snapshot_id) {
+  let locations: { storage_bin: string; material_code: string; description: string; uom: string }[] = [];
+  if (customer?.active_snapshot_id && counter) {
+    const { data } = await db.rpc("ckb_inventory_locations", { p_customer: customer.id });
+    locations = (data ?? []) as typeof locations;
+  } else if (customer?.active_snapshot_id) {
     const sid = customer.active_snapshot_id;
     [rows, adjustments] = await Promise.all([
       fetchAll<Row>((a, b) => db.from("ckb_sap_snapshot_rows").select("material_code, description, plant, storage_location, storage_bin, batch, expiry_date, uom, quantity, identity_key")
@@ -59,12 +65,34 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
           { name: "customer", label: "Customer", kind: "select", all: "Pilih customer", options: (customers ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.active_snapshot_id ? "" : " (tanpa snapshot)"}` })) },
           { name: "material", label: "Material / bin / deskripsi", kind: "text" },
         ]} />
-        <Notice title="Saldo menurut snapshot SAP, bukan saldo hidup">
+        {counter && customer?.active_snapshot_id && (
+          <>
+            <Notice title="Lokasi barang, tanpa jumlah">Penghitung tidak melihat jumlah SAP. Daftar ini menunjukkan di mana tiap material tercatat.</Notice>
+            {(() => {
+              const list = term ? locations.filter((r) => r.material_code.toUpperCase().includes(term) || r.storage_bin.toUpperCase().includes(term) || r.description.toUpperCase().includes(term)) : locations;
+              return list.length === 0 ? <EmptyState title="Tidak ada baris untuk filter ini" /> : (
+                <div className="rounded-lg border border-steel-100 bg-white">
+                  <Table sticky>
+                    <thead><tr><Th>Lokasi</Th><Th>Material</Th><Th>Satuan</Th></tr></thead>
+                    <tbody>{list.slice(0, 3000).map((r, i) => (
+                      <tr key={`${r.storage_bin}-${r.material_code}-${i}`}>
+                        <Td className="font-cond font-semibold">{r.storage_bin || "–"}</Td>
+                        <Td><span className="font-medium">{r.material_code}</span><span className="block max-w-[18rem] truncate text-xs text-steel-500">{r.description}</span></Td>
+                        <Td>{r.uom}</Td>
+                      </tr>
+                    ))}</tbody>
+                  </Table>
+                </div>
+              );
+            })()}
+          </>
+        )}
+        {!counter && <Notice title="Saldo menurut snapshot SAP, bukan saldo hidup">
           CKB belum punya buku stok sendiri. Angka di sini adalah snapshot SAP yang aktif. Penyesuaian hasil stock take
           ditampilkan terpisah dan baru berlaku setelah diposting di SAP; aplikasi tidak mengubah angka snapshot.
-        </Notice>
+        </Notice>}
         {snap && !snap.mapping_verified && <Notice tone="warn">Snapshot ini dibaca dengan pemetaan kolom yang belum diverifikasi.</Notice>}
-        {!customer ? <EmptyState title="Belum ada customer dengan snapshot aktif" action={<Link className="text-ckb underline" href="/ckb/sap/import">Import SAP</Link>} /> :
+        {counter && customer?.active_snapshot_id ? null : !customer ? <EmptyState title="Belum ada customer dengan snapshot aktif" action={<Link className="text-ckb underline" href="/ckb/sap/import">Import SAP</Link>} /> :
           !customer.active_snapshot_id ? <EmptyState title={`${customer.name} belum punya snapshot aktif`} action={<Link className="text-ckb underline" href="/ckb/sap/import">Import SAP</Link>} /> : (
           <>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

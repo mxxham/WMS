@@ -38,6 +38,7 @@ export async function exportRecon(run: ReconSummary, lines: ReconLine[], moves: 
     "Unrest Diff (SAP vs fisik)": num(l.diff_unrestricted), "Blok Diff (SAP vs fisik)": num(l.diff_blocked),
     "Selisih WMS - SAP": gapTotal(l), "Selisih bebas": gapUnrestricted(l), "Selisih blok": gapBlocked(l),
     Arah: gapTotal(l) > 0 ? "WMS lebih" : gapTotal(l) < 0 ? "WMS kurang" : "Cocok",
+    "Koreksi WMS (investigasi)": num(l.wms_fix), "Sisa selisih": gapTotal(l) + num(l.wms_fix),
     "Lokasi SAP lain": Object.entries(l.sap_other ?? {}).map(([k, v]) => `${k} ${v}`).join(", "),
     Tanda: flags(l).map((f) => FLAG_LABEL[f]).join(", "),
     ...(prev ? { "Selisih sebelumnya": prev[l.sku] ?? "" } : {}),

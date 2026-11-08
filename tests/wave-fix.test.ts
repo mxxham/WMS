@@ -87,9 +87,10 @@ test('FEFO: the earliest expiry wins; a later one only when nothing earlier cove
   assert.match(later.sentence, /FEFO dilewati/);
 });
 
-test('blocked bins, pillars and aisle CG are never proposed', () => {
+test('blocked bins, pillars and CKB 3PL racks are never proposed', () => {
+  // 0132: the Wave page marks a CKB 3PL rack (aisle CG here) as blocked when it loads stock (usableForShell).
   const p = proposeFix({ from: 'CA01A01', sku: 'S', batch: 'B', expiry: '2030-01-01', qty: 5, upp: 48 }, null,
-    [st('CB01A01', 'B', '2030-01-01', 40, true), st('CE33A01', 'B', '2030-01-01', 40), st('CG01A01', 'B', '2030-01-01', 40)], [], config);
+    [st('CB01A01', 'B', '2030-01-01', 40, true), st('CE33A01', 'B', '2030-01-01', 40), st('CG01A01', 'B', '2030-01-01', 40, true)], [], config);
   assert.equal(p.kind, 'none');
 });
 

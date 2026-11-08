@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LoadNoTag } from "../load-no-dialog";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { DayNav, StepLine } from "../day-bar";
 import { WaveGuide } from "../guide";
 import { ProblemsSummary } from "../problems-summary";
 import { StatusTag } from "../wave-parts";
-import { filterActive, rowMatches, waveHref, type RowFilter, type WaveModel } from "../wave-model";
+import { filterActive, rowMatches, waveHref, waveMatches, type RowFilter, type WaveModel } from "../wave-model";
 import { emptyDayText } from "@/lib/assigned-waves";
 
 const TONE = { normal: "text-steel", bad: "font-semibold text-bad", muted: "text-steel-500" } as const;
@@ -66,6 +67,7 @@ export function DayScreen({ model: m, filter, onFilter, onOpenWave, onShowProble
         ) : (
           <ul className="space-y-2">
             {m.ordered.map((w) => {
+              if (!waveMatches(w, filter)) return null;
               const hits = active ? pairMoves(m.tasks.filter((t) => t.wave_id === w.id)).filter((it) => rowMatches(it, filter, m.short, m.waits)).length : null;
               if (hits === 0) return null;
               return <li key={w.id}><WaveTile model={m} wave={w} hits={hits} onOpen={() => onOpenWave(w.id)} /></li>;
@@ -95,7 +97,7 @@ function WaveTile({ model: m, wave: w, hits, onOpen }: { model: WaveModel; wave:
       <span className="mt-0.5 flex flex-wrap gap-x-2 text-sm text-steel-500">
         {w.shipment_numbers.map((sh) => {
           const st = m.audit[`${w.id}|${sh}`];
-          return <span key={sh} className="tabular">{sh}{st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}</span>;
+          return <span key={sh} className="tabular"><LoadNoTag n={m.loadNos[sh]} />{sh}{st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}</span>;
         })}
       </span>
       <span className="mt-2 block h-1.5 overflow-hidden rounded bg-steel-100" aria-hidden>

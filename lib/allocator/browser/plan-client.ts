@@ -7,6 +7,7 @@ import { buildPlan } from '../plan';
 import type { DbStockRow } from '../stock-check';
 import type { DemandLine } from '../types';
 import type { EarlierFacts } from '../earlier-waves';
+import { shellBinRules, type BinRuleRow } from '@/lib/racks';
 
 /**
  * Browser-side planning against the database (supabase/migrations/0007).
@@ -177,8 +178,24 @@ export async function replanRemaining(
   });
 
   const config = withConfig({ asOf: new Date(`${date}T00:00:00Z`), pickfaceOverrides: await loadPickfaceOverrides(db),
-    ...(await loadDispatchRules(db)), ...overrides });
+    ...(await loadDispatchRules(db)), ...(await loadShellBinRules(db)), ...overrides });
   const stock = inventoryToStock(await loadPlanningStock(db, date), config);
   const run = runPipeline(stock.stock, demand, stock.stagedBySku, config, stock.warnings);
   return { result: await savePlan(db, date, run, demand), run };
+}
+
+/**
+ * The bins Shell may not use (lent to CKB 3PL, blocked, missing, planned) and the layout's aisle order,
+ * for one run's config (0132; lib/racks.ts shellBinRules).
+ */
+export async function loadShellBinRules(db: SupabaseClient): Promise<Pick<AllocatorConfig, 'blockedBins'> & Partial<Pick<AllocatorConfig, 'aisleSequence'>>> {
+  const [rows, { data: layout, error }] = await Promise.all([
+    fetchAll<BinRuleRow>((from, to) => db.from('bins').select('bin_code, rack, status, owner').not('rack', 'is', null)
+      .or('status.neq.active,owner.neq.SHELL').order('bin_code').range(from, to) as unknown as PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>),
+    db.from('settings').select('value').eq('key', 'layout').maybeSingle(),
+  ]);
+  if (error) throw new Error(error.message);
+  const order = ((layout?.value as { aisle_order?: string[] } | null)?.aisle_order) ?? [];
+  const rules = shellBinRules(rows, order);
+  return order.length ? rules : { blockedBins: rules.blockedBins };
 }

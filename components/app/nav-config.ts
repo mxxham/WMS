@@ -1,50 +1,53 @@
-import { UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, BookOpen, type LucideIcon } from "lucide-react";
+import { LayoutGrid, UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, BookOpen, BarChart3, type LucideIcon } from "lucide-react";
 import type { Job } from "@/lib/jobs";
 
 /**
  * The app's navigation, in one place: the desktop sidebar, the phone bottom bar and the Home page's
  * module cards all read it, so a new module added here appears in all three.
  */
-export type NavLink = { href: string; label: string; icon: LucideIcon; jobs: Job[] };
+/** `blurb`: one plain line on what the page is for, shown on Home's module directory. */
+export type NavLink = { href: string; label: string; blurb: string; icon: LucideIcon; jobs: Job[] };
 const AI: Job = "admin_inbound", AO: Job = "admin_outbound", CK: Job = "checker", IV: Job = "inventory", OP: Job = "operator", LD: Job = "leader", AD: Job = "admin";
 const ALL_JOBS: Job[] = [AI, AO, CK, IV, OP, LD, AD];
 
 /** Sidebar order: overview first, then by job. Empty sections are hidden per role. */
 export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   { title: null, links: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, jobs: [AI, AO, IV, LD, AD] },
+    { href: "/dashboard", label: "Dashboard", blurb: "Ringkasan stok, operasi hari ini dan akurasi.", icon: LayoutDashboard, jobs: [AI, AO, IV, LD, AD] },
   ] },
   { title: "Operasional", links: [
-    { href: "/scan", label: "Scan", icon: ScanLine, jobs: ALL_JOBS },
-    { href: "/receiving", label: "Penerimaan", icon: Truck, jobs: [AI, CK, LD, AD] },
-    { href: "/waves", label: "Wave", icon: ListChecks, jobs: [AO, CK, OP, LD, AD] },
-    { href: "/assign", label: "Penugasan", icon: UserCheck, jobs: [IV, LD, AD] },
-    { href: "/allocate", label: "Alokasi", icon: ClipboardList, jobs: [AO, LD, AD] },
-    { href: "/putaway", label: "Putaway", icon: PackagePlus, jobs: [AI, LD, AD] },
-    { href: "/pickfaces", label: "Pickface", icon: MapPin, jobs: [IV, LD, AD] },
+    { href: "/scan", label: "Scan", blurb: "Scan label rak untuk melihat dan memindah isi bin.", icon: ScanLine, jobs: ALL_JOBS },
+    { href: "/receiving", label: "Penerimaan", blurb: "Terima truk, periksa palet, posting ke stok.", icon: Truck, jobs: [AI, CK, LD, AD] },
+    { href: "/waves", label: "Wave", blurb: "Picklist per wave, posting pick, tutup wave.", icon: ListChecks, jobs: [AO, CK, OP, LD, AD] },
+    { href: "/assign", label: "Penugasan", blurb: "Bagi shipment hari ini ke operator.", icon: UserCheck, jobs: [IV, LD, AD] },
+    { href: "/allocate", label: "Alokasi", blurb: "Upload jadwal outbound, buat rencana pick FEFO.", icon: ClipboardList, jobs: [AO, LD, AD] },
+    { href: "/putaway", label: "Putaway", blurb: "Upload data putaway dan posting ke bin.", icon: PackagePlus, jobs: [AI, LD, AD] },
+    { href: "/pickfaces", label: "Pickface", blurb: "Atur bin pickface untuk tiap SKU.", icon: MapPin, jobs: [IV, LD, AD] },
   ] },
   { title: "Stok", links: [
-    { href: "/inventory", label: "Inventory", icon: Package, jobs: ALL_JOBS },
-    { href: "/warehouse", label: "Gudang 3D", icon: Boxes, jobs: [IV, OP, LD, AD] },
-    { href: "/adjust", label: "Adjust stok", icon: SlidersHorizontal, jobs: [IV, LD, AD] },
-    { href: "/movements", label: "Mutasi", icon: History, jobs: [AI, IV, LD, AD] },
-    { href: "/ledger", label: "Buku stok", icon: BookOpen, jobs: [IV, LD, AD] },
+    { href: "/inventory", label: "Inventory", blurb: "Stok per bin, SKU, batch dan expired.", icon: Package, jobs: ALL_JOBS },
+    { href: "/warehouse", label: "Gudang 3D", blurb: "Denah rak 3D dengan isi tiap bin.", icon: Boxes, jobs: [IV, OP, LD, AD] },
+    { href: "/racks", label: "Rak & Lokasi", blurb: "Denah rak, status bin, pinjam ke CKB, rak baru.", icon: LayoutGrid, jobs: [AI, AO, IV, LD, AD] },
+    { href: "/adjust", label: "Adjust stok", blurb: "Koreksi stok dengan alasan dan persetujuan.", icon: SlidersHorizontal, jobs: [IV, LD, AD] },
+    { href: "/movements", label: "Mutasi", blurb: "Riwayat semua mutasi stok.", icon: History, jobs: [AI, IV, LD, AD] },
+    { href: "/ledger", label: "Buku stok", blurb: "Buku SAP dibanding buku WMS per hari.", icon: BookOpen, jobs: [IV, LD, AD] },
+    { href: "/abc", label: "Kelas ABC", blurb: "Kelas A, B, C dari frekuensi picking bulanan.", icon: BarChart3, jobs: [AO, IV, LD, AD] },
   ] },
   { title: "Kontrol", links: [
-    { href: "/counts", label: "Cycle count", icon: ListTodo, jobs: [IV, LD, AD] },
-    { href: "/audit/picking", label: "Audit picking", icon: PackageCheck, jobs: [AO, CK, LD, AD] },
-    { href: "/audit/putaway", label: "Audit putaway", icon: ClipboardCheck, jobs: [AI, CK, LD, AD] },
-    { href: "/data-quality", label: "Kualitas data", icon: ShieldCheck, jobs: [IV, LD, AD] },
-    { href: "/trace", label: "Lacak batch", icon: Route, jobs: [IV, LD, AD] },
+    { href: "/counts", label: "Cycle count", blurb: "Jadwal dan hasil cycle count per bin.", icon: ListTodo, jobs: [IV, LD, AD] },
+    { href: "/audit/picking", label: "Audit picking", blurb: "Cek hasil pick per baris dan per rak.", icon: PackageCheck, jobs: [AO, CK, LD, AD] },
+    { href: "/audit/putaway", label: "Audit putaway", blurb: "Cek putaway yang sudah diposting.", icon: ClipboardCheck, jobs: [AI, CK, LD, AD] },
+    { href: "/data-quality", label: "Kualitas data", blurb: "Data stok yang perlu diperbaiki.", icon: ShieldCheck, jobs: [IV, LD, AD] },
+    { href: "/trace", label: "Lacak batch", blurb: "Lacak satu batch dari masuk sampai keluar.", icon: Route, jobs: [IV, LD, AD] },
   ] },
   { title: "Admin", links: [
-    { href: "/labels", label: "Label", icon: Printer, jobs: [AI, LD, AD] },
-    { href: "/labels/pallet", label: "Kartu palet", icon: Printer, jobs: [AI, LD, AD] },
-    { href: "/admin/items", label: "Master item", icon: Tags, jobs: [AI, IV, LD, AD] },
-    { href: "/admin/barcode", label: "Ikat barcode", icon: Barcode, jobs: [IV, LD, AD] },
-    { href: "/admin/import", label: "Import", icon: Upload, jobs: [AD] },
-    { href: "/admin/settings", label: "Pengaturan", icon: Settings, jobs: [AD] },
-    { href: "/admin/users", label: "Pengguna", icon: Users, jobs: [AD] },
+    { href: "/labels", label: "Label", blurb: "Cetak label lokasi rak.", icon: Printer, jobs: [AI, LD, AD] },
+    { href: "/labels/pallet", label: "Kartu palet", blurb: "Cetak kartu palet penerimaan.", icon: Printer, jobs: [AI, LD, AD] },
+    { href: "/admin/items", label: "Master item", blurb: "Master SKU: UPP, umur simpan, barcode.", icon: Tags, jobs: [AI, IV, LD, AD] },
+    { href: "/admin/barcode", label: "Ikat barcode", blurb: "Ikat barcode karton ke SKU.", icon: Barcode, jobs: [IV, LD, AD] },
+    { href: "/admin/import", label: "Import", blurb: "Import snapshot stok dari file WMS.", icon: Upload, jobs: [AD] },
+    { href: "/admin/settings", label: "Pengaturan", blurb: "Aturan inventory, layout rak, status bin.", icon: Settings, jobs: [AD] },
+    { href: "/admin/users", label: "Pengguna", blurb: "Akun, pekerjaan dan akses pengguna.", icon: Users, jobs: [AD] },
   ] },
 ];
 

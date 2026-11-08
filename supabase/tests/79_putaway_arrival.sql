@@ -63,6 +63,16 @@ select pg_temp.check('an arrival 7 days back is filed on that day',
 select pg_temp.check('and counts in every akhir since',
   (select bool_and(akhir_unrest = 7) from generate_series(1, 7) k, ledger_wms_book(pg_temp.d(k)) b where b.sku = '990000097'));
 
+-- 0125: the dashboard's Arus barang chart counts the putaway on its arrival day, not the posting day.
+select pg_temp.check('volume_in_daily counts the putaway on its arrival day',
+  (select boxes >= 40 from volume_in_daily where day = pg_temp.d(2)));
+select pg_temp.check('volume_in_daily does not count it on the posting day',
+  coalesce((select boxes from volume_in_daily where day = pg_temp.d(0)), 0) =
+  (select coalesce(sum(m.quantity), 0) from movements m join items it on it.id = m.item_id
+    where m.type in ('inbound', 'putaway') and m.quantity > 0 and it.volume_l is not null
+      and (m.created_at at time zone 'Asia/Jakarta')::date = pg_temp.d(0)
+      and not exists (select 1 from putaway_arrival_moves pam where pam.movement_id = m.id)));
+
 select pg_temp.check('arrival dates cannot be written directly',
   pg_temp.fails($q$insert into putaway_arrivals (import_id, arrival_date) values (gen_random_uuid(), current_date)$q$, '%'));
 

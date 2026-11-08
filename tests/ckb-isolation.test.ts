@@ -44,11 +44,11 @@ test('CKB code calls no Shell stock RPC and no allocator', () => {
   }
 });
 
-const CKB_MIGRATIONS = readdirSync('supabase/migrations').filter((m) => /^0(099|10[0-7])_/.test(m));
+const CKB_MIGRATIONS = readdirSync('supabase/migrations').filter((m) => /^0(099|10[0-7]|133)_/.test(m));
 const functionsOf = (sql: string) => new Map([...sql.matchAll(/create or replace function public\.(\w+)\([\s\S]*?end \$\$;/g)].map((m) => [m[1], m[0]]));
 
 test('CKB migrations alter only ckb_ tables and write no Shell stock (0106 is checked separately)', () => {
-  assert.equal(CKB_MIGRATIONS.length, 9, CKB_MIGRATIONS.join(', '));
+  assert.equal(CKB_MIGRATIONS.length, 10, CKB_MIGRATIONS.join(', '));  // 0099-0107 + 0133 (blind count)
   for (const f of CKB_MIGRATIONS) {
     const s = src(join('supabase/migrations', f));
     // 0105 (app isolation) changes Shell functions/policies on purpose; it alters no table.

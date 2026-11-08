@@ -13,7 +13,7 @@ import { WaveMenu } from "../wave-menu";
 import { WavePrimary } from "../wave-primary";
 import { Actual, BinChip, REASON, StatusTag, type OutboundDetail } from "../wave-parts";
 import { filterActive, foldDone, lineCancelled, lineDone, lineProps, rowMatches, type RowFilter, type WaveModel } from "../wave-model";
-import { DoButton } from "../do-dialog";
+import { LoadNoTag } from "../load-no-dialog";
 
 const PickingPanel = dynamic(() => import("../picking-panel").then((m) => m.PickingPanel), {
   ssr: false, loading: () => <p className="p-4 text-sm text-steel-500">Membuka layar picking…</p>,
@@ -71,8 +71,8 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
           <h1 className="font-cond text-xl font-semibold leading-tight">{/^\d{8,}$/.test(w.wave_no) ? w.wave_no : `NO ${w.wave_no}`}{w.planned_slot ? ` · ${w.planned_slot}` : ""}</h1>
           <p className="truncate text-xs text-steel-500 tabular">{w.shipment_numbers.join(", ")}</p>
         </div>
-        <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" onStartPicking={onStartPicking} onPrint={() => m.printWave(w)} />
-        <DoButton wave={w} shipments={w.shipment_numbers} dos={m.dos} supervisor={m.supervisor} rpc={m.rpc} />
+        <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="phone" loadNos={m.loadNos} dos={m.dos}
+          onStartPicking={onStartPicking} onPrint={() => m.printWave(w)} />
       </div>
 
       <div className={cn("space-y-3 px-4 pt-3", hasPrimary ? "pb-28" : "pb-4")}>
@@ -85,7 +85,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
             <div className="h-full bg-ok" style={{ width: `${f.qtyTotal ? (((f.qtyDone ?? 0) / (f.qtyTotal ?? 1)) * 100) : (f.total ? (done / f.total) * 100 : 0)}%` }} />
           </div>
           <p className={cn("text-sm", TONE[next.tone])}>{next.text}</p>
-          {w.shipment_numbers.some((sh) => m.audit[`${w.id}|${sh}`]) && (
+          {w.shipment_numbers.some((sh) => m.audit[`${w.id}|${sh}`] || m.loadNos[sh]) && (
             <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {w.shipment_numbers.map((sh) => {
                 const st = m.audit[`${w.id}|${sh}`];
@@ -93,7 +93,7 @@ export function WaveScreen({ model: m, wave: w, filter, onClearFilter, onBack, p
                 const shipmentDos = m.dos[key] ?? [];
                 return (
                   <span key={sh} className="tabular">
-                    {sh}
+                    <LoadNoTag n={m.loadNos[sh]} />{sh}
                     {st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}
                     {shipmentDos.length > 0 && (
                       <span className="ml-1.5 text-xs text-steel-400 tabular">

@@ -8,7 +8,7 @@ import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { RackScan, rackMatches, type RackConfirm } from "@/components/app/rack-scan";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
 import { binDistance, distanceLabel, parseBin, type BinParts } from "@/lib/bin-distance";
-import { DEFAULT_CONFIG } from "@/lib/allocator/config";
+
 import type { TaskRow } from "@/lib/allocator/picklist-from-tasks";
 
 type Source = { bin_code: string; batch_lot: string; expiry_date: string | null; quantity: number };
@@ -42,7 +42,7 @@ async function moveTargets(from: string, sku: string): Promise<Target[]> {
     db.from("empty_bins").select("bin_code, zone, rack, level, position").eq("level", "A").range(0, 2999),
   ]);
   const src = parseBin(from);
-  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[]).filter((b) => !DEFAULT_CONFIG.blockedBins.includes(b.bin_code))
+  const near = src ? ((empty ?? []) as (BinParts & { bin_code: string })[])
     .map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5)
     .map(({ b }) => ({ bin: b.bin_code, note: `kosong · ${distanceLabel(src, b)}` })) : [];
   const pfs = ((pf ?? []) as { bin_code: string }[]).filter((p) => p.bin_code !== from)

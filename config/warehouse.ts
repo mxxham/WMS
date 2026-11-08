@@ -12,12 +12,6 @@ export const NEAR_EXPIRY_DAYS = 90;
 /** Bin code format found in the WMS sheet: Aisle(2) Rack(2) Level(1) Position(2), e.g. CA01C01. */
 export const RACK_BIN_REGEX = /^(C[A-Z])(\d{2})([A-E])(\d{2})$/;
 
-/**
- * Aisles kept out of our rack-occupancy metric: the CKB 3PL area (physically
- * confirmed 21 Oct 2026, reopened by 0086). Those bins are booked to the
- * consignee, so filling them is not our warehouse filling up.
- */
-export const OCCUPANCY_EXCLUDED_ZONES = ["CG", "CH"];
 
 /** Non-rack locations present in the sheet. They are imported as floor bins. */
 export const FLOOR_LOCATIONS: Record<string, { zone: string; status: "active" | "blocked" }> = {

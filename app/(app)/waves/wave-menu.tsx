@@ -1,22 +1,27 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCheck, ClipboardList, FileText, Play, RotateCcw, Undo2 } from "lucide-react";
+import Link from "next/link";
+import { CheckCheck, ClipboardList, FileText, MapPinned, Play, RotateCcw, Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { PersonNameField, usePersonName } from "@/components/app/person-name";
-import { ActionMenu, MenuDanger, MenuSection } from "@/components/app/action-menu";
+import { ActionMenu, MenuDanger, MenuNote, MenuSection } from "@/components/app/action-menu";
 import { cn, fmtNum } from "@/lib/utils";
 import type { TaskRow, WaveRow } from "@/lib/allocator/picklist-from-tasks";
 import { movesOfPicks } from "@/lib/allocator/pair-moves";
 import { AddItems, TundaButton, type Rpc } from "./wave-parts";
+import { DoButton } from "./do-dialog";
+import { LoadNoButton } from "./load-no-dialog";
 
 /**
  * A wave's actions (redesign). The wave's one next step is its primary button on the page; every
  * other action is a row of this menu, under the same conditions as the old header buttons.
  * Isi dari picklist is desktop only. Buka lagi / Pulihkan wave undo a finished / cancelled wave (0069).
+ * The shipment paperwork (Urutan muat, 0128 / DO no, 0079) sits last, under its own caption: the
+ * numbers read off the day's paperwork, not a step of the wave.
  */
 
 /** Selesaikan wave (bulk post the rest) and Tutup wave (all posted): the name is asked in the confirmation. */
@@ -180,8 +185,10 @@ export function RestoreWaveButton({ wave: w }: { wave: WaveRow }) {
   );
 }
 
-export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onOpenSheet, onStartPicking }: {
+export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, loadNos, dos, onPrint, onOpenSheet, onStartPicking }: {
   wave: WaveRow; tasks: TaskRow[]; supervisor: boolean; rpc: Rpc; layout: "desktop" | "phone";
+  /** the day's loading numbers (Urutan muat, 0128) and this wave's DO numbers (0079) */
+  loadNos: Record<string, number>; dos: Record<string, string[]>;
   onPrint: () => void; onOpenSheet?: () => void;
   /** Mulai picking, also while a line is blocked or every line is posted (the primary is then another button) */
   onStartPicking?: () => void;
@@ -195,6 +202,8 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
     .filter(([, m]) => m.status === "COMPLETED")
     .map(([pickId]) => pickId)).size;
   const canSheet = layout === "desktop" && supervisor && w.status !== "CANCELLED" && live > 0 && !!onOpenSheet;
+  // The two paperwork dialogs gate themselves the same way; this only decides the caption above them.
+  const paperwork = supervisor && w.status !== "CANCELLED" && w.shipment_numbers.length > 0;
   return (
     <ActionMenu title={`NO ${w.wave_no}`}>
       <MenuSection>
@@ -202,6 +211,13 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
           <div><DialogClose asChild><Button size="sm" variant="outline" onClick={onStartPicking}><Play className="h-4 w-4" />Mulai picking</Button></DialogClose></div>
         )}
         <div><Button variant="outline" size="sm" onClick={onPrint}><FileText className="h-4 w-4" />Picklist</Button></div>
+        {supervisor && (
+          <div><Button asChild size="sm" variant="outline">
+            <Link href={`/audit/picking?tab=lokasi&date=${w.planned_date}&from=${w.planned_date}&to=${w.planned_date}&wave=${encodeURIComponent(w.wave_no)}`}>
+              <MapPinned className="h-4 w-4" />Perubahan lokasi
+            </Link>
+          </Button></div>
+        )}
         {canSheet && <div><DialogClose asChild><Button size="sm" variant="outline" onClick={onOpenSheet}><ClipboardList className="h-4 w-4" />Isi dari picklist</Button></DialogClose></div>}
         {supervisor && (pending || w.status === "RESCHEDULED") && <div><AddItems date={w.planned_date} wave={w} /></div>}
         {pending && open.length > 0 && <div><CompleteWaveButton wave={w} open={open} rpc={rpc} /></div>}
@@ -213,6 +229,15 @@ export function WaveMenu({ wave: w, tasks, supervisor, rpc, layout, onPrint, onO
         {supervisor && w.status === "COMPLETED" && <div><ReopenWaveButton wave={w} /></div>}
         {supervisor && w.status === "CANCELLED" && <div><RestoreWaveButton wave={w} /></div>}
       </MenuSection>
+      {paperwork && (
+        <div className="mt-2 border-t border-steel-100 pt-2">
+          <MenuNote>Data shipment</MenuNote>
+          <MenuSection>
+            <LoadNoButton wave={w} loadNos={loadNos} supervisor={supervisor} rpc={rpc} />
+            <DoButton wave={w} shipments={w.shipment_numbers} dos={dos} supervisor={supervisor} rpc={rpc} />
+          </MenuSection>
+        </div>
+      )}
       {supervisor && (pending || w.status === "RESCHEDULED") && (
         <MenuDanger>
           <div><ConfirmButton size="sm" variant="danger" title={`Batalkan NO ${w.wave_no}`} confirmLabel="Batalkan wave"

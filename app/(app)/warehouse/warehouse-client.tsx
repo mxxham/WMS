@@ -8,6 +8,7 @@ import { LEGENDS } from "@/components/warehouse/colors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BinDetail } from "@/lib/bin-data";
+import { offlineFetch } from "@/lib/net";
 import type { Role } from "@/lib/types";
 import type { BinSummary, ColorMode, Layout } from "@/lib/warehouse-types";
 import { cn } from "@/lib/utils";
@@ -32,16 +33,26 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
   const [detail, setDetail] = useState<BinDetail | null>(null);
 
   const loadBins = useCallback(async () => {
-    const res = await fetch("/api/warehouse", { cache: "no-store" });
-    if (res.ok) setBins((await res.json()).bins);
-    else setMessage("Data gudang gagal dimuat.");
+    try {
+      const res = await offlineFetch("/api/warehouse", { cache: "no-store" });
+      if (res.ok) setBins((await res.json()).bins);
+      else setMessage("Data gudang gagal dimuat.");
+    } catch (e) {
+      // The page is already up; only the bin colours fall back to neutral.
+      setMessage((e as Error).message || "Data gudang gagal dimuat.");
+    }
   }, []);
   useEffect(() => { loadBins(); }, [loadBins]);
 
   const loadDetail = useCallback(async (code: string) => {
     setDetail(null);
-    const res = await fetch(`/api/bin/${encodeURIComponent(code)}`, { cache: "no-store" });
-    if (res.ok) setDetail(await res.json());
+    try {
+      const res = await offlineFetch(`/api/bin/${encodeURIComponent(code)}`, { cache: "no-store" });
+      if (res.ok) setDetail(await res.json());
+    } catch {
+      // No detail panel is better than a stuck "Memuat…"; the operator sees the
+      // network notice the live reload already surfaces elsewhere on this page.
+    }
   }, []);
 
   // Stock moved elsewhere: recolour the racks and reload the open panel in
@@ -52,11 +63,17 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
     loadBins();
     const code = selected?.bin_code;
     if (!code) return;
-    const res = await fetch(`/api/bin/${encodeURIComponent(code)}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const fresh: BinDetail = await res.json();
-    // Only if the panel still shows that bin (the user may have clicked another).
-    setDetail((d) => (d?.bin.bin_code === code ? fresh : d));
+    try {
+      const res = await offlineFetch(`/api/bin/${encodeURIComponent(code)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const fresh: BinDetail = await res.json();
+      // Only if the panel still shows that bin (the user may have clicked another).
+      setDetail((d) => (d?.bin.bin_code === code ? fresh : d));
+    } catch {
+      // Same behaviour as a failed reload: the panel keeps its last content
+      // until the connection returns and the next movement reopens it.
+      return;
+    }
   }, 30000);
 
   const select = useCallback((b: BinSummary) => {
@@ -100,6 +117,10 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
         {message && <p className="rounded-md bg-white/95 px-3 py-2 text-sm">{message}</p>}
         <ul className="rounded-md bg-white/95 p-2 text-xs">
           {LEGENDS[mode].map((l) => <li key={l.label} className="flex items-center gap-2 py-0.5"><span className="h-3 w-3 rounded-sm border border-steel-300" style={{ background: l.color }} />{l.label}</li>)}
+          {/* 0132: rack state and owner, the same in every colour mode (managed on Rak & Lokasi). */}
+          <li className="flex items-center gap-2 py-0.5"><span className="h-3 w-3 rounded-sm border-2 border-bad" />Diblokir</li>
+          <li className="flex items-center gap-2 py-0.5"><span className="h-3 w-3 rounded-sm border border-dotted border-ckb bg-ckb-tint/40" />Rencana (belum dibangun)</li>
+          <li className="flex items-center gap-2 py-0.5"><span className="h-3 w-3 rounded-sm" style={{ background: "#61A5C2" }} />Dipinjam CKB 3PL</li>
           {unplaced > 0 && <li className="mt-1 text-warn">{unplaced} bin belum punya koordinat (atur di Pengaturan).</li>}
         </ul>
       </div>

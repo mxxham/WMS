@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LABEL, LEVEL_COLORS, STRIP_LEVEL_ORDER } from "@/config/warehouse";
 import { fmtDateTime } from "@/lib/utils";
+import { offlineFetch } from "@/lib/net";
 
 type Scope = "bins" | "rack" | "zone";
 type Log = { id: number; bin_ids: string[]; printed_at: string; note: string | null; profiles: { name: string } | null };
@@ -29,12 +30,19 @@ export function LabelsClient({ racks, logs }: { racks: Record<string, string[]>;
     const body =
       scope === "bins" ? { scope, codes: codes.split(/[\s,;]+/) }
       : scope === "rack" ? { scope, zone, rack } : { scope, zone };
-    const res = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, layout, colorMode, includeCode128 }) });
-    setBusy(false);
-    if (!res.ok) return setError((await res.json().catch(() => null))?.error ?? "Gagal membuat PDF.");
-    const url = URL.createObjectURL(await res.blob());
-    window.open(url, "_blank");
-    router.refresh(); // show the new print log entry
+    try {
+      const res = await offlineFetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, layout, colorMode, includeCode128 }) });
+      setBusy(false);
+      if (!res.ok) return setError((await res.json().catch(() => null))?.error ?? "Gagal membuat PDF.");
+      const url = URL.createObjectURL(await res.blob());
+      window.open(url, "_blank");
+      router.refresh(); // show the new print log entry
+    } catch (e) {
+      // `offlineFetch` throws one Indonesian sentence when the device is
+      // offline; anything else surfaces with its own message (or the generic).
+      setBusy(false);
+      return setError((e as Error).message || "Gagal membuat PDF.");
+    }
   }
 
   return (

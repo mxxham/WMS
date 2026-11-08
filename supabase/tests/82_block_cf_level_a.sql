@@ -3,6 +3,8 @@
 \set ON_ERROR_STOP on
 \pset tuples_only on
 begin;
+-- 0132: CF21-CF40 level A is lent to CKB 3PL; 0120 lent it by blocking it, so it is Shell here.
+update public.bins set owner = 'SHELL' where bin_code ~ '^CF(2[1-9]|3[0-9]|40)A0[12]$';
 reset role;
 create or replace function pg_temp.check(label text, ok boolean) returns void language plpgsql as $$
 begin raise notice '% %', case when coalesce(ok, false) then 'PASS' else 'FAIL' end, label; end $$;

@@ -90,19 +90,20 @@ test('while login is not required, Pengguna refuses to deactivate, re-role or re
 
 test('login action falls back to resolveAppsHome/akses and only uses safeNext when next is present', () => {
   const a = src('app/login/actions.ts');
-  // Explicit next uses safeNext
-  assert.ok(a.includes('if (next)') && a.includes('redirect(safeNext(next))'), 'explicit next does not use safeNext');
+  // Explicit next uses safeNext (now returned as `to` — the form does a full-page
+  // load so the floor line carries from Login into Home).
+  assert.ok(a.includes('if (next)') && a.includes('{ to: safeNext(next) }'), 'explicit next does not use safeNext');
   // No next: reads profile via service client, selects apps/default_app
   assert.ok(a.includes('from("profiles")') && a.includes('select("apps, default_app")'), 'profile apps/default_app not read via service client');
   // Calls normalizeApps and resolveAppsHome
   assert.ok(a.includes('normalizeApps(') && a.includes('resolveAppsHome('), 'does not call normalizeApps/resolveAppsHome');
-  // Fail-closed: home defaults to /akses, and the redirect happens AFTER the catch — redirect()
-  // throws, so it must never sit inside the try (a swallowed redirect would send everyone to /akses).
+  // Fail-closed: home defaults to /akses, and the `to` answer happens AFTER the catch — it must
+  // never be decided inside the try (a swallowed read would send everyone to /akses anyway).
   const homeDefault = a.indexOf('let home');
   assert.ok(homeDefault > -1 && a.slice(homeDefault, homeDefault + 60).includes('= "/akses"'), 'home must default fail-closed to /akses');
   const catchEnd = a.indexOf('  } catch {');
-  const redirectHome = a.indexOf('redirect(home);');
-  assert.ok(catchEnd > -1 && redirectHome > catchEnd, 'redirect(home) must run after the catch (a redirect inside the try is swallowed)');
+  const returnHome = a.indexOf('return { to: home === "/" ? "/home" : home };');
+  assert.ok(catchEnd > -1 && returnHome > catchEnd, 'the home `to` must be decided after the catch');
   // Comment: default-app data comes from server, never client
   assert.ok(a.includes('default-app data comes from the server, never from the client'), 'missing server-data comment');
 });

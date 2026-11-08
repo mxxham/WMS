@@ -15,6 +15,7 @@ import { ReconTab, type PrevGap, type ReconLine, type ReconSummary, type SapMove
 import { ApprovalsTab, type RequestRow } from "./tabs/approvals-tab";
 import { EmptyTab, type EmptyBin } from "./tabs/empty-tab";
 import { WmsDayDownload } from "./wms-day-download";
+import { BinOnHandLookup } from "@/components/bin/bin-day-stock";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
-type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string; rv?: string };
+type Params = { tab?: string; near?: string; q?: string; abc?: string; sort?: string; aisle?: string; level?: string; view?: string; days?: string; recon?: string; rv?: string; inv?: string };
 
 // fefo_exceptions takes ~8s on the live data set; cache both counts per window
 // for 15 min, mirroring the dashboard's getFefoCompliance, so the FEFO tab
@@ -72,7 +73,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 
   return (
     <main>
-      <PageHeader title="Inventory" live={["movements", "pick_tasks", "count_tasks", "stock_holds", "adjustment_requests", "stock_recon_lines", "stock_recons"]} liveDebounceMs={10000} />
+      <PageHeader title="Inventory" live={["movements", "pick_tasks", "count_tasks", "stock_holds", "adjustment_requests", "stock_recon_lines", "stock_recons", "recon_fixes"]} liveDebounceMs={10000} />
       <TabsNav base="/inventory" tabs={tabs} active={tab} />
       {tab === "stok" && <WmsDayDownload />}
       {tab === "stok" && await stockTab(sp)}
@@ -82,7 +83,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         near={(sp.near ?? "").trim().toUpperCase()} aisle={sp.aisle ?? ""} level={sp.level ?? ""} />}
       {tab === "hold" && supervisor && await holdTab()}
       {tab === "akurasi" && supervisor && await accuracyTab(policy.ira_target_pct)}
-      {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon, sp.rv)}
+      {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon, sp.rv, sp.inv)}
       {tab === "persetujuan" && supervisor && await approvalsTab(policy.adjust_approval_qty)}
     </main>
   );
@@ -100,7 +101,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       // Opened from the dashboard's occupancy grid: the empty rack positions of that aisle / level too.
       aisle || level
         ? fetchAll<{ bin_code: string; status: string }>((a, b) => {
-            let qb = supabase.from("bin_summary").select("bin_code, status").not("rack", "is", null).eq("total_qty", 0);
+            // 0132: only positions Shell can use; CKB 3PL racks, missing and planned bins are not free space.
+            let qb = supabase.from("bin_summary").select("bin_code, status").not("rack", "is", null).eq("total_qty", 0)
+              .eq("status", "active").eq("owner", "SHELL");
             if (aisle) qb = qb.eq("zone", aisle);
             if (level) qb = qb.eq("level", level);
             return qb.order("bin_code").range(a, b);
@@ -108,9 +111,12 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         : Promise.resolve([]),
     ]);
     return (
+      <>
+      <div className="px-4 pt-4 lg:px-8"><BinOnHandLookup /></div>
       <InventoryClient packed={packLines(lines)} tasks={tasks} canAdjust={supervisor} initialQuery={p.q ?? ""} initialAbc={p.abc} initialSort={p.sort}
         initialAisle={aisle} initialLevel={level} initialView={p.view === "line" || aisle || level ? "line" : "sku"}
         emptyBins={empty.map((e) => ({ code: e.bin_code, blocked: e.status === "blocked" }))} />
+      </>
     );
   }
 
@@ -162,7 +168,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     return <AccuracyTab counts={counts} adjustments={adjustments} target={target} recons={(recons ?? []) as { id: string; as_of: string; accuracy_pct: number | null; skus: number; skus_match: number }[]} />;
   }
 
-  async function reconTab(reconId?: string, view?: string) {
+  async function reconTab(reconId?: string, view?: string, inv?: string) {
     const { data: runsRaw } = await supabase.from("stock_recon_summary").select("*").order("created_at", { ascending: false }).limit(30);
     const runs = (runsRaw ?? []) as ReconSummary[];
     const run = reconId ? runs.find((r) => r.id === reconId) : undefined;
@@ -189,7 +195,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       : null;
     return (
       <ReconTab runs={runs} selected={run.id} lines={lines} moves={moves} ships={(match.data ?? []) as ShipMatch[]} shipError={match.error?.message ?? null}
-        prev={prev} prevAsOf={before?.as_of ?? null} view={view} />
+        prev={prev} prevAsOf={before?.as_of ?? null} view={view} inv={inv} />
     );
   }
 

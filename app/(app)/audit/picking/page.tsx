@@ -8,6 +8,7 @@ import { AccuracyView } from "./accuracy-view";
 import { sheetRackBins, sheetShipments, type SheetLineRow } from "./file/data";
 import { FileView } from "./file/file-view";
 import { DownloadPickAudit } from "./download-pick-audit";
+import { changeRange, LocationChangesView } from "./location-changes";
 import { rackBins, rackSummary, withMoves, RACK_STATE_LABEL, type RackState } from "./rack-data";
 import { RackList } from "./rack-list";
 import { ShipmentList, type ShipmentRow } from "./shipment-list";
@@ -21,17 +22,21 @@ const OPEN: ShipmentState[] = ["PICKING", "READY_AUDIT", "HAS_MISMATCH", "READY_
  * rack (0025, default tab) or at staging per shipment; a shipment is loaded
  * only when all its lines passed (0024).
  */
-export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string; view?: string }> }) {
+export default async function PickingAuditPage({ searchParams }: { searchParams: Promise<{ date?: string; tab?: string; days?: string; view?: string; from?: string; to?: string; wave?: string }> }) {
   const user = await requirePage("/audit/picking");
   const sp = await searchParams;
   const date = auditDate(sp.date);
   const supervisor = user.role !== "operator";
-  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : sp.tab === "shipment" || sp.tab === "file" ? sp.tab : "rak";
+  const tab = supervisor && sp.tab === "akurasi" ? "akurasi" : sp.tab === "shipment" || sp.tab === "file" || sp.tab === "lokasi" ? sp.tab : "rak";
   const days = [7, 30, 90].includes(Number(sp.days)) ? Number(sp.days) : 30;
   const supabase = await createClient();
 
   let body: React.ReactNode;
   if (tab === "akurasi") body = <AccuracyView days={days} />;
+  else if (tab === "lokasi") {
+    const r = changeRange(date, sp.from, sp.to);
+    body = <LocationChangesView from={r.from} to={r.to} wave={sp.wave?.trim() || null} />;
+  }
   else if (tab === "file") {
     const { data } = await supabase.from("sheet_pick_line_state").select("*").eq("pick_date", date);
     const rows = (data ?? []) as SheetLineRow[];
@@ -104,9 +109,11 @@ export default async function PickingAuditPage({ searchParams }: { searchParams:
   return (
     <main>
       <AuditHeader title="Audit picking" date={date} active="picking"
-        live={tab === "file" ? ["sheet_pick_lines", "sheet_pick_audits"] : ["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]} />
+        live={tab === "file" ? ["sheet_pick_lines", "sheet_pick_audits"] : ["pick_tasks", "pick_audits", "shipment_loads", "waves", "movements"]}
+        keep={tab === "lokasi" ? { tab: "lokasi" } : undefined} />
       <TabsNav base="/audit/picking" active={tab}
         tabs={[{ key: "rak", label: "Per rak" }, { key: "shipment", label: "Shipment" }, { key: "file", label: "Dari file WMS" },
+               { key: "lokasi", label: "Perubahan lokasi" },
                ...(supervisor ? [{ key: "akurasi", label: "Akurasi picking" }] : [])]} />
       <div className="p-4 lg:p-8">{body}</div>
     </main>

@@ -1,6 +1,5 @@
 "use server";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { normalizeUsername, usernameError } from "@/lib/username";
 import { safeNext } from "@/lib/auth-route";
@@ -23,7 +22,9 @@ async function clientIp(): Promise<string> {
  * everywhere after 30 across IPs. Unknown usernames count the same way (nothing is revealed), and if
  * the limit cannot be checked, sign-in is refused rather than let through.
  */
-export async function loginAction(_: { error?: string }, fd: FormData): Promise<{ error?: string }> {
+/** `to`: where the browser goes next. The form loads it as a full page (not a router push), so the
+ *  browser can carry the floor line from this page into Home (cross-document view transition). */
+export async function loginAction(_: { error?: string; to?: string }, fd: FormData): Promise<{ error?: string; to?: string }> {
   const username = normalizeUsername(String(fd.get("username") ?? ""));
   const password = String(fd.get("password") ?? "");
   if (usernameError(username) || password.length === 0) return { error: FAILED };
@@ -39,10 +40,8 @@ export async function loginAction(_: { error?: string }, fd: FormData): Promise<
   if (!ok) return { error: FAILED };
 
   const next = String(fd.get("next") ?? "");
-  if (next) {
-    // Explicit deep-link wins — existing behaviour.
-    redirect(safeNext(next));
-  }
+  // Explicit deep-link wins, as before.
+  if (next) return { to: safeNext(next) };
 
   // No explicit next: decide the home from the profile's app access. default-app data comes from the server, never from the client.
   let home: "/" | "/ckb" | "/akses" = "/akses";
@@ -56,5 +55,7 @@ export async function loginAction(_: { error?: string }, fd: FormData): Promise<
     // Fail-closed: if the profile read fails for any reason (migration not applied, column missing,
     // network error), send to /akses. normalizeApps returns [] when the column is missing → "/akses".
   }
-  redirect(home);
+  // The Shell WMS lands on Home after signing in: its floor line continues the one on this page and
+  // points to the job's first stop (Scan or Dashboard). CKB and /akses are unchanged.
+  return { to: home === "/" ? "/home" : home };
 }

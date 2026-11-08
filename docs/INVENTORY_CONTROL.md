@@ -65,10 +65,45 @@ tidak pernah bisa di-pick. Hold hanya dilepas dengan alasan dan nama.
 |---|---|---|
 | Penerimaan vs DO | **Penerimaan** | Dokumen Shell (DO / surat jalan) dibandingkan dengan yang benar-benar datang per palet. Pemeriksa tidak melihat qty dokumen. Hasil: sesuai / kurang / lebih / tidak datang / tidak ada di dokumen / rusak. Karton rusak otomatis ke karantina dengan hold. |
 | Cycle count buta | **Cycle count** | Penghitung tidak melihat isi dan qty sistem. Hitungan yang berbeda dari sistem (di luar toleransi kelas A/B/C) **dihitung ulang oleh orang lain**; dua hitungan yang sama = selisih terkonfirmasi. |
-| Rekonsiliasi SAP | **Inventory → Rekonsiliasi SAP** | Upload stok SAP (MB52 / sheet "SAP vs fisik"). Unrestricted SAP vs stok bebas kita, Blocked SAP vs stok ditahan + karantina; pending GI / GR menjelaskan beda waktu. Tiap selisih: keterangan, status, atau "minta hitung ulang" (tugas hitung untuk semua bin SKU itu). Export dalam format sheet manual. |
+| Rekonsiliasi SAP | **Inventory → Rekonsiliasi SAP** | Upload stok SAP (MB52 / sheet "SAP vs fisik"). Unrestricted SAP vs stok bebas kita, Blocked SAP vs stok ditahan + karantina; pending GI / GR menjelaskan beda waktu. Tiap selisih: keterangan, status, "minta hitung ulang" (tugas hitung untuk semua bin SKU itu), atau **Investigasi & koreksi stok** (lihat 3a). Export dalam format sheet manual. |
 | Kualitas data | **Kualitas data** | Batch kosong / terbaca tanggal, expired ≠ kode batch, satu batch banyak expired, tanpa expired, expired di rak, bin > 1 palet. |
 | Scan barcode | Hitung, penerimaan, posting pick | Barcode karton (EAN) di Master item. Scan barang lain = ditolak. Opsi: wajib scan saat konfirmasi pick. |
 | Audit | Audit picking / putaway | (sudah ada) cek ulang pekerjaan yang sudah selesai. |
+
+## 3a. Investigasi selisih SAP (0129)
+
+Buka SKU yang selisih di **Rekonsiliasi SAP → Perbandingan stok**, lalu
+**Investigasi & koreksi stok**. Satu halaman, tiga langkah:
+
+1. **Bin yang paling dicurigai.** Sistem menilai setiap bin dari petunjuk:
+   bin terakhir berisi **tepat sebesar selisih**, bin yang **dinolkan impor
+   pagi (not in file)**, bin yang di sistem kosong padahal pernah berisi,
+   mutasi beberapa hari sebelum tanggal SAP, pickface, staging, bin sebelah.
+   Petunjuk merah = paling kuat, datangi dulu.
+2. **Cek semua bin.** Kalau belum ketemu: setiap bin yang **pernah** berisi SKU
+   ini (dari riwayat mutasi), pickface, staging, dan bin sebelah (satu kolom
+   atas-bawah, kiri-kanan di level yang sama). Urut "paling dicurigai" atau
+   "urut rak" untuk jalan keliling. Bin lain bisa di-scan. Tiap bin: isi batch,
+   expired dan jumlah karton dari label, atau **Kosong**. Batch/expired sudah
+   terisi dari isi bin itu; jumlah tidak pernah ditebak sistem.
+3. **Hasil dan koreksi.** Per batch + expired: bin yang kurang dan bin yang
+   lebih adalah karton yang sama → **Bin To Bin** (total tidak berubah, tidak
+   perlu ke SAP). Sisanya jadi **adjustment** (ditemukan / hilang). Tidak
+   pernah antar batch atau expired (FEFO).
+
+Aturan:
+- Adjustment di atas batas (standar 20 karton) harus **diterapkan orang lain**
+  dari yang mengecek. Bin To Bin saja boleh oleh pengecek sendiri.
+- Cek yang **basi** (stok sistem bin itu berubah sesudah dicek) tidak pernah
+  dipakai: cek ulang.
+- Stok yang dipesan wave atau ditahan (hold) tidak bisa dikoreksi sampai wave
+  dikerjakan / dihitung ulang atau hold dilepas.
+- Baris rekonsiliasi tetap menyimpan angka hari itu; tambahannya "dikoreksi
+  +48 · sisa 0", status jadi Selesai dengan penyebabnya (baru: **Salah lokasi**).
+- Koreksi mengubah stok WMS **hari ini**. SAP berubah hanya setelah Shell
+  memposting koreksinya; unggahan MB52 berikutnya menunjukkan hasilnya.
+- Cek dan koreksi tidak bisa diubah atau dihapus (`recon_checks`,
+  `recon_fixes`); koreksi yang salah = koreksi baru.
 
 ## 4. Koreksi: alasan dan persetujuan orang lain
 

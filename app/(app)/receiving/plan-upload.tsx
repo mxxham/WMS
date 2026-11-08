@@ -44,7 +44,9 @@ export function PlanUpload() {
     });
     setBusy(false);
     if (error) return setError(error.message);
-    setDone(data as { created: number; skipped: { doc_no: string; why: string }[] }); setPlan(null); router.refresh();
+    setDone(data as { created: number; skipped: { doc_no: string; why: string }[] }); setPlan(null);
+    // The list shows one day: open the plan's day so the new receipts are on screen.
+    router.push(`/receiving?date=${date}`); router.refresh();
   }
 
   const lines = plan?.docs.reduce((n, d) => n + d.lines.length, 0) ?? 0;

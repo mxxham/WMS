@@ -23,6 +23,9 @@ function colLetter(i: number) {
 }
 import { cn, fmtNum } from "@/lib/utils";
 
+type Skipped = { bin_code: string; sku: string; quantity: number | null; reason: "CKB" | "TIDAK_ADA" | "RENCANA" };
+const SKIP_REASON: Record<Skipped["reason"], string> = { CKB: "rak CKB 3PL", TIDAK_ADA: "bin tidak ada", RENCANA: "rak belum dibangun" };
+
 type Step = "upload" | "map" | "review" | "done";
 /** replace: the file is the whole warehouse, stock missing from it is zeroed. update: only the file's rows change. */
 type Mode = "replace" | "update";
@@ -43,6 +46,8 @@ export function ImportClient() {
   const [mode, setMode] = useState<Mode>("replace");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  // 0132: rows the database would not book (CKB 3PL racks, bins that do not exist or are not built yet).
+  const [skipped, setSkipped] = useState<Skipped[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   function loadSheet(book: XLSX.WorkBook, name: string) {
@@ -99,8 +104,11 @@ export function ImportClient() {
     });
     setBusy(false);
     if (error) { setError(error.message); return error.message; }
+    const skip = (res.skipped ?? []) as Skipped[];
+    setSkipped(skip);
     setResult(`${mode === "replace" ? "Stok diganti dengan isi file" : "Stok diperbarui"}: ${fmtNum(res.rows)} baris diproses, ${fmtNum(res.movements)} mutasi penyesuaian dibuat. ${counts.error} baris error tidak diimpor.`
-      + (res.held ? ` ${fmtNum(res.held)} baris tidak dinolkan karena terakhir dipindah atau dihitung di sistem: cek di Ditahan impor di atas.` : ""));
+      + (res.held ? ` ${fmtNum(res.held)} baris tidak dinolkan karena terakhir dipindah atau dihitung di sistem: cek di Ditahan impor di atas.` : "")
+      + (skip.length ? ` ${fmtNum(skip.length)} baris dilewati karena lokasinya bukan rak Shell yang ada (lihat di bawah).` : ""));
     setStep("done");
     router.refresh();
     return null;
@@ -218,13 +226,28 @@ export function ImportClient() {
       {step === "done" && (
         <Card><CardContent className="space-y-3">
           <p className="font-cond text-xl font-semibold">Import selesai</p><p className="text-sm">{result}</p>
+          {skipped.length > 0 && (
+            <div className="rounded-md border border-warn/40 bg-warn/5 p-3">
+              <p className="text-sm font-semibold">{fmtNum(skipped.length)} baris dilewati</p>
+              <p className="mb-2 text-xs text-steel-500">Stok ini tidak dicatat. Cari di mana barangnya sebenarnya, lalu catat lewat koreksi stok. Status rak diatur di Rak &amp; Lokasi.</p>
+              <ul className="space-y-1 text-sm">
+                {skipped.map((k, i) => (
+                  <li key={`${k.bin_code}-${k.sku}-${i}`} className="flex flex-wrap gap-x-3">
+                    <span className="font-mono font-semibold">{k.bin_code}</span><span>{k.sku}</span>
+                    <span className="tabular">{fmtNum(Number(k.quantity ?? 0))} karton</span>
+                    <span className="text-steel-500">{SKIP_REASON[k.reason]}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {mode === "replace" && (
             <StaleWavesNotice before={new Date().toLocaleDateString("sv-SE")}
               intro="Stok sekarang sama dengan file WMS, yang sudah memuat barang yang diambil. Tugas terbuka wave lama ini tetap menahan stok dan Bin To Bin-nya dihitung sebagai stok masuk, jadi rencana hari ini akan salah sampai wave ini diselesaikan atau dibatalkan." />
           )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={downloadReport}>Unduh laporan masalah</Button>
-            <Button onClick={() => { setStep("upload"); setRows([]); setResult(null); }}>Import file lain</Button>
+            <Button onClick={() => { setStep("upload"); setRows([]); setResult(null); setSkipped([]); }}>Import file lain</Button>
           </div>
         </CardContent></Card>
       )}

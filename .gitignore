@@ -48,3 +48,4 @@ backups/
 
 # Local build cache (opencode prodbuild) — never commit
 tmp/
+.superpowers/

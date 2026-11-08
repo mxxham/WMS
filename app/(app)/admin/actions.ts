@@ -31,32 +31,3 @@ export async function saveLayoutAction(_: ActionState, fd: FormData): Promise<Ac
     return { ok: `Layout disimpan. Koordinat ${data} bin dihitung ulang.` };
   } catch (e) { return { error: (e as Error).message }; }
 }
-
-export async function setBinStatusAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  try {
-    await admin();
-    const codes = String(fd.get("codes") ?? "").split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
-    const status = String(fd.get("status")) === "blocked" ? "blocked" : "active";
-    const abc = String(fd.get("abc") ?? "");
-    if (!codes.length) return { error: "Isi minimal satu kode bin." };
-    const patch: Record<string, unknown> = { status };
-    if (["A", "B", "C"].includes(abc)) patch.abc_class = abc;
-    if (abc === "clear") patch.abc_class = null;
-    const supabase = await createClient();
-    const { data, error } = await supabase.from("bins").update(patch).in("bin_code", codes).select("bin_code");
-    if (error) return { error: error.message };
-    const missing = codes.filter((c) => !data?.some((d) => d.bin_code === c));
-    return { ok: `${data?.length ?? 0} bin diperbarui.${missing.length ? ` Tidak ditemukan: ${missing.join(", ")}` : ""}` };
-  } catch (e) { return { error: (e as Error).message }; }
-}
-
-export async function recomputeAbcAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  try {
-    await admin();
-    const days = Math.max(7, Number(fd.get("days") ?? 90));
-    const supabase = await createClient();
-    const { data, error } = await supabase.rpc("recompute_abc", { days });
-    if (error) return { error: error.message };
-    return { ok: `Kelas ABC ${data} SKU dihitung ulang dari picking ${days} hari terakhir.` };
-  } catch (e) { return { error: (e as Error).message }; }
-}

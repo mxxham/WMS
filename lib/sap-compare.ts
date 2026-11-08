@@ -12,6 +12,8 @@ export type CompareLine = {
   sap_unrestricted: number; sap_blocked: number; wms_unrestricted: number; wms_blocked: number;
   pending_gi: number; pending_gr: number; auto_gi: number;
   diff_unrestricted: number; diff_blocked: number;
+  /** net adjustment posted to the WMS from this line (Investigasi selisih, 0129); the day's numbers stay as they were */
+  wms_fix?: number | null;
   sap_other: Record<string, number> | null;
   status: "OPEN" | "EXPLAINED" | "COUNT_REQUESTED" | "RESOLVED"; cause: CauseCode | null;
 };
@@ -26,6 +28,7 @@ export const CAUSES = {
   UOM: "Satuan beda",
   DAMAGED: "Rusak / blok",
   RETURN: "Retur",
+  MISPLACED: "Salah lokasi (Bin To Bin tidak tercatat)",
   OTHER: "Lainnya",
 } as const;
 export type CauseCode = keyof typeof CAUSES;

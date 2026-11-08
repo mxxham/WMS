@@ -32,11 +32,7 @@
 @keyframes welcome-fade { from { opacity: 0; } to { opacity: 1; } }
 .welcome-fade { animation: welcome-fade 400ms ease-out both; }
 
-/* Home banner (components/home/home-page.tsx): the image runs edge to edge, and the navy strip under
-   it continues the image's own right panel. Every animation runs once; all of it is off with reduced
-   motion above, and the end state is the plain layout. */
-@keyframes home-banner-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
-.home-banner-in { animation: home-banner-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+/* Entrance helpers still used by the dashboard and the welcome screen. Off with reduced motion above. */
 @keyframes home-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .home-rise { animation: home-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
 /* One light-aqua sweep across banner and strip, like the light bands in the image. */
@@ -44,10 +40,6 @@
   background: linear-gradient(105deg, transparent 35%, rgb(169 214 229 / 0.16) 50%, transparent 65%);
   animation: home-shine 1800ms ease-in-out 700ms 1 both; }
 @keyframes home-shine { to { transform: translateX(100%); } }
-/* The strip under the banner: darkest at the sidebar's edge, brightening into the banner's teal band
-   pocket (pixel-sampled #075360), settling at the panel tone before the CTAs. 100° matches the tilt
-   of the diagonal bands in the image itself. */
-.home-strip { background-image: linear-gradient(100deg, #032741 0%, #06464A 40%, #075360 60%, #04404E 100%); }
 /* Ghost echo of the banner's dot-grid motif: faint deep-water-blue dots dissolving down-left,
    tucked into the top-right of the modules section. Static, so reduced motion needs no exception. */
 .home-dots { background-image: radial-gradient(circle, rgb(42 111 151 / 0.22) 1.5px, transparent 1.6px);
@@ -78,17 +70,76 @@ body:has([data-pinned-bar]) .site-footer { padding-bottom: 6rem; }
 }
 .login-photo { animation: login-photo 1100ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 
+/* Loading screens (components/loading/skeleton.tsx). One light sweep runs left to right across every
+   placeholder block at once (the gradient is fixed to the viewport, so all blocks share one sheen),
+   instead of each group pulsing. The whole skeleton fades in only after 120 ms, so a fast page never
+   flashes one. Reduced motion: plain static blocks, shown at once. */
+@keyframes skel-sweep { from { background-position: -100vw 0; } to { background-position: 100vw 0; } }
+.skel { background-image: linear-gradient(90deg, transparent 0, transparent 40%, rgb(255 255 255 / 0.55) 50%, transparent 60%, transparent 100%);
+  background-size: 100vw 100%; background-attachment: fixed; background-repeat: no-repeat;
+  animation: skel-sweep 1.6s linear infinite; }
+.skel-navy { background-image: linear-gradient(90deg, transparent 0, transparent 40%, rgb(255 255 255 / 0.12) 50%, transparent 60%, transparent 100%); }
+@keyframes skel-in { from { opacity: 0; } to { opacity: 1; } }
+.skel-in { animation: skel-in 200ms ease-out 120ms both; }
+@media (prefers-reduced-motion: reduce) { .skel, .skel-in { animation: none !important; background-image: none; } }
+
+/* The welcome screen's (components/app/welcome-screen.tsx) staggered rise. */
 @keyframes login-rise {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
 }
 .login-rise { animation: login-rise 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
 
-@keyframes login-field {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
+/* Login and Home (the "floor" screens): the warehouse in navy, one painted floor line in yellow that
+   leads each person to their next step. The line is the only thing that moves: line and arrowhead slide
+   in together from the left inside a clipping box, so the arrow leads the paint the whole way (like a
+   striping machine), then it nudges twice at what it points to. Transform only, so the compositor does
+   the work. With reduced motion it is simply there. Tokens live in tailwind.config (`floor`, `jeir`). */
+@keyframes floor-run { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes floor-nudge { 0%, 100% { transform: none; } 50% { transform: translateX(6px); } }
+.floor-run { animation: floor-run 1500ms cubic-bezier(0.33, 1, 0.68, 1) 300ms both; }
+.floor-nudge { animation: floor-nudge 460ms ease-in-out 1850ms 2; }
+/* Signing in (app/login/login-form.tsx): one journey left to right. The login line keeps going and
+   leaves past the right edge of the screen (accelerating, like it is driving off), then Home opens and
+   its line comes in from the left with the same entrance. During the exit the line is no longer clipped
+   to its box and the photo side stacks above the form, so the arrow runs over the Masuk button and out. */
+@keyframes floor-exit { from { transform: none; } to { transform: translateX(100vw); } }
+.floor-exit .floor-run { animation: floor-exit 450ms cubic-bezier(0.55, 0, 1, 0.45) both; }
+.floor-exit .floor-box { overflow: visible; }
+.floor-exit .floor-nudge { animation: none; }
+.floor-exit [data-floor-stage] { z-index: 10; overflow: visible; }
+/* The Masuk button is the door the line drives through: it folds flat to the line's own height (48px ->
+   6px) as the arrow reaches it, its words gone, and on a desktop, where it sits on the line, it carries
+   on to the right as part of the line. On a phone the line runs along the photo band instead, so the
+   button just folds away. Timing: the arrow covers the 56px to the button in the first ~28% of the run. */
+@keyframes floor-door-merge {
+  0% { transform: none; color: #032741; }
+  28% { transform: scaleY(0.125); color: transparent; }
+  100% { transform: translateX(100vw) scaleY(0.125); color: transparent; }
 }
-.login-field { animation: login-field 500ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+@keyframes floor-door-fold { to { transform: scaleY(0.125); color: transparent; opacity: 0; } }
+/* Home's button sits right at the arrow (12 px away, not 56): it folds almost at once. */
+@keyframes floor-door-merge-near {
+  0% { transform: none; color: #032741; }
+  10% { transform: scaleY(0.11); color: transparent; }
+  100% { transform: translateX(100vw) scaleY(0.11); color: transparent; }
+}
+.floor-exit .floor-door { animation: floor-door-fold 220ms cubic-bezier(0.55, 0, 1, 0.45) both; }
+@media (min-width: 1024px) {
+  .floor-exit .floor-door { animation: floor-door-merge 450ms cubic-bezier(0.55, 0, 1, 0.45) both; }
+}
+.floor-exit .floor-door[data-door-near] { animation: floor-door-merge-near 450ms cubic-bezier(0.55, 0, 1, 0.45) both; }
+/* Home -> Dashboard (components/floor/floor-door-link.tsx): Home's board of four counts grows into the
+   Dashboard's "Hari ini" panel while the rest of the page cross-fades. */
+::view-transition-group(today-board) { animation-duration: 550ms; animation-timing-function: cubic-bezier(0.65, 0.05, 0.36, 1); }
+::view-transition-old(today-board), ::view-transition-new(today-board) { animation-duration: 550ms; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 350ms; }
+.today-handoff .home-rise { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+/* The building in navy: the photo loses its colours so the yellow line is the only colour left. */
+.floor-photo { filter: grayscale(1) contrast(1.08) brightness(0.92); }
 
 /* The single animation in the app: the 404 card's slow turn (`card-spin`, tailwind.config).
    Everything else here is static by design; this comment exists partly to give the CSS module a
@@ -106,7 +157,7 @@ body:has([data-pinned-bar]) .site-footer { padding-bottom: 6rem; }
 .animate-shake { animation: shake 400ms ease-in-out; }
 
 @media (prefers-reduced-motion: reduce) {
-  .login-photo, .login-rise, .login-field, .animate-fade-in, .animate-shake {
+  .login-photo, .login-rise, .floor-run, .floor-nudge, .floor-exit .floor-run, .floor-exit .floor-door, .animate-fade-in, .animate-shake {
     animation: none !important;
     opacity: 1;
     transform: none;

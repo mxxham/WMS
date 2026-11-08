@@ -14,18 +14,22 @@ import { exportRecon } from "./export";
 import { Mb51List } from "./mb51-list";
 import { ShipmentMatch } from "./shipment-match";
 import { StockCompare } from "./stock-compare";
+import { Investigation } from "./investigate";
 import type { PrevGap, ReconLine, ReconSummary, SapMove, ShipMatch } from "./types";
 
 type View = "stok" | "kirim" | "mb51";
 
-export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsOf, initialView }: {
+export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsOf, initialView, initialInv }: {
   run: ReconSummary; lines: ReconLine[]; moves: SapMove[]; ships: ShipMatch[]; shipError: string | null;
-  prev: PrevGap | null; prevAsOf: string | null; initialView?: string;
+  prev: PrevGap | null; prevAsOf: string | null; initialView?: string; initialInv?: string;
 }) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
   const [view, setView] = useState<View>(initialView === "kirim" || initialView === "mb51" ? initialView : "stok");
   const [closeNote, setCloseNote] = useState("");
+  // Investigasi selisih (0129): one SKU opened full-page, kept in the address (?inv=<sku>).
+  const [inv, setInv] = useState<string | null>(initialInv ?? null);
+  const invLine = inv ? lines.find((x) => x.sku === inv) ?? null : null;
   const s = useMemo(() => compareStats(lines), [lines]);
   const shipOff = ships.filter((r) => r.status !== "MATCH").length;
   const open = run.status === "OPEN";
@@ -36,6 +40,13 @@ export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsO
     const u = new URL(window.location.href);
     u.searchParams.set("rv", v);
     window.history.replaceState(null, "", u.toString());
+  }
+  function investigate(sku: string | null) {
+    setInv(sku);
+    const u = new URL(window.location.href);
+    if (sku) { u.searchParams.set("inv", sku); u.searchParams.set("rv", "stok"); } else u.searchParams.delete("inv");
+    window.history.replaceState(null, "", u.toString());
+    window.scrollTo({ top: 0 });
   }
   async function close(): Promise<string | null> {
     const { error } = await createClient().rpc("close_stock_recon", { p_id: run.id, p_note: closeNote, p_by_name: person });
@@ -53,6 +64,10 @@ export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsO
     ["Hanya di WMS", fmtNum(s.onlyWms), "SAP kosong"],
     ["Belum ditangani", fmtNum(s.open), "selisih tanpa status", s.open ? "text-warn" : undefined],
   ];
+
+  if (invLine) {
+    return <Investigation run={run} line={invLine} lines={lines} person={person} setPerson={setPerson} onBack={() => investigate(null)} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -98,7 +113,7 @@ export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsO
         {open && <div className="pb-2"><PersonNameField id="lperson" value={person} onChange={setPerson} /></div>}
       </div>
 
-      {view === "stok" && <StockCompare run={run} lines={lines} moves={moves} prev={prev} prevAsOf={prevAsOf} person={person} />}
+      {view === "stok" && <StockCompare run={run} lines={lines} moves={moves} prev={prev} prevAsOf={prevAsOf} person={person} onInvestigate={investigate} />}
       {view === "kirim" && <ShipmentMatch run={run} rows={ships} error={shipError} person={person} />}
       {view === "mb51" && <Mb51List moves={moves} />}
 

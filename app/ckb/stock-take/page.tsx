@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { requireCkb } from "@/lib/ckb/auth";
 import { createClient } from "@/lib/supabase/server";
 import { cleanFilters } from "@/lib/ckb/report-data";
+import { loadSessionList, type SessionListRow } from "@/lib/ckb/stocktake-data";
 import { isLead, isStaff } from "@/lib/ckb/permissions";
 import { STOCKTAKE_STATUS, SCOPE_LABEL, type StocktakeStatus } from "@/lib/ckb/stocktake";
 import { CkbHeader, CkbBody, EmptyState, Notice, Pill } from "@/components/ckb/ui";
@@ -15,16 +16,22 @@ import { fmtDate, fmtDateTime } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Stock take" };
 
-/** Stock-take sessions. Representatives see only their customers' closed sessions (RLS). */
+/**
+ * Stock-take sessions. Representatives see only their customers' closed sessions (RLS). The list is
+ * read in full, in pages — a fixed cap here dropped older sessions without saying so.
+ */
 export default async function StocktakeListPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireCkb("/ckb/stock-take");
   const f = cleanFilters(await searchParams);
   const db = await createClient();
   const { data: customers } = await db.from("ckb_customers").select("id, name").order("name");
-  let q = db.from("ckb_stocktakes").select("id, ref_no, customer_id, scope_type, status, blind, warehouse, created_by_name, created_at, closed_at").order("created_at", { ascending: false }).limit(300);
-  if (f.customer) q = q.eq("customer_id", f.customer);
-  if (f.status) q = q.eq("status", f.status);
-  const { data: sessions, error } = await q;
+  let sessions: SessionListRow[] = [];
+  let loadError: string | null = null;
+  try {
+    sessions = await loadSessionList({ customer: f.customer, status: f.status });
+  } catch (e) {
+    loadError = (e as Error).message;
+  }
   const cname = new Map((customers ?? []).map((c) => [c.id, c.name]));
   const lead = isLead(user.ckbRole);
 
@@ -39,15 +46,15 @@ export default async function StocktakeListPage({ searchParams }: { searchParams
           { name: "customer", label: "Customer", kind: "select", options: (customers ?? []).map((c) => ({ value: c.id, label: c.name })) },
           ...(isStaff(user.ckbRole) ? [{ name: "status", label: "Status", kind: "select" as const, options: (Object.keys(STOCKTAKE_STATUS) as StocktakeStatus[]).map((s) => ({ value: s, label: STOCKTAKE_STATUS[s].label })) }] : []),
         ]} />
-        {error && <Notice tone="bad">Sesi tidak bisa dimuat: {error.message}</Notice>}
-        {(sessions ?? []).length === 0 ? (
+        {loadError && <Notice tone="bad">Sesi tidak bisa dimuat: {loadError}</Notice>}
+        {loadError ? null : sessions.length === 0 ? (
           <EmptyState title="Belum ada sesi stock take" action={lead && <Button asChild><Link href="/ckb/stock-take/new">Buat sesi pertama</Link></Button>}>
             {lead ? "Sesi dibuat dari snapshot SAP sebuah customer." : undefined}
           </EmptyState>
         ) : (
           <>
             <ul className="space-y-2 md:hidden">
-              {(sessions ?? []).map((s) => (
+              {sessions.map((s) => (
                 <li key={s.id}>
                   <Link href={`/ckb/stock-take/${s.id}`} className="block rounded-lg border border-steel-100 bg-white p-4 hover:bg-steel-100/50">
                     <div className="flex items-center justify-between gap-2">
@@ -63,7 +70,7 @@ export default async function StocktakeListPage({ searchParams }: { searchParams
               <Table>
                 <thead><tr><Th>Sesi</Th><Th>Customer</Th><Th>Cakupan</Th><Th>Gudang</Th><Th>Status</Th><Th>Dibuat</Th><Th>Ditutup</Th></tr></thead>
                 <tbody>
-                  {(sessions ?? []).map((s) => (
+                  {sessions.map((s) => (
                     <tr key={s.id}>
                       <Td><Link href={`/ckb/stock-take/${s.id}`} className="font-medium text-ckb hover:underline">{s.ref_no}</Link>{s.blind && <span className="ml-2 text-xs text-steel-500">buta</span>}</Td>
                       <Td>{cname.get(s.customer_id)}</Td>

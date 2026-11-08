@@ -30,9 +30,9 @@ import { WaveMenu } from "./wave-menu";
 import { DayBar } from "./day-bar";
 import { ProblemsSummary, type ProblemCounts } from "./problems-summary";
 import { useIsPhone } from "./use-is-phone";
-import { NO_FILTER, filterActive, foldDone, lineCancelled, lineProps, rowMatches, waveHref, type RowFilter, type WaveModel } from "./wave-model";
+import { NO_FILTER, filterActive, foldDone, lineCancelled, lineProps, rowMatches, waveHref, waveMatches, type RowFilter, type WaveModel } from "./wave-model";
 import { WavePrimary } from "./wave-primary";
-import { DoButton } from "./do-dialog";
+import { LoadNoTag } from "./load-no-dialog";
 import { emptyDayText } from "@/lib/assigned-waves";
 
 export type { OutboundDetail, TaskWait } from "./wave-parts";
@@ -52,7 +52,7 @@ const WaveSheetPanel = dynamic(() => import("./wave-sheet").then((m) => m.WaveSh
  * The Wave page: one address, two layouts — the desktop layout below and a dedicated phone layout
  * (mobile/phone-layout.tsx) under 768 px. Same data, same actions; only the arrangement differs.
  */
-export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = false, waves, tasks, dayWaves = waves, dayTasks = tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {} }: {
+export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = false, waves, tasks, dayWaves = waves, dayTasks = tasks, outbound, shortfalls, audit, waits = {}, counts = [], lastImport = null, corrections = [], requests = [], dos = {}, loadNos = {} }: {
   date: string; prevDate: string | null; nextDate: string | null;
   role: Role; /** operator view: only their assigned shipments are passed in */ assignedOnly?: boolean; waves: WaveRow[]; tasks: TaskRow[]; outbound: (OutboundRow & OutboundDetail)[];
   /** the whole day's waves and tasks, for every replay (Sisa, rest notes, print order); default = waves / tasks */
@@ -73,6 +73,7 @@ export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = fal
   requests?: LineRequest[];
   /** manual DO numbers per wave+shipment (0079), keyed `${wave_id}|${shipment_number}` */
   dos?: Record<string, string[]>;
+  loadNos?: Record<string, number>;
 }) {
   const router = useRouter();
   const phone = useIsPhone();
@@ -140,7 +141,7 @@ export function WavesClient({ date, prevDate, nextDate, role, assignedOnly = fal
 
   const model: WaveModel = {
     date, prevDate, nextDate, waves, tasks, outbound, supervisor, rpc, onDone: () => router.refresh(),
-    assignedOnly, short, waits, audit, rest: restNotesFromTasks(dayWaves, dayTasks), dos,
+    assignedOnly, short, waits, audit, rest: restNotesFromTasks(dayWaves, dayTasks), dos, loadNos,
     // 0073: picks whose pallet's relokasi is already posted (posted alone to unblock another
     // wave) may not be cancelled: the moved cartons stay moved and the pickface keeps the rest.
     postedMoveOf: new Map([...movesOfPicks([...tasks].sort((a, b) => a.seq - b.seq), { anyState: true })]
@@ -233,18 +234,19 @@ function WavesDesktop({ model: m, openWave, sheetAt, onSheetAtDone }: {
                 onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
             </div>
             <Button variant="ghost" size="sm" className="h-10" aria-expanded={showFilter} onClick={() => setShowFilter((v) => !v)}>
-              <SlidersHorizontal className="h-4 w-4" />Filter{filter.onlyOpen || filter.onlyProblems ? " (aktif)" : ""}
+              <SlidersHorizontal className="h-4 w-4" />Filter{active ? " (aktif)" : ""}
             </Button>
             {showFilter && (
               <div className="flex flex-wrap items-center gap-4 text-sm">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyOpen} onChange={(e) => setFilter({ ...filter, onlyOpen: e.target.checked })} />Hanya yang belum diposting</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyDone} onChange={(e) => setFilter({ ...filter, onlyDone: e.target.checked })} />Hanya yang sudah selesai</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={filter.onlyProblems} onChange={(e) => setFilter({ ...filter, onlyProblems: e.target.checked })} />Hanya yang bermasalah</label>
               </div>
             )}
             {active && <button className="text-sm underline" onClick={() => setFilter(NO_FILTER)}>Hapus filter</button>}
           </div>
           <div className="space-y-2">
-            {m.ordered.map((w) => (
+            {m.ordered.map((w) => waveMatches(w, filter) && (
               <WaveBlock key={w.id} model={m} wave={w} open={openId === w.id || (active && openId === null)} onToggle={() => open(openId === w.id ? null : w.id)}
                 filter={filter} onShowProblems={() => { setProblemsOpen(true); setTimeout(() => document.getElementById("perlu-ditangani")?.scrollIntoView({ behavior: "smooth" }), 50); }}
                 sheetAt={sheetAt?.wave_id === w.id ? sheetAt : null} onSheetAtDone={onSheetAtDone} />
@@ -302,7 +304,7 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
                 const shipmentDos = m.dos[key] ?? [];
                 return (
                   <span key={sh} className="tabular">
-                    {sh}
+                    <LoadNoTag n={m.loadNos[sh]} />{sh}
                     {st && <span className={cn("ml-1 rounded px-1.5 text-xs font-semibold", SHIPMENT_STATE_TONE[st])}>{SHIPMENT_STATE_LABEL[st]}</span>}
                     {shipmentDos.length > 0 && (
                       <span className="ml-1.5 text-xs text-steel-400 tabular">
@@ -327,10 +329,9 @@ function WaveBlock({ model: m, wave: w, open, onToggle, filter, onShowProblems, 
         </button>
         <div className="flex items-center gap-1">
           {primary}
-          <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop"
+          <WaveMenu wave={w} tasks={tasks} supervisor={m.supervisor} rpc={m.rpc} layout="desktop" loadNos={m.loadNos} dos={m.dos}
             onStartPicking={() => { setSheet(false); setPicking(true); if (!open) onToggle(); }}
             onPrint={() => m.printWave(w)} onOpenSheet={() => { setSheet(true); setSheetFromRequest(false); if (!open) onToggle(); }} />
-          <DoButton wave={w} shipments={w.shipment_numbers} dos={m.dos} supervisor={m.supervisor} rpc={m.rpc} />
         </div>
       </div>
 
@@ -409,7 +410,7 @@ function DesktopLines({ model: m, wave: w, rows, outbound }: { model: WaveModel;
             const shipmentDos = m.dos[key] ?? [];
             return (
               <tr key={i}>
-                <Td>{o.shipment_number}</Td><Td>{o.sku}</Td><Td>{o.description}</Td>
+                <Td><LoadNoTag n={m.loadNos[o.shipment_number]} />{o.shipment_number}</Td><Td>{o.sku}</Td><Td>{o.description}</Td>
                 <Td className="text-right">{fmtNum(Number(o.quantity_requested))}</Td>
                 <Td className="text-right">{fmtNum(Number(o.quantity_allocated))}</Td>
                 <Td className={cn("text-right", o.status === "COMPLETED" && Number(o.quantity_picked) < Number(o.quantity_allocated) && "font-semibold text-bad")}>{fmtNum(Number(o.quantity_picked))}</Td>

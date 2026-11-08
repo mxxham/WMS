@@ -8,12 +8,12 @@
  */
 
 export type EvidenceEntity = "STOCKTAKE" | "COUNT_TASK" | "INSPECTION";
-export type EvidenceKind = "GENERAL" | "DAMAGE" | "LABEL" | "DOCUMENT" | "DISCREPANCY";
+export type EvidenceKind = "GENERAL" | "DAMAGE" | "LABEL" | "DOCUMENT" | "DISCREPANCY" | "COUNT";
 
 export const EVIDENCE_ENTITIES: readonly EvidenceEntity[] = ["STOCKTAKE", "COUNT_TASK", "INSPECTION"];
-export const EVIDENCE_KINDS: readonly EvidenceKind[] = ["GENERAL", "DAMAGE", "LABEL", "DOCUMENT", "DISCREPANCY"];
+export const EVIDENCE_KINDS: readonly EvidenceKind[] = ["GENERAL", "DAMAGE", "LABEL", "DOCUMENT", "DISCREPANCY", "COUNT"];
 export const EVIDENCE_KIND_LABEL: Record<EvidenceKind, string> = {
-  GENERAL: "Umum", DAMAGE: "Kerusakan", LABEL: "Label", DOCUMENT: "Dokumen", DISCREPANCY: "Selisih",
+  GENERAL: "Umum", DAMAGE: "Kerusakan", LABEL: "Label", DOCUMENT: "Dokumen", DISCREPANCY: "Selisih", COUNT: "Foto hitung",
 };
 export const ENTITY_LABEL: Record<EvidenceEntity | "REBAGGING", string> = {
   STOCKTAKE: "Stock take", COUNT_TASK: "Tugas hitung", INSPECTION: "Inspeksi", REBAGGING: "Rebagging",

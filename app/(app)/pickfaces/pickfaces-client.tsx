@@ -6,7 +6,7 @@ import { fetchAll } from "@/lib/fetch-all";
 import { withConfig } from "@/lib/allocator/config";
 import { inventoryToStock, type InventoryRow } from "@/lib/allocator/adapters/inventory-stock";
 import { derivePickfaces } from "@/lib/allocator/pickface";
-import { loadPickfaceOverrides } from "@/lib/allocator/browser/plan-client";
+import { loadPickfaceOverrides, loadShellBinRules } from "@/lib/allocator/browser/plan-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,18 +34,20 @@ export function PickfacesClient() {
     setBusy(true); setError(null);
     try {
       const db = createClient();
-      const [stockRows, fixed] = await Promise.all([
+      const [stockRows, fixed, binRules] = await Promise.all([
         fetchAll<InventoryRow>((from, to) => db.from("inventory_detail").select(COLUMNS).order("bin_code").order("sku").order("batch_lot").range(from, to)),
         loadPickfaceOverrides(db),
+        // 0132: never suggest a pickface in a CKB 3PL rack or a blocked / missing / planned bin.
+        loadShellBinRules(db),
       ]);
-      const config = withConfig({ pickfaceOverrides: fixed });
+      const config = withConfig({ pickfaceOverrides: fixed, ...binRules });
       const stock = inventoryToStock(stockRows, config).stock;
       // Suggestion = the automatic choice if this SKU had no fixed bin (other SKUs' fixed bins still respected).
       const auto = derivePickfaces(stock, config);
       const suggest = (sku: string) => {
         if (!fixed[sku]) return auto.get(sku)?.location ?? null;
         const others = { ...fixed }; delete others[sku];
-        return derivePickfaces(stock, withConfig({ pickfaceOverrides: others })).get(sku)?.location ?? null;
+        return derivePickfaces(stock, withConfig({ pickfaceOverrides: others, ...binRules })).get(sku)?.location ?? null;
       };
       const desc = new Map(stockRows.map((r) => [r.sku, r.description ?? ""]));
       const skus = [...new Set([...stockRows.map((r) => r.sku), ...Object.keys(fixed)])].sort();

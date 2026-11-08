@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
-import { DEFAULT_CONFIG, withConfig } from "@/lib/allocator/config";
+import { withConfig } from "@/lib/allocator/config";
 import { inventoryToStock } from "@/lib/allocator/adapters/inventory-stock";
-import { loadDispatchRules, loadPickfaceOverrides, loadPlanningStock } from "@/lib/allocator/browser/plan-client";
+import { loadDispatchRules, loadPickfaceOverrides, loadPlanningStock, loadShellBinRules } from "@/lib/allocator/browser/plan-client";
 import { runPipeline } from "@/lib/allocator/pipeline";
 import { buildPlan, type PlanPayload } from "@/lib/allocator/plan";
 import { binToBin } from "@/lib/allocator/picklist";
@@ -47,6 +47,7 @@ async function planLines(date: string, shipment: string, lines: Line[],
     asOf: new Date(`${date}T00:00:00Z`),
     pickfaceOverrides: await loadPickfaceOverrides(db),
     ...(await loadDispatchRules(db)),
+    ...(await loadShellBinRules(db)),
   });
   const stock = inventoryToStock(await loadPlanningStock(db, date, [], true), config);
   const bySku = new Map<string, DemandLine>();
@@ -158,7 +159,7 @@ function moveSuggestions(from: string, sku: string, plannedTo: string, data: Mov
   for (const pf of data?.pickfaces.get(sku) ?? []) push(pf, "pickface SKU ini");
   const src = parseBin(from);
   if (src && data) {
-    const near = data.emptyA.filter((b) => !DEFAULT_CONFIG.blockedBins.includes(b.bin_code)).map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5);
+    const near = data.emptyA.map((b) => ({ b, d: binDistance(src, b) })).sort((a, c) => a.d - c.d).slice(0, 5);
     for (const { b } of near) push(b.bin_code, `kosong · ${distanceLabel(src, b)}`);
   }
   return list;

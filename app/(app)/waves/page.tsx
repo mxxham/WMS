@@ -97,9 +97,13 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
     (dosRows ?? []).map((r) => [`${r.wave_id}|${r.shipment_number}`, (r.do_nos as string[]) ?? []])
   );
 
+  // Manual loading numbers (Urutan muat, 0128): keyed on day + shipment.
+  const { data: loadRows } = await supabase.from("shipment_load_no").select("shipment_number, load_no").eq("planned_date", date);
+  const loadNos: Record<string, number> = Object.fromEntries((loadRows ?? []).map((r) => [r.shipment_number as string, Number(r.load_no)]));
+
   return (
     <main>
-      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads", "pick_line_requests", "shipment_assignments"]} />
+      <PageHeader title="Wave & tugas pick" live={["waves", "pick_tasks", "outbound", "movements", "pick_audits", "shipment_loads", "pick_line_requests", "shipment_assignments", "shipment_load_no"]} />
       <div className="space-y-4 p-4 lg:p-8">
         <WavesClient
           date={date}
@@ -120,6 +124,7 @@ export default async function WavesPage({ searchParams }: { searchParams: Promis
           corrections={inventoryWork(assignedOnly, corrections as PicklistCorrection[] | null)}
           requests={(requests ?? []) as LineRequest[]}
           dos={dos}
+          loadNos={loadNos}
         />
       </div>
     </main>

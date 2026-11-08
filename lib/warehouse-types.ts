@@ -3,6 +3,8 @@ export type BinSummary = {
   status: "active" | "blocked"; capacity: number | null;
   pos_x: number | null; pos_y: number | null; pos_z: number | null;
   abc_class: string | null; total_qty: number; fill_ratio: number | null; min_expiry: string | null; skus: string[];
+  /** 0132: why a blocked bin is blocked, and who uses the rack; absent before 0132 */
+  block_kind?: "BLOCKED" | "NOT_PRESENT" | "PLANNED" | null; owner?: "SHELL" | "CKB" | null;
 };
 
 export type Layout = {

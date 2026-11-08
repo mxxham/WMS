@@ -33,6 +33,8 @@ export const isLead = (r: CkbRole | null | undefined): boolean => r === "admin" 
 export const CKB_ROUTES: { prefix: string; roles: CkbRole[] }[] = [
   { prefix: "/ckb/stock-take/new", roles: LEAD },
   { prefix: "/ckb/stock-take/*/count", roles: STAFF },
+  { prefix: "/ckb/stock-take/*/assign", roles: LEAD },
+  { prefix: "/ckb/count", roles: STAFF },
   { prefix: "/ckb/stock-take/*/discrepancies", roles: LEAD },
   { prefix: "/ckb/stock-take/*/review", roles: LEAD },
   { prefix: "/ckb/stock-take/*/export", roles: LEAD },
@@ -75,6 +77,7 @@ export const CKB_NAV: { title: string; items: CkbNavItem[] }[] = [
     { href: "/ckb", label: "Dashboard", icon: "dashboard" },
   ] },
   { title: "Operasional gudang", items: [
+    { href: "/ckb/count", label: "Hitung saya", icon: "count" },
     { href: "/ckb/rebagging", label: "Rebagging", icon: "rebag" },
     { href: "/ckb/inspections", label: "Inspeksi kargo", icon: "inspect" },
     { href: "/ckb/stock-take", label: "Stock take & hitung ulang", icon: "count" },

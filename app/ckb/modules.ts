@@ -8,6 +8,7 @@ export type CkbModule = {
 };
 
 export const CKB_MODULES: CkbModule[] = [
+  { href: "/ckb/count",       label: "Hitung saya",      group: "Operasional",     blurb: "Baris stock take yang ditugaskan ke Anda." },
   { href: "/ckb/rebagging",   label: "Rebagging",        group: "Operasional",     blurb: "Catat dan kelola operasi rebagging." },
   { href: "/ckb/inspections", label: "Inspeksi kargo",   group: "Operasional",     blurb: "Kontrol pemeriksaan kargo masuk." },
   { href: "/ckb/stock-take",  label: "Stock take",       group: "Operasional",     blurb: "Sesi penghitungan stok berkala." },

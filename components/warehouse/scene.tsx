@@ -13,6 +13,8 @@ type Props = {
 
 const dummy = new THREE.Object3D();
 const tmpColor = new THREE.Color();
+/** 0132: a rack lent to CKB 3PL is mixed toward the banner teal, whatever the colour mode. */
+const CKB_TINT = new THREE.Color("#61A5C2");
 
 /** Size of one pallet box, derived from the layout config. */
 function boxSize(l: Layout): [number, number, number] {
@@ -29,7 +31,7 @@ function centre(b: BinSummary, l: Layout): [number, number, number] {
  * All bins drawn as ONE instanced mesh (2.5k boxes -> 1 draw call).
  * Colours are per-instance; clicking returns the instance index.
  */
-function Bins({ bins, layout, mode, onSelect }: Pick<Props, "bins" | "layout" | "mode" | "onSelect">) {
+function Bins({ bins, layout, mode, onSelect, ghost = false }: Pick<Props, "bins" | "layout" | "mode"> & { onSelect?: Props["onSelect"]; ghost?: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const invalidate = useThree((st) => st.invalidate); // frameloop="demand": redraw after instance updates
   const size = boxSize(layout);
@@ -50,26 +52,32 @@ function Bins({ bins, layout, mode, onSelect }: Pick<Props, "bins" | "layout" | 
   useLayoutEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
-    bins.forEach((b, i) => mesh.setColorAt(i, tmpColor.set(binColor(b, mode))));
+    bins.forEach((b, i) => {
+      tmpColor.set(ghost ? "#A9D6E5" : binColor(b, mode));
+      if (!ghost && b.owner === "CKB") tmpColor.lerp(CKB_TINT, 0.45);
+      mesh.setColorAt(i, tmpColor);
+    });
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     invalidate();
-  }, [bins, mode, invalidate]);
+  }, [bins, mode, ghost, invalidate]);
 
   return (
     <instancedMesh
       ref={ref} args={[undefined, undefined, bins.length]}
-      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (e.instanceId !== undefined) onSelect(bins[e.instanceId]); }}
-      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      raycast={ghost ? () => null : undefined}
+      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (onSelect && e.instanceId !== undefined) onSelect(bins[e.instanceId]); }}
+      onPointerOver={() => { if (!ghost) document.body.style.cursor = "pointer"; }}
       onPointerOut={() => (document.body.style.cursor = "")}
     >
       <boxGeometry args={size} />
-      <meshStandardMaterial roughness={0.8} />
+      {/* A planned rack (Rencana, 0132) is a faint outline of what is coming: see-through, not clickable. */}
+      {ghost ? <meshStandardMaterial roughness={0.8} transparent opacity={0.22} depthWrite={false} /> : <meshStandardMaterial roughness={0.8} />}
     </instancedMesh>
   );
 }
 
 /** Wireframe cages around searched/selected bins (a second, small instanced mesh). */
-function Highlights({ bins, layout }: { bins: BinSummary[]; layout: Layout }) {
+function Highlights({ bins, layout, color = "#D7263D", scale = 1.25 }: { bins: BinSummary[]; layout: Layout; color?: string; scale?: number }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const invalidate = useThree((st) => st.invalidate);
   const [w, h, d] = boxSize(layout);
@@ -83,8 +91,8 @@ function Highlights({ bins, layout }: { bins: BinSummary[]; layout: Layout }) {
   if (bins.length === 0) return null;
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, bins.length]} raycast={() => null}>
-      <boxGeometry args={[w * 1.25, h * 1.25, d * 1.25]} />
-      <meshBasicMaterial color="#D7263D" wireframe />
+      <boxGeometry args={[w * scale, h * scale, d * scale]} />
+      <meshBasicMaterial color={color} wireframe />
     </instancedMesh>
   );
 }
@@ -169,12 +177,16 @@ function Focus({ controls, bins, layout, focusKey }: { controls: React.RefObject
 
 export default function WarehouseScene({ bins, layout, mode, highlighted, focusKey, onSelect }: Props) {
   const controls = useRef<CameraControls>(null);
-  const placed = useMemo(() => bins.filter((b) => b.pos_x !== null && b.pos_y !== null && b.pos_z !== null), [bins]);
+  // 0132: a bin that does not exist (a pillar) is not drawn; a planned one is a ghost; a blocked one gets a cage.
+  const all = useMemo(() => bins.filter((b) => b.pos_x !== null && b.pos_y !== null && b.pos_z !== null && b.block_kind !== "NOT_PRESENT"), [bins]);
+  const placed = useMemo(() => all.filter((b) => b.block_kind !== "PLANNED"), [all]);
+  const planned = useMemo(() => all.filter((b) => b.block_kind === "PLANNED"), [all]);
+  const blocked = useMemo(() => placed.filter((b) => b.status === "blocked"), [placed]);
   const hi = useMemo(() => placed.filter((b) => highlighted.has(b.id)), [placed, highlighted]);
   const extent = useMemo(() => {
-    const xs = placed.map((b) => Number(b.pos_x)), zs = placed.map((b) => Number(b.pos_z));
+    const xs = all.map((b) => Number(b.pos_x)), zs = all.map((b) => Number(b.pos_z));
     return { cx: (Math.min(...xs) + Math.max(...xs)) / 2, cz: (Math.min(...zs) + Math.max(...zs)) / 2, w: Math.max(...xs) - Math.min(...xs) + 20, d: Math.max(...zs) - Math.min(...zs) + 20 };
-  }, [placed]);
+  }, [all]);
 
   return (
     <Canvas frameloop="demand" camera={{ position: [extent.cx - 30, 45, extent.cz + 55], fov: 45, near: 0.1, far: 2000 }} dpr={[1, 2]}>
@@ -187,8 +199,10 @@ export default function WarehouseScene({ bins, layout, mode, highlighted, focusK
       </mesh>
       <Uprights bins={placed} layout={layout} />
       <Bins bins={placed} layout={layout} mode={mode} onSelect={onSelect} />
+      {planned.length > 0 && <Bins bins={planned} layout={layout} mode={mode} ghost />}
+      <Highlights bins={blocked} layout={layout} color="#C0392B" scale={1.08} />
       <Highlights bins={hi} layout={layout} />
-      <ZoneLabels bins={placed} />
+      <ZoneLabels bins={all} />
       <CameraControls ref={controls} makeDefault maxPolarAngle={Math.PI / 2.05} minDistance={3} maxDistance={400} />
       <Focus controls={controls} bins={hi} layout={layout} focusKey={focusKey} />
     </Canvas>

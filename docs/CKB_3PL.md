@@ -128,6 +128,25 @@ Per task: `ACCEPT` a chosen count (any round), `RECOUNT` (new round, reason requ
 which stock identity to adjust is a business rule not confirmed yet, so they are recounted or
 excluded. The session closes only when every task is decided.
 
+### 5.4b Counters, blind reads and photos (0133)
+
+Spec: `docs/superpowers/specs/2026-11-08-ckb-blind-count-design.md`.
+
+- **Assignment per location:** `Penugasan hitung` (`/ckb/stock-take/[id]/assign`, leads) assigns lines by SAP storage bin
+  (`ckb_assign_count_tasks`, audited); `ckb_count_tasks.assigned_to`. An operator counts an assigned line only when it
+  is theirs; an unassigned line follows the 0101 session rule. Leads count any line. `Hitung saya` (`/ckb/count`) lists
+  a counter's sessions.
+- **Blind for the operator role everywhere:** RLS hides `ckb_sap_snapshot_rows`, `ckb_adjustments`, `ckb_counts`,
+  `ckb_task_notes` from operators; `ckb_stocktake_tasks` returns them only their lines, and a recount is blind (no
+  earlier count, accepted qty or decision text). Inventaris shows operators locations only (`ckb_inventory_locations`);
+  the dashboard has no discrepancy count for them. Leads see SAP everywhere, also while counting.
+- **Photos per round (`ckb_evidence.round`, kind `COUNT` "Foto hitung"):** a count needs a photo of the current round when
+  it is 0, a found line, a recount, or the customer's `count_photo_required` ("foto wajib di setiap hitungan", admin
+  switch on `Customer`). Accepting a line with a variance needs ≥ 1 photo. A counter cannot withdraw a photo a submitted
+  count relied on. Only for sessions created after 0133 (`ckb_stocktakes.photo_rules`). Enforced by triggers on
+  `ckb_counts`, `ckb_evidence`, `ckb_count_tasks`, so every writer obeys them. Found stock is two steps
+  (`ckb_add_found_line`, then the normal count). SQL test 97.
+
 ### 5.5 Adjustments
 
 Accepting a task with a variance creates one `PROPOSED` adjustment (unique per task). A
@@ -186,6 +205,11 @@ resolved from the customer name, a read policy for representatives on finished j
 Shell `apply_movement` trigger still requires a **Shell** supervisor for the loss adjustment, so a
 CKB supervisor without a Shell supervisor role cannot post a rebagging job with a loss. Whether CKB
 stock moves to its own ledger is decision §10.1.
+
+**Since 0132 (Rak & Lokasi)** which racks CKB 3PL uses is data, not a zone list: `bins.owner = 'CKB'`
+(CG, CH and CF21-CF40 level A at the migration; changed by an admin on `Rak & Lokasi`). Rebagging sources and
+outputs must be CKB racks or floor locations, and a rebagging movement (its `ref_id` is the job) may not touch
+a Shell rack; a Shell movement may not touch a CKB rack. The WMS import never books or zeroes CKB racks.
 
 ## 10. Decisions needed
 

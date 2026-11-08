@@ -8,7 +8,7 @@ import { Input, Label } from "@/components/ui/input";
 import { POLICY_LABEL, type InventoryPolicy } from "@/lib/inventory-control";
 import { cn } from "@/lib/utils";
 
-const NUMBERS = ["default_shelf_life_months", "min_dispatch_days", "near_expiry_days", "adjust_approval_qty", "ira_target_pct", "pick_accuracy_target_pct", "bin_check_max_qty"] as const;
+const NUMBERS = ["default_shelf_life_months", "min_dispatch_days", "near_expiry_days", "adjust_approval_qty", "ira_target_pct", "pick_accuracy_target_pct", "bin_check_max_qty", "abc_a_pct", "abc_b_pct"] as const;
 // require_scan_on_pick stays in the policy but controls nothing since 0068: the rack scan is always required on picking.
 const FLAGS = ["recount_on_variance"] as const;
 

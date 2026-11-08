@@ -9,7 +9,7 @@ export default async function LabelsPage() {
   const supabase = await createClient();
   // Distinct zone/rack pairs for the pickers (rack bins only).
   const data = await fetchAll<{ zone: string; rack: string | null }>((a, b) =>
-    supabase.from("bins").select("zone, rack").not("rack", "is", null).order("bin_code").range(a, b));
+    supabase.from("bins").select("zone, rack").not("rack", "is", null).or("block_kind.is.null,block_kind.eq.BLOCKED").order("bin_code").range(a, b));
   const racks: Record<string, string[]> = {};
   for (const r of data) {
     racks[r.zone] ??= [];

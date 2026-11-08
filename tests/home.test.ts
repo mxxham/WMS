@@ -2,7 +2,7 @@
 import { strict as assert } from 'node:assert';
 import { existsSync } from 'node:fs';
 import type { Job } from '../lib/jobs';
-import { homePrimary, mobileLinksFor, sectionsFor } from '../components/app/nav-config';
+import { SECTIONS, homePrimary, mobileLinksFor, sectionsFor } from '../components/app/nav-config';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -39,6 +39,14 @@ test('Home is not a nav item; the main button suits the role', () => {
   assert.deepEqual(homePrimary('leader'), { href: '/dashboard', label: 'Buka dashboard' });
   assert.deepEqual(homePrimary('admin'), { href: '/dashboard', label: 'Buka dashboard' });
   assert.deepEqual(homePrimary('operator'), { href: '/scan', label: 'Buka Scan' });
+});
+
+test('every module has a one-line description for the Home directory', () => {
+  for (const sec of SECTIONS) for (const l of sec.links) {
+    assert.ok(l.blurb.trim().length >= 10, `${l.href} has no description`);
+    assert.ok(l.blurb.length <= 60, `${l.href}: description longer than one line (${l.blurb.length})`);
+    assert.ok(/\.$/.test(l.blurb), `${l.href}: description ends without a full stop`);
+  }
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

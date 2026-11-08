@@ -114,16 +114,18 @@ export const DEFAULT_CONFIG: AllocatorConfig = {
   // CA01A01 → aisle CA, bay 01, level A, position 01. CA–CF are the Shell
   // aisles; CG/CH physically exist as the CKB 3PL area (0086) and are
   // deliberately excluded from Shell picking: the FEFO route never goes there.
-  rackLocationPattern: /^C[A-F]\d{2}[A-E]\d{2}$/,
+  // 0132: any aisle C? may hold Shell racks (new aisles are added on Rak & Lokasi); which bins Shell may
+  // use comes from the database (state + owner), passed in as blockedBins / bin_status.
+  rackLocationPattern: /^C[A-Z]\d{2}[A-E]\d{2}$/,
   excludedLocations: ['STAGING', 'STAGING_INB', 'STAGING_OUT', 'Quarantine', 'QUARANTINE'],
   stagingLocations: ['STAGING', 'STAGING_OUT'],
   stagingLanePattern: /^STG_\d{2}$/,
   pickableStatuses: ['Aktif', 'AKTIF', 'ACTIVE'],
   /**
-   * Phantom racks confirmed non-existent on the floor (tiang/pilar):
-   * full CE33 row + CE32 position 02 + CE34 position 01.
-   * DB rows deleted; listed here so the engine never picks from
-   * nor relocates (bin-to-bin) into these codes, whatever the stock source.
+   * Offline fallback only. Since 0132 the database is the source of truth: the pillars (CE33, CE32
+   * position 02, CE34 position 01) are NOT_PRESENT bins there, and the app passes every bin Shell may
+   * not use into this list for each run (lib/racks.ts shellBinRules). Kept for a CLI run on a workbook
+   * that never sees the database.
    */
   blockedBins: [
     'CE33A01', 'CE33A02', 'CE33B01', 'CE33B02', 'CE33C01',

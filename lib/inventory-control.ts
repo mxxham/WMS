@@ -43,6 +43,8 @@ export type InventoryPolicy = {
   require_scan_on_pick: boolean;
   pick_accuracy_target_pct: number;
   bin_check_max_qty: number;
+  abc_a_pct: number;
+  abc_b_pct: number;
 };
 
 export const POLICY_DEFAULTS: InventoryPolicy = {
@@ -56,6 +58,8 @@ export const POLICY_DEFAULTS: InventoryPolicy = {
   require_scan_on_pick: false,
   pick_accuracy_target_pct: 99.5,
   bin_check_max_qty: 5,
+  abc_a_pct: 80,
+  abc_b_pct: 95,
 };
 
 export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: string }> = {
@@ -68,6 +72,8 @@ export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: 
   ira_target_pct: { label: "Target akurasi stok (%)", help: "Target Inventory Record Accuracy." },
   require_scan_on_pick: { label: "Wajib scan barcode karton saat konfirmasi pick", help: "Hanya untuk SKU yang barcode-nya sudah diisi di Master item." },
   pick_accuracy_target_pct: { label: "Target akurasi picking (%)", help: "Baris yang lolos audit pada percobaan pertama. Umumnya 99,5%." },
+  abc_a_pct: { label: "Batas kelas A (% baris picking)", help: "Kelas A = SKU yang bersama-sama membuat persen pertama ini dari semua baris picking. Umumnya 80. Berlaku mulai perhitungan ABC berikutnya." },
+  abc_b_pct: { label: "Batas kelas B (% baris picking)", help: "Kelas B = sampai persen ini; sisanya dan SKU tanpa picking kelas C. Umumnya 95. Harus lebih besar dari batas A." },
   bin_check_max_qty: { label: "Cek sisa bin setelah pick (karton)", help: "Bila pick menyisakan sebanyak ini atau kurang (0 termasuk), picker ditanya sisa di bin, tanpa melihat angka sistem. Jawaban berbeda membuka hitung bin." },
 };
 

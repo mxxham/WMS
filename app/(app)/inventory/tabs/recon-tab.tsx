@@ -17,16 +17,16 @@ const n = (v: unknown) => Number(v ?? 0) || 0;
  * reconciliation: the stock comparison, shipments vs SAP goods issue, and
  * the MB51 transactions that came with the file.
  */
-export function ReconTab({ runs, selected, lines, moves, ships, shipError, prev, prevAsOf, view }: {
+export function ReconTab({ runs, selected, lines, moves, ships, shipError, prev, prevAsOf, view, inv }: {
   runs: ReconSummary[]; selected: string | null; lines: ReconLine[] | null; moves: SapMove[]; ships: ShipMatch[]; shipError: string | null;
-  prev: PrevGap | null; prevAsOf: string | null; view?: string;
+  prev: PrevGap | null; prevAsOf: string | null; view?: string; inv?: string;
 }) {
   const run = runs.find((r) => r.id === selected) ?? null;
   if (selected) {
     return (
       <div className="p-4 lg:p-8">
         {run && lines
-          ? <ReconDetail run={run} lines={lines} moves={moves} ships={ships} shipError={shipError} prev={prev} prevAsOf={prevAsOf} initialView={view} />
+          ? <ReconDetail run={run} lines={lines} moves={moves} ships={ships} shipError={shipError} prev={prev} prevAsOf={prevAsOf} initialView={view} initialInv={inv} />
           : <p className="text-sm text-bad">Rekonsiliasi tidak ditemukan. <Link className="underline" href="/inventory?tab=rekonsiliasi">Kembali</Link></p>}
       </div>
     );

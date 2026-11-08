@@ -46,6 +46,7 @@ export default async function StocktakePage({ params }: { params: Promise<{ id: 
           <RpcButton rpc="ckb_start_stocktake" args={{ p_id: id }} title="Mulai penghitungan"
             summary={`${tasks.length} tugas hitung ${s.ref_no} dibuka untuk penghitung${s.blind ? "; qty SAP tidak ditampilkan kepada operator" : ""}.`} confirmLabel="Mulai">Mulai penghitungan</RpcButton>
         )}
+        {(s.status === "DRAFT" || s.status === "COUNTING" || s.status === "REVIEW") && lead && <Button asChild variant="outline"><Link href={`/ckb/stock-take/${id}/assign`}>Penugasan hitung</Link></Button>}
         {(s.status === "COUNTING" || s.status === "REVIEW") && staff && <Button asChild><Link href={`/ckb/stock-take/${id}/count`}>Hitung</Link></Button>}
         {s.status === "COUNTING" && lead && (
           <RpcButton rpc="ckb_close_counting" args={{ p_id: id }} variant="outline" title="Tutup penghitungan"
@@ -75,6 +76,9 @@ export default async function StocktakePage({ params }: { params: Promise<{ id: 
           ["Catatan", s.notes ?? "–"],
         ]} />
 
+        {/* Every tile counts the same rows the table below prints, so a tile cannot disagree with it:
+            "Hitung ulang" is exactly the RECOUNT_REQUESTED rows and "Sudah diputuskan" the ACCEPTED and
+            EXCLUDED ones. */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <StatTile label="Tugas" value={tasks.length} />
           <StatTile label="Sudah dihitung" value={n((t) => t.count_total > 0)} />
@@ -120,12 +124,14 @@ export default async function StocktakePage({ params }: { params: Promise<{ id: 
             <CardHeader><CardTitle>Penyesuaian dari sesi ini</CardTitle></CardHeader>
             <CardContent className="p-0">
               <Table>
-                <thead><tr><Th>Ref</Th><Th>Material</Th><Th>Bin</Th><Th>Batch</Th><Th className="text-right">Selisih</Th><Th>Status</Th><Th>Keputusan</Th></tr></thead>
+                <thead><tr><Th>Ref</Th><Th>Material</Th><Th>Bin</Th><Th>Batch</Th>{showsBaseline && <Th className="text-right">Selisih</Th>}<Th>Status</Th><Th>Keputusan</Th></tr></thead>
                 <tbody>
                   {(adjustments ?? []).map((a) => (
                     <tr key={a.id}>
                       <Td>{a.ref_no}</Td><Td>{a.material_code}</Td><Td>{a.storage_bin}</Td><Td>{a.batch || "–"}</Td>
-                      <Td className={`text-right font-medium ${a.delta < 0 ? "text-bad" : "text-ok"}`}>{a.delta > 0 ? "+" : ""}{fmtNum(Number(a.delta), 3)} {a.uom}</Td>
+                      {/* An adjustment delta is accepted − SAP, which gives back the SAP quantity the
+                          task table hides from a blind counter: the same flag hides it here. */}
+                      {showsBaseline && <Td className={`text-right font-medium ${a.delta < 0 ? "text-bad" : "text-ok"}`}>{a.delta > 0 ? "+" : ""}{fmtNum(Number(a.delta), 3)} {a.uom}</Td>}
                       <Td><Pill tone={ADJUSTMENT_STATUS[a.status as AdjustmentStatus].tone}>{ADJUSTMENT_STATUS[a.status as AdjustmentStatus].label}</Pill></Td>
                       <Td className="text-xs text-steel-500">{a.decided_by_name ?? "–"}{a.decision_reason ? ` · ${a.decision_reason}` : ""}</Td>
                     </tr>

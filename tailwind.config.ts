@@ -20,6 +20,11 @@ const config: Config = {
          *  image and strip merge instead of clashing with the sidebar. */
         jeir: { navy: "#032741", panel: "#04404E", teal: { DEFAULT: "#61A5C2", dark: "#468FAF" } },
         plate: { DEFAULT: "#89C2D9", dark: "#01497C" },
+        // The painted floor line of the Login and Home screens: "the way in", the yellow of the lane paint on
+        // the CKB floor. Chosen over the banner cyan by the user (1 Nov). Only ever on navy or as a fill
+        // behind navy text (#032741 on #F5C518 = 9.4:1); never as text on white. Distinct from `warn`
+        // (#D9941A, amber), which keeps meaning "warning" on the inner pages.
+        floor: { DEFAULT: "#F5C518", dark: "#DDAE00" },
         ok: "#2E7D4F",
         warn: "#D9941A",
         bad: "#C0392B",

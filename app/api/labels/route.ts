@@ -24,7 +24,9 @@ export async function POST(req: Request) {
   let bins: Row[];
   try {
     bins = await fetchAll<Row>((a, b) => {
-      let q = supabase.from("bins").select("id, bin_code, zone, rack, level, position, abc_class").order("bin_code");
+      // 0132: no label for a bin that does not exist (a pillar) or is not built yet (Rencana).
+      let q = supabase.from("bins").select("id, bin_code, zone, rack, level, position, abc_class")
+        .or("block_kind.is.null,block_kind.eq.BLOCKED").order("bin_code");
       if (body.scope === "bins") q = q.in("bin_code", body.codes.map((c) => c.trim().toUpperCase()).filter(Boolean));
       else if (body.scope === "rack") q = q.eq("zone", body.zone).eq("rack", body.rack);
       else q = q.eq("zone", body.zone);
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
-  if (!bins?.length) return NextResponse.json({ error: "Tidak ada bin yang cocok dengan pilihan." }, { status: 404 });
+  if (!bins?.length) return NextResponse.json({ error: "Tidak ada bin yang cocok dengan pilihan (bin yang tidak ada atau masih Rencana tidak punya label)." }, { status: 404 });
 
   const pdf = await buildLabelPdf(bins, {
     layout: body.layout, colorMode: body.colorMode, includeCode128: Boolean(body.includeCode128),

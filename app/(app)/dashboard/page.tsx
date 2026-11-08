@@ -6,6 +6,8 @@ import {
   IconRoute, IconTruck, IconBuildingWarehouse, IconLock,
 } from "@tabler/icons-react";
 import { requirePage } from "@/lib/auth";
+import { pageAllowed } from "@/components/app/nav-config";
+import { TODAY_BOARD, TODAY_PANEL_ATTR } from "@/components/floor/floor";
 import { parsePolicy, quantityAccuracy } from "@/lib/inventory-control";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
@@ -18,6 +20,7 @@ import { NEAR_EXPIRY_DAYS, expiryStatus } from "@/config/warehouse";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { unstable_cache } from "next/cache";
 import { SHELF_BUCKETS, jakartaDate } from "@/lib/inventory-view";
+import { flowOnDay, inflowFetchSince, INFLOW_SELECT, type InflowMove } from "@/lib/inbound-day";
 
 // fefo_exceptions timed out (over 8 s) before 0070 made it ~0.1 s; the counts
 // are still cached for 15 min so dashboard loads don't wait on it. A cached function may not read cookies
@@ -52,7 +55,11 @@ export const dynamic = "force-dynamic";
  */
 type Occ = { total: number; occ: number };
 type Summary = {
-  bins: { total: number; occupied: number; blocked: number; rack_total: number; rack_occupied: number };
+  bins: { total: number; occupied: number; blocked: number; rack_total: number; rack_occupied: number;
+          /** 0132: rack bins lent to CKB 3PL, marked not present, planned (not built yet); undefined before 0132 */
+          ckb?: number; not_present?: number; planned?: number };
+  /** 0132: planned positions per aisle and owner; undefined before 0132 */
+  planned?: Array<{ zone: string; owner: "SHELL" | "CKB"; positions: number }>;
   levels: Array<Occ & { level: string }>;
   zones: Array<Occ & { zone: string; cells: Array<Occ & { level: string }> }>;
   abc: Array<{ k: string; qty: number; skus: number }>;
@@ -69,7 +76,6 @@ type Summary = {
   top_skus: Array<{ sku: string; description: string; uom: string | null; qty: number; pallets: number; bins: number }>;
 };
 type Task = { status: string; task_type: string; quantity: number; actual_quantity: number | null; actual_from_bin: string | null; from_bin: string; actual_batch_lot: string | null; batch_lot: string; completed_at: string | null; planned_date: string };
-type Mv = { type: string; quantity: number; from_bin_id: string | null };
 type Audit = { kind: "PICK" | "PUTAWAY"; result: "OK" | "MISMATCH"; audited_at: string | null };
 type Vol = { day: string; boxes: number | null; litres: number | null; picks: number | null };
 /** Outbound-volume window (today included). One strip, every day rendered. */
@@ -162,8 +168,12 @@ const SHELF_MAX = SHELF_BUCKETS.filter((b) => Number.isFinite(b.max)).map((b) =>
 const SHELF_KEYS = SHELF_BUCKETS.map((b) => b.key as string);
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ kalender?: string }> }) {
-  await requirePage("/dashboard");
+  const user = await requirePage("/dashboard");
   const supabase = await createClient();
+  // First visit of a new month: last month's ABC classes are computed and applied (0126) before the
+  // ABC panel below reads them. Idempotent; a failure never takes the dashboard down.
+  await supabase.rpc("abc_ensure_monthly").then(() => null, () => null);
+  const abcPage = pageAllowed(user.job, "/abc");
   const today = jakartaDate();
   const todayStart = new Date(`${today}T00:00:00+07:00`);
   const accSince = new Date(Date.now() - ACCURACY_DAYS * 86_400_000).toISOString();
@@ -187,7 +197,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("planned_date", today).order("id").range(a, b)),
     fetchAll<Task>((a, b) => supabase.from("pick_task_detail").select("status, task_type, quantity, actual_quantity, actual_from_bin, from_bin, actual_batch_lot, batch_lot, completed_at, planned_date").eq("status", "COMPLETED").gte("completed_at", accSince).order("id").range(a, b)),
-    fetchAll<Mv>((a, b) => supabase.from("movements").select("type, quantity, from_bin_id").in("type", ["inbound", "putaway", "picking"]).gte("created_at", todayStart.toISOString()).order("id").range(a, b)),
+    // Karton masuk counts a putaway on its arrival date (posted up to 7 days later); picking on today.
+    Promise.all([
+      fetchAll<InflowMove>((a, b) => supabase.from("movements").select(INFLOW_SELECT).in("type", ["inbound", "putaway"]).gte("created_at", inflowFetchSince(today)).order("id").range(a, b)),
+      fetchAll<InflowMove>((a, b) => supabase.from("movements").select(INFLOW_SELECT).eq("type", "picking").gte("created_at", todayStart.toISOString()).order("id").range(a, b)),
+    ]).then(([inn, out]) => [...inn, ...out]),
     fetchAll<Audit>((a, b) => supabase.from("audits").select("kind, result, audited_at").gte("audited_at", accSince).order("id").range(a, b)),
     supabase.from("count_tasks").select("id", { count: "exact", head: true }).in("status", ["OPEN", "COUNTED", "RECOUNT"]),
     supabase.from("waves").select("status").eq("planned_date", today),
@@ -219,6 +233,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const blocked = Number(summary.bins.blocked);
   const rackTotal = Number(summary.bins.rack_total);
   const rackOccupied = Number(summary.bins.rack_occupied);
+  const ckbBins = Number(summary.bins.ckb ?? 0);
+  const plannedRacks = summary.planned ?? [];
 
   /** Two counts from SQL → the occupancy cell the heat grid draws (probability, 0 when empty). */
   const occCell = (occ: number, total: number) => ({ occ, total, pct: total ? occ / total : 0 });
@@ -260,12 +276,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const cartonsPlanned = picks.reduce((s, t) => s + Number(t.quantity), 0);
   const cartonsPosted = picks.reduce((s, t) => s + (t.status === "COMPLETED" ? Number(t.actual_quantity ?? t.quantity) : 0), 0);
 
-  // Today's flow: in = new receipts (inbound, putaway without a source bin), out = picking.
-  const todayFlow = { masuk: 0, keluar: 0 };
-  for (const m of moves) {
-    if (m.type === "picking") todayFlow.keluar += Number(m.quantity);
-    else if (m.type === "inbound" || !m.from_bin_id) todayFlow.masuk += Number(m.quantity);
-  }
+  const todayFlow = flowOnDay(moves, today);
 
   // ---- Occupancy: rack positions holding stock, per aisle x level ------------
   // occCell turns the two counts SQL already tallied into the cell the heat grid draws.
@@ -492,7 +503,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <div className="space-y-5 p-4 lg:p-8">
 
         {/* ---- Today: the plan, the flow, what is waiting on the dock ------------- */}
-        <section aria-labelledby="hari-ini" className="home-rise relative overflow-hidden rounded-2xl bg-jeir-side text-white ring-1 ring-jeir-navy/30">
+        {/* From Home's button, Home's board of four counts grows into this panel (FloorDoorLink). */}
+        <section aria-labelledby="hari-ini" {...{ [TODAY_PANEL_ATTR]: "" }} style={{ viewTransitionName: TODAY_BOARD }}
+          className="home-rise relative overflow-hidden rounded-2xl bg-jeir-side text-white ring-1 ring-jeir-navy/30">
           <span aria-hidden className="home-dots pointer-events-none absolute -right-10 -top-10 h-40 w-72 opacity-80" />
           <div className="relative px-4 pt-4 lg:px-6">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -808,9 +821,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 ))}
               </dl>
               <p className="text-[11px] text-steel-500">
-                {fmtNum(rackTotal)} posisi rak di grid; {fmtNum(binTotal - rackTotal)} bin lantai/staging tidak dihitung.
+                {fmtNum(rackTotal)} posisi rak Shell yang bisa dipakai di grid; bin lantai/staging, rak dipinjam CKB 3PL
+                {ckbBins > 0 ? ` (${fmtNum(ckbBins)})` : ""}, bin diblokir, tidak ada, dan rencana tidak dihitung.
                 Sehat 80–85% terisi — di atas 85% gudang sesak, putaway dan picking melambat.
               </p>
+              {plannedRacks.length > 0 && (
+                <p className="text-[11px] text-ckb">
+                  Rencana:{" "}
+                  {plannedRacks.map((p, i) => (
+                    <span key={`${p.zone}-${p.owner}`}>{i > 0 ? ", " : ""}aisle {p.zone}, {fmtNum(p.positions)} posisi{p.owner === "CKB" ? " (CKB 3PL)" : ""}</span>
+                  ))}
+                  {" · "}<Link href="/racks" className="underline">Rak &amp; Lokasi</Link>
+                </p>
+              )}
             </div>
           </section>
 
@@ -954,7 +977,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <div className="min-w-0">
                 <div className="min-w-0">
                   <h2 id="abc-title" className="font-cond text-lg font-semibold leading-tight">Kelas ABC stok</h2>
-                  <p className="text-xs text-steel-500">Kelas dari frekuensi baris picking.</p>
+                  <p className="text-xs text-steel-500">Kelas dari frekuensi baris picking, dihitung ulang tiap awal bulan.
+                    {abcPage && <> <Link href="/abc" className="underline">Lihat Kelas ABC</Link></>}</p>
                 </div>
               </div>
               <span className="text-[11px] text-steel-500">{fmtNum(totalQty)} karton</span>

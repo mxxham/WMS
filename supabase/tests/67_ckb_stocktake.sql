@@ -33,6 +33,9 @@ select ckb_create_stocktake(:'c_fp', :'imp', 'BINS', array['cg01a01', 'CG02A02']
 select pg_temp.check('a bin scope takes only those bins (case-insensitive)',
   (select count(*) from ckb_stocktake_tasks(:'st_bins')) = 2);
 select ckb_create_stocktake(:'c_fp', :'imp', 'FULL', null, 'Warehouse 5', true, array[pg_temp.u('op')]::uuid[], 'opname Oktober') as st \gset
+-- 0133: this file pins the 0101 rules; the photo rules of 0133 are tested in 97.
+reset role; update ckb_stocktakes set photo_rules = false where id = :'st'; set role authenticated;
+select pg_temp.as_user(pg_temp.u('sup'));
 select pg_temp.check('one task per stock identity: 8 rows, 7 identities',
   (select count(*) from ckb_stocktake_tasks(:'st')) = 7);
 select pg_temp.check('the duplicate identity is one task, flagged, with both rows counted in its baseline',
@@ -86,10 +89,13 @@ select ckb_submit_count(:'t2', 4, true, null, null, null, null, gen_random_uuid(
 select ckb_submit_count(:'t3', 7, null, null, null, null, null, gen_random_uuid()) as c3_first \gset
 select ckb_submit_count(:'t4', 0, null, null, null, null, 'kosong', gen_random_uuid());
 select ckb_submit_count(:'t5', 7, null, null, null, null, null, gen_random_uuid());
+select ckb_submit_count(:'t1', 41, null, null, null, null, null, 'c0000000-0000-0000-0000-000000000001') as retried \gset
+-- 0133: an operator no longer reads ckb_counts; checked as the owner.
+reset role;
 select pg_temp.check('a retried submission (same key) returns the first count and adds nothing',
-  ckb_submit_count(:'t1', 41, null, null, null, null, null, 'c0000000-0000-0000-0000-000000000001')
-    = (select id from ckb_counts where client_key = 'c0000000-0000-0000-0000-000000000001')
+  :'retried'::uuid = (select id from ckb_counts where client_key = 'c0000000-0000-0000-0000-000000000001')
   and (select count(*) from ckb_counts where task_id = :'t1') = 1);
+set role authenticated;
 select pg_temp.check('a key reused for another task is refused',
   pg_temp.fails(format($q$select ckb_submit_count(%L, 1, null, null, null, null, null, 'c0000000-0000-0000-0000-000000000001')$q$, :'t2'), '%tugas lain%'));
 select pg_temp.check('a batch mismatch needs a note of what was seen',
@@ -97,8 +103,10 @@ select pg_temp.check('a batch mismatch needs a note of what was seen',
 select ckb_submit_count(:'t7', 2, false, null, 'BY', null, 'label menunjukkan batch BY', gen_random_uuid());
 -- A revision while counting is a new row, the first count stays.
 select ckb_submit_count(:'t3', 5, null, null, null, null, 'hitung lagi', gen_random_uuid());
+reset role;
 select pg_temp.check('a revision adds a count; the first count is kept',
   (select count(*) from ckb_counts where task_id = :'t3') = 2 and exists (select 1 from ckb_counts where id = :'c3_first' and qty = 7));
+set role authenticated;
 
 -- Stock found on the floor but not on the list.
 select pg_temp.check('found stock that is on the list must be counted there',

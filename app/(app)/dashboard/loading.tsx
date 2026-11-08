@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export default function Loading() {
   return (
     <PageSkeleton label="Memuat dashboard">
-      <StatBandSkeleton gauges={2} stats={4} />
+      <StatBandSkeleton gauges={2} stats={4} todayPanel />
 
       {/* Arus barang: the day's figure, the legend, the fortnight of paired bars, the note. */}
       <ChartCardSkeleton lead className="lg:col-span-5" delayMs={140} />
@@ -175,9 +175,10 @@ function QualityCard() {
         ))}
       </div>
 
-      <p className="mt-auto border-t border-steel-100 px-4 py-2.5">
+      {/* A div, not a p: the placeholder inside is a div, and a div inside a p is invalid HTML. */}
+      <div className="mt-auto border-t border-steel-100 px-4 py-2.5">
         <Bone className="h-2 w-full max-w-[420px] rounded" />
-      </p>
+      </div>
     </section>
   );
 }

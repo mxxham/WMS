@@ -3,6 +3,8 @@
 \set ON_ERROR_STOP on
 \pset tuples_only on
 begin;
+-- 0132: on the floor these bins are lent to CKB 3PL; this test uses them as Shell bins.
+update public.bins set owner = 'SHELL' where bin_code in ('CG01A01','CG01A02','CG01B01');
 reset role;
 -- Any operator and any supervisor (works on the stub and on a real local Supabase).
 select set_config('t.op',  (select id::text from profiles where role = 'operator'   limit 1), false),
