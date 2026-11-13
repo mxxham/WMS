@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { authRoute, loginRequired } from "@/lib/auth-route";
+import { supabaseAnonKey } from "@/lib/supabase/keys";
 
 // Sign-in (spec 2026-10-12 login + revision). LOGIN_REQUIRED=true: everyone signs in with their own
 // account at /login. Otherwise (today): a request without a session is signed in as the shared site
@@ -10,7 +11,7 @@ import { authRoute, loginRequired } from "@/lib/auth-route";
 // JWKS, refreshing it first if it is about to expire.
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
-  const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+  const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabaseAnonKey(), {
     cookies: {
       getAll: () => request.cookies.getAll(),
       setAll: (list) => {
