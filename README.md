@@ -64,7 +64,7 @@ Bin labels · scanning · 3D stock · FEFO allocation · picklists · waves · a
 <tr><td><b>Waves</b></td><td>Idempotent posting into the <code>movements</code> ledger; pick and its Bin To Bin as one line; the rest of an opened pallet named on both rows (<code>CF40A01 (dipindah NO 6)</code>)</td></tr>
 <tr><td><b>Corrections</b></td><td><code>Isi dari picklist</code> (the whole wave from the paper, one posting), <code>Perlu ditangani</code> panel with <code>Perbaiki</code> / <code>Perbaiki semua</code>, <code>Posting sesuai lapangan</code>, <code>Ubah baris</code>, <code>Pecah</code>, <code>Batalkan posting</code> (also pick only), <code>Posting Bin To Bin saja</code>, <code>Tambah item</code> / <code>Tambah order</code>; every risky action lists the rows of other waves it would affect</td></tr>
 <tr><td><b>Finding things</b></td><td>Tap a bin for its stock, open rows and movements; <code>Riwayat</code> per row; filter by SKU or bin, only open, only problems; finished waves fold away</td></tr>
-<tr><td><b>Putaway & pickfaces</b></td><td>Sheet import with per-row conflict decisions; one fixed pick bin per SKU</td></tr>
+<tr><td><b>Putaway & pickfaces</b></td><td>Sheet import with per-row conflict decisions; Rekap inbound <code>STAGE-IN</code> rows booked into <code>STAGING</code> once per arrival day and moved into a rack on <code>Staging</code> (scan the rack label); one fixed pick bin per SKU</td></tr>
 <tr><td><b>Inventory control</b></td><td>Holds, reason codes, four-eyes approval, blind cycle counts, receiving, SAP reconciliation, FEFO compliance, <code>Laporan WMS harian</code> (on hand and remain per day)</td></tr>
 <tr><td><b>Audits</b></td><td>Blind picking audit in staging and at the rack, putaway audit, WMS-file audit, <b>Pindahan bin (replenish) audit</b>; a shipment loads only when every line passes; <code>Audit picking &lt;date&gt;.xlsx</code> carries <code>Remain Qty</code> (end-of-day bin stock per bin and SKU, the same figure as <code>Remain Qty</code> in <code>Laporan WMS harian</code>)</td></tr>
 <tr><td><b>Jobs & assignment</b></td><td>Seven jobs (<code>Admin Inbound</code>, <code>Admin Outbound</code>, <code>Checker</code>, <code>Inventory</code>, <code>Operator / Picker</code>, <code>Leader</code>, <code>Admin</code>) each open their own pages, enforced on the server; <code>Penugasan</code> lets <code>Inventory</code>, <code>Leader</code> and <code>Admin</code> assign each shipment to one operator, and an <code>Operator / Picker</code> sees and posts only those (<code>Belum ada shipment yang ditugaskan ke Anda.</code> when none)</td></tr>
@@ -107,7 +107,7 @@ Racks and bins themselves (which exist, which are blocked, which are lent to CKB
 `Rak & Lokasi` (`/racks`, migration 0132), never in code.
 
 <details>
-<summary><b>12 assumptions that must be confirmed before go-live</b></summary>
+<summary><b>13 assumptions that must be confirmed before go-live</b></summary>
 
 | # | Assumption | Change in |
 |---|---|---|
@@ -123,6 +123,7 @@ Racks and bins themselves (which exist, which are blocked, which are lent to CKB
 | 10 | Minimum remaining shelf life to ship = **0 days** (no rule from Shell or the customer yet) | same as above |
 | 11 | Adjustment above **20 units** needs approval from someone else; count tolerance for classes A/B/C = **0** cartons | same as above |
 | 12 | Scanning the carton barcode when posting a pick is **not mandatory** (the item master has no EAN yet) | same as above, once barcodes are filled in on `Master item` |
+| 13 | A staging line has "waited long" at **3 days** or more (the `Staging` page highlight and the dashboard staging tally use the same rule) | `lib/staging.ts` → `STAGING_LONG_DAYS` (and the dashboard tally in `dashboard_summary`, 0132) |
 
 </details>
 

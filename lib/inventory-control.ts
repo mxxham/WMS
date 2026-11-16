@@ -45,6 +45,8 @@ export type InventoryPolicy = {
   bin_check_max_qty: number;
   abc_a_pct: number;
   abc_b_pct: number;
+  /** stock volume the warehouse is sized for, litres (0137, Laporan gudang) */
+  target_volume_l: number;
 };
 
 export const POLICY_DEFAULTS: InventoryPolicy = {
@@ -60,6 +62,7 @@ export const POLICY_DEFAULTS: InventoryPolicy = {
   bin_check_max_qty: 5,
   abc_a_pct: 80,
   abc_b_pct: 95,
+  target_volume_l: 1756000,
 };
 
 export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: string }> = {
@@ -74,6 +77,7 @@ export const POLICY_LABEL: Record<keyof InventoryPolicy, { label: string; help: 
   pick_accuracy_target_pct: { label: "Target akurasi picking (%)", help: "Baris yang lolos audit pada percobaan pertama. Umumnya 99,5%." },
   abc_a_pct: { label: "Batas kelas A (% baris picking)", help: "Kelas A = SKU yang bersama-sama membuat persen pertama ini dari semua baris picking. Umumnya 80. Berlaku mulai perhitungan ABC berikutnya." },
   abc_b_pct: { label: "Batas kelas B (% baris picking)", help: "Kelas B = sampai persen ini; sisanya dan SKU tanpa picking kelas C. Umumnya 95. Harus lebih besar dari batas A." },
+  target_volume_l: { label: "Target volume stok (liter)", help: "Volume stok yang direncanakan untuk gudang. Laporan gudang (Rekonsiliasi SAP > Cocok) membandingkan volume stok dengan angka ini." },
   bin_check_max_qty: { label: "Cek sisa bin setelah pick (karton)", help: "Bila pick menyisakan sebanyak ini atau kurang (0 termasuk), picker ditanya sisa di bin, tanpa melihat angka sistem. Jawaban berbeda membuka hitung bin." },
 };
 

@@ -17,3 +17,11 @@ backups
 tmp/
 .next
 node_modules
+
+# Scratch from comparing against the deployment, and the local code index
+.tmp-*
+.codegraph
+
+# Supabase CLI link state (project ref, pooler URL): local only
+supabase/.temp
+supabase/.branches

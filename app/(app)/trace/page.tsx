@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Search } from "lucide-react";
 import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
@@ -9,208 +10,268 @@ import { ExpiryBadge } from "@/components/ui/badge";
 import { Input, Label } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { expiryStatus } from "@/config/warehouse";
-import { fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
-import { TraceExport, type TraceExportData } from "./trace-export";
+import { parsePolicy } from "@/lib/inventory-control";
+import { jakartaDate } from "@/lib/inventory-view";
+import {
+  buildAlerts, buildCandidates, buildDestinations, buildExpiryGroups, buildHistory, buildPositions, buildShipments, buildSummary, jakartaDateTime,
+  type Candidate, type TraceData, type TraceHold, type TraceMove, type TraceOutbound, type TraceStock, type TraceTask,
+} from "@/lib/trace";
+import { fmtDate, fmtNum } from "@/lib/utils";
+import { RecentTraces, TraceView, traceHref } from "./trace-client";
+import { SkuBatchReport } from "./trace-sku";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-type Mv = {
+type MoveRow = {
   id: string; type: string; quantity: number; batch_lot: string; expiry_date: string | null; created_at: string; note: string | null;
+  reason_code: string | null; by_name: string | null; approved_by_name: string | null;
   items: { sku: string; description: string; uom: string | null } | null;
   from_bin: { bin_code: string } | null; to_bin: { bin_code: string } | null; profiles: { name: string } | null;
   pick_tasks: { shipment_number: string | null; waves: { wave_no: string; planned_date: string; truck: string | null } | null } | null;
 };
-type Inv = { bin_code: string; zone: string; sku: string; description: string; uom: string | null; batch_lot: string; quantity: number; expiry_date: string | null; received_date: string | null; bin_status: string };
-type Outbound = { shipment_number: string; sku: string; destination: string; truck: string | null; order_nos: string[] };
 
-const TYPE_LABEL: Record<string, string> = { inbound: "Terima", putaway: "Putaway", picking: "Pick", transfer: "Transfer", adjustment: "Adjust" };
+const STOCK_COLS = "bin_code, zone, rack, level, bin_status, sku, description, uom, upp, batch_lot, quantity, expiry_date, received_date, days_remaining, held, hold_reasons";
 /** ILIKE pattern for an exact, case-insensitive match (escape the wildcards). */
 const exact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**
- * Batch traceability: where a batch is now, which shipments / customers it
- * went to, where it came from, and every movement of it (the ledger).
+ * Batch traceability. One search box: an exact batch code opens the trace
+ * (where it is now with each expiry date and bin, who received it, every
+ * movement, holds and open wave tasks, all downloadable as Excel); anything
+ * else — part of a batch code, a SKU, a bin, a word of the description —
+ * lists the batches that match, so the code need not be known by heart.
  */
-export default async function TracePage({ searchParams }: { searchParams: Promise<{ batch?: string; sku?: string }> }) {
+export default async function TracePage({ searchParams }: { searchParams: Promise<{ batch?: string; sku?: string; tab?: string; mode?: string }> }) {
   await requirePage("/trace");
   const sp = await searchParams;
   const batch = (sp.batch ?? "").trim();
   const sku = (sp.sku ?? "").trim();
+  // ?mode=sku: the batches of many materials at once (a principal's request), instead of one batch.
+  const listMode = sp.mode === "sku" && !batch;
   const supabase = await createClient();
 
-  let moves: Mv[] = [], inv: Inv[] = [], outbound: Outbound[] = [], similar: string[] = [];
+  let data: TraceData | null = null;
+  let nearDays = 90;
+  let found: { candidates: Candidate[]; past: string[]; kind: string } | null = null;
+  let error: string | null = null;
+
   if (batch) {
-    [moves, inv] = await Promise.all([
-      fetchAll<Mv>((a, b) => {
-        let q = supabase.from("movements")
-          .select("id, type, quantity, batch_lot, expiry_date, created_at, note, items!inner(sku, description, uom), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name), pick_tasks(shipment_number, waves(wave_no, planned_date, truck))")
-          .ilike("batch_lot", exact(batch));
-        if (sku) q = q.eq("items.sku", sku);
-        return q.order("created_at").order("id").range(a, b);
-      }),
-      fetchAll<Inv>((a, b) => {
-        let q = supabase.from("inventory_detail").select("bin_code, zone, sku, description, uom, batch_lot, quantity, expiry_date, received_date, bin_status").ilike("batch_lot", exact(batch));
-        if (sku) q = q.eq("sku", sku);
-        return q.order("sku").order("bin_code").range(a, b);
-      }),
+    try {
+      const [moveRows, stock, tasks, holdsRes, policyRes] = await Promise.all([
+        fetchAll<MoveRow>((a, b) => {
+          let q = supabase.from("movements")
+            .select("id, type, quantity, batch_lot, expiry_date, created_at, note, reason_code, by_name, approved_by_name, items!inner(sku, description, uom), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name), pick_tasks(shipment_number, waves(wave_no, planned_date, truck))")
+            .ilike("batch_lot", exact(batch));
+          if (sku) q = q.eq("items.sku", sku);
+          return q.order("created_at").order("id").range(a, b);
+        }),
+        fetchAll<TraceStock>((a, b) => {
+          let q = supabase.from("inventory_detail").select(STOCK_COLS).ilike("batch_lot", exact(batch));
+          if (sku) q = q.eq("sku", sku);
+          return q.order("sku").order("bin_code").order("id").range(a, b);
+        }),
+        fetchAll<TraceTask>((a, b) => {
+          let q = supabase.from("pick_task_detail")
+            .select("task_type, sku, description, from_bin, to_bin, batch_lot, expiry_date, quantity, wave_no, planned_date, shipment_number")
+            .eq("status", "PLANNED").in("wave_status", ["PENDING", "RESCHEDULED"]).ilike("batch_lot", exact(batch));
+          if (sku) q = q.eq("sku", sku);
+          return q.order("planned_date").order("id").range(a, b);
+        }),
+        (() => {
+          let q = supabase.from("stock_hold_detail")
+            .select("id, scope, bin_code, sku, batch_lot, expiry_date, quantity, reason_code, note, status, created_by_name, created_at, released_by_name, released_at, release_note, covered_qty")
+            .ilike("batch_lot", exact(batch));
+          if (sku) q = q.eq("sku", sku);
+          return q.order("created_at", { ascending: false }).limit(200);
+        })(),
+        supabase.rpc("inventory_policy"),
+      ]);
+      const policy = parsePolicy(policyRes.data);
+      nearDays = policy.near_expiry_days;
+
+      if (moveRows.length > 0 || stock.some((s) => Number(s.quantity) > 0)) {
+        const moves: TraceMove[] = moveRows.map((m) => ({
+          id: m.id, type: m.type, quantity: Number(m.quantity), batch_lot: m.batch_lot, expiry_date: m.expiry_date, created_at: m.created_at,
+          note: m.note, reason_code: m.reason_code, by_name: m.by_name, approved_by_name: m.approved_by_name,
+          sku: m.items?.sku ?? "", description: m.items?.description ?? "", uom: m.items?.uom ?? null,
+          from_bin: m.from_bin?.bin_code ?? null, to_bin: m.to_bin?.bin_code ?? null, user: m.profiles?.name ?? null,
+          shipment: m.pick_tasks?.shipment_number ?? null, wave_no: m.pick_tasks?.waves?.wave_no ?? null,
+          wave_date: m.pick_tasks?.waves?.planned_date ?? null, truck: m.pick_tasks?.waves?.truck ?? null,
+        }));
+        const skus = [...new Set([...moves.map((m) => m.sku), ...stock.map((s) => s.sku)])].filter(Boolean);
+        const shipments = [...new Set(moves.map((m) => m.shipment).filter((s): s is string => !!s))];
+        const [outRes, itemRes] = await Promise.all([
+          shipments.length
+            ? supabase.from("outbound").select("shipment_number, sku, destination, truck, order_nos").in("shipment_number", shipments)
+            : Promise.resolve({ data: [] as TraceOutbound[] }),
+          skus.length
+            ? supabase.from("items").select("sku, shelf_life_months").in("sku", skus).not("shelf_life_months", "is", null)
+            : Promise.resolve({ data: [] as { sku: string; shelf_life_months: number }[] }),
+        ]);
+        const shelfLife = Object.fromEntries(((itemRes.data ?? []) as { sku: string; shelf_life_months: number }[]).map((i) => [i.sku, Number(i.shelf_life_months)]));
+
+        const positions = buildPositions(stock, tasks, jakartaDate());
+        const expiries = buildExpiryGroups(positions, shelfLife, policy.default_shelf_life_months);
+        const history = buildHistory(moves);
+        const summary = buildSummary(history, positions, expiries);
+        const ships = buildShipments(history, (outRes.data ?? []) as TraceOutbound[]);
+        const holds = (holdsRes.data ?? []) as TraceHold[];
+        // The batch as it is written in the data (the search is case-insensitive).
+        const code = stock[0]?.batch_lot ?? moves[0]?.batch_lot ?? batch;
+        data = {
+          batch: code, skuFilter: sku, printedAt: jakartaDateTime(new Date().toISOString()),
+          positions, summary, expiries, ships, destinations: buildDestinations(ships), history, tasks, holds,
+          alerts: buildAlerts({ positions, summary, holds, nearDays, fmtDate: (d) => fmtDate(d) }),
+        };
+      } else {
+        found = await findBatches(batch, sku);
+      }
+    } catch (e) { error = (e as Error).message; }
+  }
+
+  /** Not an exact batch code: stock whose batch, SKU, bin or description matches, and past batches by code. */
+  async function findBatches(q: string, skuOnly: string) {
+    const like = `%${exact(q)}%`;
+    const stockQ = () => { const s = supabase.from("inventory_detail").select(STOCK_COLS).gt("quantity", 0); return skuOnly ? s.eq("sku", skuOnly) : s; };
+    const [byBatch, bySku, byBin, byDesc, pastRes] = await Promise.all([
+      fetchAll<TraceStock>((a, b) => stockQ().ilike("batch_lot", like).order("id").range(a, b)),
+      fetchAll<TraceStock>((a, b) => stockQ().eq("sku", q).order("id").range(a, b)),
+      fetchAll<TraceStock>((a, b) => stockQ().eq("bin_code", q.toUpperCase()).order("id").range(a, b)),
+      q.length >= 3 ? fetchAll<TraceStock>((a, b) => stockQ().ilike("description", like).order("id").range(a, b)) : Promise.resolve([] as TraceStock[]),
+      supabase.from("movements").select("batch_lot").ilike("batch_lot", like).limit(500),
     ]);
-    const shipments = [...new Set(moves.map((m) => m.pick_tasks?.shipment_number).filter((s): s is string => !!s))];
-    if (shipments.length) {
-      const { data } = await supabase.from("outbound").select("shipment_number, sku, destination, truck, order_nos").in("shipment_number", shipments);
-      outbound = (data ?? []) as Outbound[];
-    }
-    if (moves.length === 0 && inv.length === 0) {
-      const { data } = await supabase.from("movements").select("batch_lot").ilike("batch_lot", `%${exact(batch)}%`).limit(200);
-      similar = [...new Set((data ?? []).map((d) => d.batch_lot as string))].slice(0, 20);
-    }
+    const kind = byBin.length ? `bin ${q.toUpperCase()}` : bySku.length ? `SKU ${q}` : byBatch.length ? `kode batch yang memuat "${q}"` : `deskripsi yang memuat "${q}"`;
+    const candidates = buildCandidates(byBin.length ? byBin : bySku.length ? bySku : byBatch.length ? byBatch : byDesc);
+    const inStock = new Set(candidates.map((c) => c.batch.toUpperCase()));
+    const past = [...new Set(((pastRes.data ?? []) as { batch_lot: string }[]).map((d) => d.batch_lot).filter((b) => b && !inStock.has(b.toUpperCase())))].sort().slice(0, 40);
+    return { candidates, past, kind };
   }
-
-  // ---- Summary per SKU ------------------------------------------------------
-  type Sum = { sku: string; description: string; uom: string | null; opening: number; received: number; shipped: number; adjusted: number; internal: number; onHand: number };
-  const sums = new Map<string, Sum>();
-  const sum = (s: string, d: string, u: string | null) => {
-    let e = sums.get(s);
-    if (!e) { e = { sku: s, description: d, uom: u, opening: 0, received: 0, shipped: 0, adjusted: 0, internal: 0, onHand: 0 }; sums.set(s, e); }
-    return e;
-  };
-  for (const m of moves) {
-    const e = sum(m.items!.sku, m.items!.description, m.items!.uom);
-    const q = Number(m.quantity);
-    if (m.type === "picking") e.shipped += q;
-    else if (m.type === "inbound" || (m.type === "putaway" && !m.from_bin)) e.received += q;
-    else if (m.type === "adjustment" && m.note?.startsWith("OPENING BALANCE")) e.opening += q;
-    else if (m.type === "adjustment") e.adjusted += q;
-    else e.internal += q;
-  }
-  for (const r of inv) sum(r.sku, r.description, r.uom).onHand += Number(r.quantity);
-
-  // ---- Where it went: pick movements grouped per shipment + SKU ---------------
-  const outBy = new Map(outbound.map((o) => [`${o.shipment_number}|${o.sku}`, o]));
-  type Ship = { shipment: string; sku: string; date: string; wave: string; destination: string; truck: string | null; orders: string; qty: number; bins: Set<string>; last: string };
-  const ships = new Map<string, Ship>();
-  for (const m of moves.filter((x) => x.type === "picking")) {
-    const sh = m.pick_tasks?.shipment_number ?? "(pick manual)";
-    const k = `${sh}|${m.items!.sku}`;
-    const o = outBy.get(k);
-    const e = ships.get(k) ?? {
-      shipment: sh, sku: m.items!.sku, date: m.pick_tasks?.waves?.planned_date ?? m.created_at.slice(0, 10),
-      wave: m.pick_tasks?.waves?.wave_no ?? "–", destination: o?.destination ?? "–", truck: o?.truck ?? m.pick_tasks?.waves?.truck ?? null,
-      orders: o?.order_nos?.join(", ") ?? "", qty: 0, bins: new Set<string>(), last: m.created_at,
-    };
-    e.qty += Number(m.quantity);
-    if (m.from_bin) e.bins.add(m.from_bin.bin_code);
-    if (m.created_at > e.last) e.last = m.created_at;
-    ships.set(k, e);
-  }
-  const shipRows = [...ships.values()].sort((a, b) => b.last.localeCompare(a.last));
-  const customers = new Set(shipRows.map((s) => s.destination).filter((d) => d !== "–")).size;
-
-  const exportData: TraceExportData = {
-    batch,
-    summary: [...sums.values()].map((s) => ({ SKU: s.sku, Deskripsi: s.description, "Saldo awal": s.opening, Diterima: s.received, Dikirim: s.shipped, Penyesuaian: s.adjusted, "Stok sekarang": s.onHand })),
-    shipments: shipRows.map((s) => ({ Shipment: s.shipment, SKU: s.sku, Tanggal: s.date, Wave: s.wave, Tujuan: s.destination, Truk: s.truck ?? "", "No order": s.orders, Qty: s.qty, "Dari bin": [...s.bins].join(", ") })),
-    locations: inv.map((r) => ({ Bin: r.bin_code, SKU: r.sku, Batch: r.batch_lot, Expired: r.expiry_date ?? "", Qty: Number(r.quantity), "Tgl terima": r.received_date ?? "" })),
-    history: moves.map((m) => ({ Waktu: m.created_at, Jenis: TYPE_LABEL[m.type] ?? m.type, SKU: m.items!.sku, Batch: m.batch_lot, Qty: Number(m.quantity), Dari: m.from_bin?.bin_code ?? "", Ke: m.to_bin?.bin_code ?? "", Shipment: m.pick_tasks?.shipment_number ?? "", Oleh: m.profiles?.name ?? "", Catatan: m.note ?? "" })),
-  };
 
   return (
     <main>
       <PageHeader title="Lacak batch" />
-      <div className="space-y-6 p-4 lg:p-8">
-        <form className="flex flex-wrap items-end gap-3 rounded-lg bg-white p-4">
-          <div className="min-w-48 flex-1"><Label htmlFor="batch">Batch</Label><Input id="batch" name="batch" defaultValue={batch} placeholder="mis. 29E26JJ" autoFocus required /></div>
-          <div className="w-44"><Label htmlFor="sku">SKU (opsional)</Label><Input id="sku" name="sku" defaultValue={sku} inputMode="numeric" placeholder="semua SKU" /></div>
-          <Button type="submit">Lacak</Button>
-          {(moves.length > 0 || inv.length > 0) && <TraceExport data={exportData} />}
-        </form>
+      <div className="space-y-4 p-4 lg:p-8">
+        <nav aria-label="Cara melacak" className="inline-flex rounded-md border border-steel-300 bg-white text-sm">
+          {([["/trace", "Lacak satu batch", !listMode], ["/trace?mode=sku", "Daftar batch per SKU", listMode]] as const).map(([href, label, on]) => (
+            <Link key={href} href={href} aria-current={on ? "page" : undefined}
+              className={cn("px-4 py-2 first:rounded-l-md last:rounded-r-md", on ? "bg-ckb font-semibold text-white" : "hover:bg-steel-100")}>{label}</Link>
+          ))}
+        </nav>
 
-        {!batch && <p className="text-sm text-steel-500">Masukkan kode batch untuk melihat di mana batch itu sekarang, ke shipment/customer mana saja sudah dikirim, dan seluruh riwayat mutasinya. Berguna untuk recall atau keluhan kualitas.</p>}
+        {listMode && <SkuBatchReport />}
 
-        {batch && moves.length === 0 && inv.length === 0 && (
-          <div className="rounded-lg bg-white p-4 text-sm">
-            <p>Batch <b>{batch}</b>{sku && ` untuk SKU ${sku}`} tidak ditemukan.</p>
-            {similar.length > 0 && <p className="mt-2">Mungkin maksudnya: {similar.map((b, i) => <span key={b}>{i > 0 && ", "}<Link className="underline" href={`/trace?batch=${encodeURIComponent(b)}${sku ? `&sku=${sku}` : ""}`}>{b}</Link></span>)}</p>}
+        {!listMode && <form className="rounded-lg border border-steel-100 bg-white p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-56 flex-1"><Label htmlFor="batch">Batch, SKU, atau bin</Label>
+              <Input id="batch" name="batch" defaultValue={batch} placeholder="mis. 29E26JJ · 550044709 · CA10A02" autoFocus={!data} required autoComplete="off" className="h-11 font-mono text-base" /></div>
+            <div className="w-44"><Label htmlFor="sku">Batasi ke SKU (opsional)</Label>
+              <Input id="sku" name="sku" defaultValue={sku} inputMode="numeric" placeholder="semua SKU" autoComplete="off" className="h-11" /></div>
+            <Button type="submit" className="h-11"><Search className="h-4 w-4" />Lacak</Button>
           </div>
-        )}
+          <p className="mt-2 text-xs text-steel-500">Kode batch lengkap langsung membuka lacaknya. Sebagian kode, nomor SKU, kode bin, atau kata dari deskripsi menampilkan daftar batch yang cocok.</p>
+        </form>}
 
-        {(moves.length > 0 || inv.length > 0) && (
-          <>
-            <Card>
-              <CardHeader><CardTitle>Ringkasan batch {batch}</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <Table>
-                  <thead><tr><Th>SKU</Th><Th>Deskripsi</Th><Th className="text-right">Saldo awal</Th><Th className="text-right">Diterima</Th><Th className="text-right">Dikirim</Th><Th className="text-right">Penyesuaian</Th><Th className="text-right">Stok sekarang</Th></tr></thead>
-                  <tbody>{[...sums.values()].map((s) => (
-                    <tr key={s.sku}>
-                      <Td className="font-semibold">{s.sku}</Td><Td className="text-xs">{s.description}</Td>
-                      <Td className="text-right tabular">{fmtNum(s.opening)}</Td><Td className="text-right tabular">{fmtNum(s.received)}</Td>
-                      <Td className="text-right tabular">{fmtNum(s.shipped)}</Td>
-                      <Td className="text-right tabular">{s.adjusted > 0 ? "+" : ""}{fmtNum(s.adjusted)}</Td>
-                      <Td className="text-right font-semibold tabular">{fmtNum(s.onHand)} <span className="text-xs font-normal text-steel-500">{s.uom}</span></Td>
-                    </tr>
-                  ))}</tbody>
-                </Table>
-                <p className="text-sm">Dikirim ke <b>{fmtNum(shipRows.filter((s) => s.shipment !== "(pick manual)").length)}</b> shipment · <b>{fmtNum(customers)}</b> tujuan. Saat ini ada di <b>{fmtNum(new Set(inv.map((r) => r.bin_code)).size)}</b> bin.</p>
-              </CardContent>
-            </Card>
+        {!listMode && <RecentTraces remember={data ? { batch: data.batch, sku } : undefined} />}
 
-            <Card>
-              <CardHeader><CardTitle>Dikirim ke (shipment &amp; tujuan)</CardTitle></CardHeader>
-              <CardContent>
-                {shipRows.length === 0 ? <p className="text-sm text-steel-500">Batch ini belum pernah dipick untuk shipment.</p> : (
-                  <Table>
-                    <thead><tr><Th>Shipment</Th><Th>SKU</Th><Th>Tanggal</Th><Th>Wave</Th><Th>Tujuan</Th><Th>Truk</Th><Th>No order</Th><Th className="text-right">Qty</Th><Th>Dari bin</Th></tr></thead>
-                    <tbody>{shipRows.map((s) => (
-                      <tr key={`${s.shipment}|${s.sku}`}>
-                        <Td className="font-semibold">{s.shipment}</Td><Td>{s.sku}</Td><Td className="whitespace-nowrap">{fmtDate(s.date)}</Td>
-                        <Td>{s.wave !== "–" ? <Link className="underline" href={`/waves?date=${s.date}`}>NO {s.wave}</Link> : "–"}</Td>
-                        <Td>{s.destination}</Td><Td>{s.truck ?? "–"}</Td><Td className="text-xs">{s.orders || "–"}</Td>
-                        <Td className="text-right tabular">{fmtNum(s.qty)}</Td><Td className="text-xs">{[...s.bins].join(", ")}</Td>
-                      </tr>
-                    ))}</tbody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+        {error && <p role="alert" className="rounded-lg border border-bad/40 bg-bad/5 p-4 text-sm text-bad">Data batch tidak bisa dibaca: {error}</p>}
 
-            <Card>
-              <CardHeader><CardTitle>Posisi sekarang</CardTitle></CardHeader>
-              <CardContent>
-                {inv.length === 0 ? <p className="text-sm text-steel-500">Tidak ada stok batch ini di gudang.</p> : (
-                  <Table>
-                    <thead><tr><Th>Bin</Th><Th>SKU</Th><Th>Deskripsi</Th><Th>Batch</Th><Th>Expired</Th><Th className="text-right">Qty</Th><Th>Terima</Th></tr></thead>
-                    <tbody>{inv.map((r, i) => (
-                      <tr key={i}>
-                        <Td><Link className="font-semibold underline" href={`/bin/${encodeURIComponent(r.bin_code)}`}>{r.bin_code}</Link>{r.bin_status === "blocked" && <span className="ml-1 text-xs text-bad">diblokir</span>}</Td>
-                        <Td>{r.sku}</Td><Td className="text-xs">{r.description}</Td><Td>{r.batch_lot}</Td>
-                        <Td className="whitespace-nowrap text-xs">{fmtDate(r.expiry_date)} <ExpiryBadge status={expiryStatus(r.expiry_date)} /></Td>
-                        <Td className="text-right tabular">{fmtNum(Number(r.quantity))} {r.uom}</Td><Td className="text-xs">{fmtDate(r.received_date)}</Td>
-                      </tr>
-                    ))}</tbody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+        {!batch && !error && !listMode && <Landing />}
 
-            <Card>
-              <CardHeader><CardTitle>Riwayat lengkap ({fmtNum(moves.length)} mutasi)</CardTitle></CardHeader>
-              <CardContent>
-                <Table>
-                  <thead><tr><Th>Waktu</Th><Th>Jenis</Th><Th>SKU</Th><Th className="text-right">Qty</Th><Th>Dari</Th><Th>Ke</Th><Th>Shipment</Th><Th>Oleh</Th><Th>Catatan</Th></tr></thead>
-                  <tbody>{[...moves].reverse().map((m) => (
-                    <tr key={m.id}>
-                      <Td className="whitespace-nowrap text-xs">{fmtDateTime(m.created_at)}</Td><Td>{TYPE_LABEL[m.type] ?? m.type}</Td><Td>{m.items?.sku}</Td>
-                      <Td className="text-right tabular">{Number(m.quantity) > 0 && m.type === "adjustment" ? "+" : ""}{fmtNum(Number(m.quantity))}</Td>
-                      <Td>{m.from_bin?.bin_code ?? "–"}</Td><Td>{m.to_bin?.bin_code ?? "–"}</Td><Td>{m.pick_tasks?.shipment_number ?? "–"}</Td>
-                      <Td className="text-xs">{m.profiles?.name ?? "sistem"}</Td><Td className="text-xs">{m.note ?? ""}</Td>
-                    </tr>
-                  ))}</tbody>
-                </Table>
-              </CardContent>
-            </Card>
-          </>
-        )}
+        {data && <TraceView key={`${data.batch}|${sku}`} data={data} nearDays={nearDays} initialTab={sp.tab} />}
+
+        {found && <Found q={batch} sku={sku} found={found} />}
       </div>
     </main>
+  );
+}
+
+function Landing() {
+  const items = [
+    ["Posisi sekarang", "Setiap bin yang menyimpan batch itu, dengan tanggal expired, sisa hari, qty, yang dipesan wave, yang ditahan, dan yang tersedia."],
+    ["Dikirim ke", "Shipment, tujuan, truk dan nomor order yang menerima batch itu: daftar yang dihubungi saat recall."],
+    ["Riwayat", "Semua mutasi sejak batch masuk, dengan efek ke stok dan saldo berjalan."],
+    ["Hold & pesanan wave", "Hold yang aktif dan tugas wave terbuka yang akan mengambil batch itu."],
+  ];
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {items.map(([t, d]) => (
+        <div key={t} className="rounded-lg border border-steel-100 bg-white p-4">
+          <p className="font-cond text-lg font-semibold">{t}</p>
+          <p className="mt-1 text-sm text-steel-500">{d}</p>
+        </div>
+      ))}
+      <p className="text-sm text-steel-500 sm:col-span-2 xl:col-span-4">Semua bagian bisa diunduh ke Excel, lengkap atau per bagian. Berguna untuk recall, keluhan kualitas, dan pengecekan expired.</p>
+    </div>
+  );
+}
+
+function Found({ q, sku, found }: { q: string; sku: string; found: { candidates: Candidate[]; past: string[]; kind: string } }) {
+  const { candidates, past, kind } = found;
+  if (candidates.length === 0 && past.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-steel-300 bg-white px-4 py-8 text-center">
+        <p className="font-semibold">Tidak ada yang cocok dengan &quot;{q}&quot;{sku && ` untuk SKU ${sku}`}</p>
+        <p className="mx-auto mt-1 max-w-md text-sm text-steel-500">Periksa ejaan kode batch, atau coba nomor SKU, kode bin, atau sebagian kode batch.</p>
+      </div>
+    );
+  }
+  return (
+    <>
+      {candidates.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{fmtNum(candidates.length)} batch di gudang untuk {kind}</CardTitle>
+            <p className="mt-0.5 text-sm text-steel-500">Bukan kode batch lengkap. Pilih batch untuk membuka lacaknya; expired terdekat di atas.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 md:hidden">
+              {candidates.map((c) => (
+                <Link key={`${c.batch}|${c.sku}`} href={c.batch ? traceHref(c.batch, c.sku) : "#"} className="block rounded-lg border border-steel-100 p-3 hover:border-ckb">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-mono text-base font-semibold text-ckb">{c.batch || "(tanpa batch)"}</span>
+                    <span className="font-cond text-xl font-semibold tabular">{fmtNum(c.qty)} <span className="text-xs font-normal text-steel-500">{c.uom}</span></span>
+                  </div>
+                  <div className="text-xs"><b>{c.sku}</b> · {c.description}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    {c.expiries.length ? c.expiries.map((e) => <span key={e} className="whitespace-nowrap">{fmtDate(e)} <ExpiryBadge status={expiryStatus(e)} /></span>) : <ExpiryBadge status="unknown" />}
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-steel-500">{c.bins.slice(0, 8).join(", ")}{c.bins.length > 8 ? ` +${c.bins.length - 8}` : ""}</div>
+                </Link>
+              ))}
+            </div>
+            <div className="hidden md:block">
+              <Table sticky>
+                <thead><tr><Th>Batch</Th><Th>SKU</Th><Th>Deskripsi</Th><Th>Produksi</Th><Th>Expired</Th><Th className="text-right">Qty</Th><Th className="text-right">Bin</Th><Th>Di bin</Th></tr></thead>
+                <tbody>{candidates.map((c) => (
+                  <tr key={`${c.batch}|${c.sku}`} className="hover:bg-paper">
+                    <Td>{c.batch ? <Link className="font-mono font-semibold text-ckb underline" href={traceHref(c.batch, c.sku)}>{c.batch}</Link> : <span className="text-steel-500">(tanpa batch)</span>}</Td>
+                    <Td className="font-semibold">{c.sku}</Td><Td className="text-xs">{c.description}</Td>
+                    <Td className="whitespace-nowrap text-xs">{c.mfg ? fmtDate(c.mfg) : "–"}</Td>
+                    <Td className="text-xs">{c.expiries.length ? c.expiries.map((e) => <span key={e} className="block whitespace-nowrap py-0.5">{fmtDate(e)} <ExpiryBadge status={expiryStatus(e)} /></span>) : <ExpiryBadge status="unknown" />}</Td>
+                    <Td className="text-right font-semibold tabular">{fmtNum(c.qty)} <span className="text-xs font-normal text-steel-500">{c.uom}</span></Td>
+                    <Td className="text-right tabular">{fmtNum(c.bins.length)}</Td>
+                    <Td className="font-mono text-xs">{c.bins.slice(0, 10).join(", ")}{c.bins.length > 10 ? ` +${c.bins.length - 10}` : ""}</Td>
+                  </tr>
+                ))}</tbody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {past.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Batch lain dengan kode yang mirip</CardTitle>
+            <p className="mt-0.5 text-sm text-steel-500">Tercatat di riwayat mutasi; mungkin sudah tidak ada di gudang.</p>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {past.map((b) => (
+              <Link key={b} href={traceHref(b, sku)} className="rounded-full border border-steel-300 bg-white px-3 py-1 font-mono text-xs hover:border-ckb hover:text-ckb">{b}</Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </>
   );
 }

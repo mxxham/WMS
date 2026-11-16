@@ -11,18 +11,39 @@ export type PutawayRow = {
   sheet_bin?: string;
   /** Rekap inbound: several pallets (distinct Pallet IDs) into this bin, summed into this line; their Excel rows */
   pallet_lines?: number[];
+  /** Rekap inbound: Item Code / Batch No / Expired Date were blank and copied from this earlier row of the shipment */
+  filled_from?: number;
 };
 
 /** Resolution of a conflict, chosen per row by the supervisor. "fix": the sheet is right, the bin is corrected (0066). */
 export type PutawayAction = "add" | "set" | "fix";
 export type PutawayKind = "qty_differs" | "bin_occupied" | "bin_unknown" | "bin_blocked" | "sku_unknown" | "moved_in";
+/** A row into a staging bin (0134): posted additively, once per arrival day; never a conflict. */
+export type StagingKind = "staging" | "staging_done" | "staging_less";
+export const STAGING_LABELS: Record<StagingKind, string> = {
+  staging: "ke staging",
+  staging_done: "sudah dicatat di staging (dilewati)",
+  staging_less: "Sheet kurang dari yang sudah dicatat di staging hari itu",
+};
+export function isStagingKind(k: string | null | undefined): k is StagingKind {
+  return k === "staging" || k === "staging_done" || k === "staging_less";
+}
+/** What a staging verdict says on the row; `recorded` = what that arrival day already booked for the line. */
+export function stagingProblem(v: { kind: StagingKind; recorded?: number | null }): string {
+  const rec = Number(v.recorded ?? 0);
+  if (v.kind === "staging_less") return `${STAGING_LABELS.staging_less} (${rec}): tidak diposting, cek fisik / Adjust stok`;
+  if (v.kind === "staging" && rec > 0) return `${STAGING_LABELS.staging} (tambahan; ${rec} sudah dicatat hari itu)`;
+  return STAGING_LABELS[v.kind];
+}
 export type PutawayVerdict = {
-  line: number; status: "new" | "same" | "conflict"; kind: PutawayKind | null; action: PutawayAction | null;
+  line: number; status: "new" | "same" | "conflict"; kind: PutawayKind | StagingKind | null; action: PutawayAction | null;
   current: { sku: string; batch_lot: string; expiry_date: string | null; quantity: number }[];
   /** The Bin To Bin that brought this SKU into the bin in the last two days (0059). */
   moved_in?: { quantity: number; from_bin: string | null; batch_lot: string; at: string; note: string | null } | null;
   /** Expiry the batch code implies, when the sheet's expiry differs (0018). */
   expiry_expected?: string | null;
+  /** Staging rows (0134): what the arrival day already booked for this line. */
+  recorded?: number | null;
   /** Why a "Sheet benar" fix cannot run (bin changed, stock reserved or held, bad target bin; 0066). */
   fix_error?: string | null;
 };
@@ -126,9 +147,11 @@ const norm = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g
 
 /** Optional: the raw "Rekap inbound" file has it, the WMS "data putaway" sheet does not. */
 const PALLET_ID = ["pallet id"];
+/** Optional, Rekap inbound only: a blank Shipment No. marks a row continuing the shipment above. */
+const SHIPMENT = ["shipment no.", "shipment no", "shipment"];
 
 /** Finds the header row (within the first 10 rows) and each column's index. */
-function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, number>; pallet: number } | null {
+function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, number>; pallet: number; shipment: number } | null {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const cells = (rows[r] ?? []).map(norm);
     const cols = {} as Record<Col, number>;
@@ -136,9 +159,21 @@ function findHeader(rows: unknown[][]): { headerRow: number; cols: Record<Col, n
       const idx = aliases.map((a) => cells.indexOf(a)).find((i) => i >= 0);
       if (idx !== undefined) cols[col] = idx;
     }
-    if (Object.keys(cols).length === Object.keys(COLUMNS).length) return { headerRow: r, cols, pallet: cells.findIndex((c) => PALLET_ID.includes(c)) };
+    if (Object.keys(cols).length === Object.keys(COLUMNS).length) return {
+      headerRow: r, cols,
+      pallet: cells.findIndex((c) => PALLET_ID.includes(c)),
+      shipment: cells.findIndex((c) => SHIPMENT.includes(c)),
+    };
   }
   return null;
+}
+
+/**
+ * A Rekap inbound staging code ("STAGE-IN", "STAGE IN", "STAGING-IN", "STAGING": anything starting "STAG") is the
+ * STAGING location (0134). Floor spots STG_01..STG_08, rack codes and QUA-SHELL are not.
+ */
+export function stagingCode(raw: string): "STAGING" | null {
+  return String(raw ?? "").trim().toUpperCase().startsWith("STAG") ? "STAGING" : null;
 }
 
 /** Reads the sheet into rows. Throws when the expected columns are missing. */
@@ -148,10 +183,15 @@ export function parsePutawaySheet(data: SheetRows): PutawayRow[] {
 
 /**
  * The sheet's rows plus what a raw "Rekap inbound" day sheet adds (it has a Pallet ID column):
- * - pallets with a Pallet ID but no BIN Location are still waiting in staging: not rows, only counted;
+ * - pallets with a Pallet ID but no BIN Location are not filled in yet (not staging): not rows, only counted;
+ * - a staging code (STAGE-IN) becomes the STAGING location, the file's text kept in sheet_bin;
  * - two pallets with different Pallet IDs into one bin with the same batch + expiry are one
  *   putaway of their summed qty (24 Oct: two drums into CB18A02), not a duplicate.
  *   The same Pallet ID twice, or no Pallet ID column, stays a duplicate error.
+ * - a pallet row with a blank Shipment No. and a blank Item Code continues the shipment above it:
+ *   Item Code, Batch No and Expired Date are copied from the shipment's last row that has an Item Code
+ *   (9 Nov: 19 pallets of shipment 109758431 had them only on the first row and were never posted).
+ *   An empty row or a new Shipment No. ends the shipment.
  */
 export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pending: { pallets: number; quantity: number } } {
   const h = findHeader(data.rows);
@@ -160,11 +200,29 @@ export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pendi
   const seen = new Map<string, number>();
   const firstOf = new Map<string, { row: PutawayRow; pallets: Set<string> }>();
   const pending = { pallets: 0, quantity: 0 };
+  const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === "";
+  // The shipment's last row with an Item Code (Rekap inbound only: needs Pallet ID and Shipment No. columns).
+  let lot: { line: number; sku: unknown; batch: unknown; expiry: unknown } | null = null;
   for (let i = h.headerRow + 1; i < data.rows.length; i++) {
-    const r = data.rows[i];
+    const src = data.rows[i];
+    const pallet = h.pallet >= 0 ? String(src[h.pallet] ?? "").trim() : "";
+    let r = src;
+    let filled_from: number | undefined;
+    if (h.pallet >= 0 && h.shipment >= 0) {
+      // readSheet drops empty rows: a jump in Excel row numbers is the empty row between shipments.
+      const gap = i > 0 && data.lines[i] !== data.lines[i - 1] + 1;
+      if (gap || !blank(src[h.shipment])) lot = null;
+      if (!blank(src[h.cols.sku])) {
+        lot = { line: data.lines[i], sku: src[h.cols.sku], batch: src[h.cols.batch_lot], expiry: src[h.cols.expiry_date] };
+      } else if (lot && pallet && blank(src[h.shipment])) {
+        r = [...src];
+        r[h.cols.sku] = lot.sku;
+        if (blank(r[h.cols.batch_lot])) r[h.cols.batch_lot] = lot.batch;
+        if (blank(r[h.cols.expiry_date])) r[h.cols.expiry_date] = lot.expiry;
+        filled_from = lot.line;
+      }
+    }
     const get = (c: Col) => r[h.cols[c]];
-    const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === "";
-    const pallet = h.pallet >= 0 ? String(r[h.pallet] ?? "").trim() : "";
     if (pallet && blank(get("bin_code"))) {
       pending.pallets++;
       const q = Number(get("quantity"));
@@ -173,7 +231,8 @@ export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pendi
     }
     if (blank(get("bin_code")) && blank(get("sku")) && blank(get("quantity"))) continue;
 
-    const bin_code = String(get("bin_code") ?? "").trim().toUpperCase();
+    const sheetBin = String(get("bin_code") ?? "").trim().toUpperCase();
+    const bin_code = stagingCode(sheetBin) ?? sheetBin;
     const sku = String(get("sku") ?? "").trim();
     const batch_lot = excelBatchText(get("batch_lot"));
     const rawQty = get("quantity");
@@ -199,6 +258,8 @@ export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pendi
       else seen.set(key, data.lines[i]);
     }
     const row: PutawayRow = { line: data.lines[i], bin_code, sku, batch_lot, quantity, expiry_date: exp.iso, error };
+    if (bin_code !== sheetBin) row.sheet_bin = sheetBin;
+    if (filled_from !== undefined) row.filled_from = filled_from;
     if (!error) {
       const key = `${bin_code}|${sku}|${batch_lot}|${exp.iso}`;
       if (!firstOf.has(key)) firstOf.set(key, { row, pallets: new Set(pallet ? [pallet] : []) });

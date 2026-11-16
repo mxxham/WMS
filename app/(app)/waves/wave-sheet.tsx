@@ -327,7 +327,7 @@ export function WaveSheetPanel({ wave: w, tasks, onClose, prefill }: { wave: { i
                               className={cn("ml-auto h-9 w-14 rounded-md border px-2 text-right text-sm tabular outline-none transition-colors focus-visible:border-ckb focus-visible:ring-2 focus-visible:ring-ckb/30 disabled:border-transparent disabled:bg-transparent",
                                 l.moveTo && mqDiff ? "border-warn bg-warn/15" : "border-steel-100 bg-white hover:border-steel-300")} />
                             {l.moveTo && mqDiff && init.moveQty && <div className="mt-0.5 text-[11px] leading-tight text-steel-500">rencana <span className="line-through">{init.moveQty}</span></div>}
-                            {l.moveTo && !init.moveTo && <div className="mt-0.5 text-[11px] leading-tight text-steel-500">sisa di bin {fmtNum(leftoverAfter(l, stock))}</div>}
+                            {l.moveTo && !init.moveTo && <div className="mt-0.5 text-[11px] leading-tight text-steel-500">sisa di {l.sources[0].bin.trim().toUpperCase() || "bin"}: {fmtNum(leftoverAfter(l, stock))}</div>}
                           </div>
                         </td>
                         <td className="pr-2 text-right">

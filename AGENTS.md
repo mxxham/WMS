@@ -204,7 +204,7 @@ the posting guard is in the database, not the UI.
 - **Bin codes are shown like the yellow location plates on the rack.**
 - Changing a physical assumption (label colours, arrow direction, rack dimensions, shelf life,
   near-expiry days, approval thresholds) belongs in `config/warehouse.ts` or `inventory_policy` —
-  README §1 lists all 12 and where each one lives. Never scatter a value.
+  README §1 lists all 13 and where each one lives. Never scatter a value.
 - Print labels at **100% scale**. Labels are vectors, not PNGs, so 203 dpi stays sharp. Keep the
   3 mm QR/Code 128 quiet zone — scanners need it to find the start and end.
 - 3D uses one instanced mesh (one draw call for 2,970 bins) and `frameloop="demand"`. Bin
@@ -360,13 +360,20 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
 - **Putaway also takes the raw "Rekap inbound <yyyymm>" workbook** (sheets `01`..`31`, plus
   `Pallet ID`). The day sheet sets the arrival date; distinct Pallet IDs into one bin are summed
   into one line (`pallet_lines`); a Pallet ID with no `BIN Location` is still in staging and only
-  counted. The WMS `data putaway` sheet keeps its old rules. `tests/putaway-rekap.test.ts`.
+  counted. A pallet row with blank Shipment No. and blank Item Code continues the shipment above it: Item Code,
+  Batch No, Expired Date are copied from the shipment's last row with an Item Code (`filled_from`; an empty row or a
+  new Shipment No. ends it). Admins type `2-Nov-30`, which Excel stores as **1930**: the page's expiry-vs-batch
+  warning catches it, and (0135) when the bin already holds the SKU + batch at the batch-code expiry the row matches
+  that line instead of being `bin_occupied`; the date itself is fixed on `Kualitas data`. SQL test 99. The WMS `data putaway` sheet keeps its old rules. `tests/putaway-rekap.test.ts`.
 - **Investigasi selisih (0129, `recon/investigate.tsx`, `lib/recon-investigate.ts`)** corrects today's on hand from a
   `Rekonsiliasi SAP` line: `recon_suspect_bins` scores every bin the SKU is in / was ever in (balances walked back from
   today's stock), `recon_check_bin` records a look (append-only), `recon_fix_plan` nets per batch + expiry into Bin To
   Bin + residual FOUND/LOST, `recon_apply_fix` posts it (above the limit: not by a checker). Preview and apply share
   `recon_fix_plan`. A check is stale when the bin's system lines differ from its snapshot (not by timestamps: one
   transaction has one `now()`). The line keeps the day's numbers; `wms_fix` holds what was posted. SQL test 90.
+  Since 0139 every gap shown (Selisih, chart, filters, accuracy, `stock_recon_summary`) is what is *left*: the day's gap
+  plus `wms_fix` (`openGap` in `lib/sap-compare.ts` = `recon_line_open` in SQL, free first then blocked); `dayGapTotal`
+  is the untouched day's gap. A timing gap is closed with `GI otomatis`, never with a stock correction. SQL test 103.
 - **Perubahan lokasi (0130, `Audit picking` tab `lokasi`, `lib/location-changes.ts`)**: a trigger on `pick_tasks` writes
   one append-only `pick_location_changes` row whenever a task's effective location (actual-or-planned bin + batch + expiry,
   or a Bin To Bin destination) changes, so a new path that moves a pick is caught without editing it. Copied data, no FK:
@@ -391,6 +398,48 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
   `ckb_stocktake_tasks`); photo rules per round are enforced by triggers on `ckb_counts` / `ckb_evidence` /
   `ckb_count_tasks` (only sessions with `photo_rules`, i.e. created after 0133). CKB SQL tests that pin 0101 behaviour set
   `photo_rules = false` on their session. `docs/CKB_3PL.md` §5.4b, SQL test 97.
+- **Staging (0134, `/staging`, `lib/staging.ts`, spec `docs/superpowers/specs/2026-11-08-staging-handling-design.md`)**:
+  a Rekap inbound `STAGE-IN` row (`stagingCode`: any code starting `STAG`) is the `STAGING` bin; a blank `BIN Location`
+  is "belum diisi", never staging. `putaway_import_arrival` posts rows into the `STAGING` bin (only that one; floor
+  spots `STG_xx` keep `putaway_import`'s checks) additively, and per arrival day + SKU + batch + expiry against what
+  that day already booked (`staging_receipts`, append-only): more posts the difference, the same posts nothing, less
+  is `staging_less` and posts nothing (a day's sheet is filled in over several passes). The Putaway page re-checks
+  before posting when the arrival date changed after the check. Staging stays pickable as the allocator's last resort.
+  `staging_to_rack` (Inventory, Admin Inbound, Leader, Admin) is one transfer and checks reserved stock itself, for
+  every job: `guard_reserved_stock` lets supervisor-level jobs (Inventory) through. Page age = `received_date`, the
+  dashboard tally's rule. SQL test 98, `tests/staging.test.ts`.
+- **Laporan gudang (0137, `recon/manager-report.tsx`)**: the `Cocok` filter of a `Rekonsiliasi SAP` shows the manager's
+  report instead of the list: SAP vs WMS accuracy and a per-SKU sheet from that reconciliation, plus rack occupancy *now*
+  from `rack_occupancy()` (locations = rack bins `bin_usable` for Shell; bays wholly lent to CKB are left off; litres =
+  qty x `items.volume_l`, target `inventory_policy.target_volume_l`). `RETN` (0136) is a returns floor location, zone
+  `RETURN`, never picked. SQL tests 100, 101; `scripts/sql-test.sh` now also runs three-digit test numbers.
+- **Inventory → `Stok` adjusts without a second person (0140, user decision 16 Nov 2026)**: its `Adjust` button
+  (`AdjustLineButton direct`) posts above `adjust_approval_qty` through `adjust_stock_line` (existing stock line only,
+  supervisor / admin, reason + name; the movement has no `approved_by_name`). The limit still holds everywhere else,
+  including the same button on `Koreksi picklist`. The tab also lists empty Shell rack bins with quantity 0 (`emptyRack`:
+  in `Per lokasi` after the stock, under `Per SKU` only when the search finds them; no adjust buttons). SQL test 104.
+- **Lacak batch (`/trace`, `lib/trace.ts`, `tests/trace.test.ts`)**: one search box. An exact batch code opens the
+  trace; anything else (part of a code, a SKU, a bin, a word of the description) lists the matching batches
+  (`buildCandidates`). Everything on the screen and in the Excel download is derived in `lib/trace.ts` from four reads
+  (stock, movements, open wave tasks, holds), so the two cannot disagree: add a column in both `positionRows` /
+  `historyRows` and the table. `Posisi sekarang` is the first tab: one card per expiry date with its bins, then a row per
+  bin + SKU + expiry (never merged) with reserved / held / available as on Inventory → `Stok`. Times use
+  `jakartaDateTime` (explicit time zone, same text on server and browser). `Saldo batch` is by the movements alone; a
+  gap against on hand is reported as info, not an error (identity corrections move history to another batch code).
+- **Lacak batch → `Daftar batch per SKU` (`/trace?mode=sku`, `lib/trace-sku.ts`, `trace-sku.tsx`, `tests/trace-sku.test.ts`)**:
+  answers a principal's "send batch number, production and expiry date of these materials". The request is pasted as it
+  is (e-mail table, Excel rows, bare list) or uploaded; `parseSkuRequest` reads 9-digit material numbers, the first
+  text after each as its name and the first number as its quoted stock (later numbers, e.g. a phone number in the
+  signature, are ignored). One line per material + batch + expiry; production date from the batch code, else expiry
+  minus the item's shelf life and labelled as an estimate. Read-only, queried from the browser in groups of 100 SKUs.
+  WMS stock here is every location (rack, staging, quarantine), compared with the quoted figure as WMS minus request.
+- **`npm test` chain had `&&&&`** from 1d1c966 to 9 Nov (the whole chain failed with a shell syntax error, so nothing
+  ran). After editing the chain, run `npm test` once and check it gets past the first file.
+- **WMS sheet `on hand` = `Qty` + `putaway`** (morning stock incl. yesterday's putaway, the app's inbounds and the day's
+  `Selisih hitung`; excludes `PICK` / `b out` / `b in'`). `Remain Qty` subtracts the day's picks. To rebase stock on a
+  mid-day file without losing the day's work: target = file on hand + picking/transfer movements since the last import,
+  booked through `import_snapshot` (done 9 Nov with `STAGING` kept, see memory `production-supabase`). The Import page's
+  replace mode would wipe the day's posted picks.
 - **Data issues are real, not hypothetical** — `docs/DATA_ISSUES.md`: bin CC01C01 holds `#VALUE!`,
   CE08A01 expired in 1930, batches CD39C01/C02 that Excel read as dates, 129 bins with qty 0, 57
   duplicate `Lokasi` rows. Column mapping is `docs/DATA_MAPPING.md`. Import

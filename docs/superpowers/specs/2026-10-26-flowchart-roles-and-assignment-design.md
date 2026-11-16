@@ -97,6 +97,7 @@ calls, reading the same table. Sub-routes follow their parent (`/audit/picking/.
 | Putaway | ✓ | | | | | ✓ | ✓ |
 | Pickface | | | | ✓ | | ✓ | ✓ |
 | Inventory | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Staging (0134) | ✓ | | | ✓ | | ✓ | ✓ |
 | Gudang 3D | | | | ✓ | ✓ | ✓ | ✓ |
 | Rak & Lokasi (0132) | ✓ | ✓ | | ✓ | | ✓ | ✓ |
 | Adjust stok | | | | ✓ | | ✓ | ✓ |

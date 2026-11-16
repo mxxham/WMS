@@ -59,6 +59,47 @@ test('pallets without a BIN Location are counted as waiting, not rows or errors'
   assert.deepEqual(pending, { pallets: 3, quantity: 144 });
 });
 
+// Shipment 109758431 on 9 Nov 2026: Item Code, batch and expiry only on the shipment's first row.
+const ship = (no: unknown, sku: unknown, pallet: unknown, bin: unknown, batch: unknown, exp: unknown) =>
+  [no, sku, null, null, null, null, 48, pallet, bin, null, batch, null, exp, null, null, null];
+
+test('a shipment\'s pallet rows without Item Code take it, batch and expiry from the shipment\'s first row', () => {
+  const { rows } = parsePutawayDetail(sheetOf([
+    ship('109758431', '550062463', 540000775055, 'CE18D01', '02K26JJ', '2030-11-02'),
+    ship(null, null, 540000775056, 'CE18D02', null, null),
+    ship(null, null, 540000775057, 'CE19D01', null, null),
+  ]));
+  assert.deepEqual(rows.map((r) => [r.line, r.bin_code, r.sku, r.batch_lot, r.expiry_date, r.quantity, r.error, r.filled_from ?? null]), [
+    [2, 'CE18D01', '550062463', '02K26JJ', '2030-11-02', 48, null, null],
+    [3, 'CE18D02', '550062463', '02K26JJ', '2030-11-02', 48, null, 2],
+    [4, 'CE19D01', '550062463', '02K26JJ', '2030-11-02', 48, null, 2],
+  ]);
+});
+
+test('copying stops at an empty row or a new Shipment No., and never overwrites a filled cell', () => {
+  const { rows } = parsePutawayDetail(sheetOf([
+    ship('109758431', '550062463', 540000775055, 'CE18D01', '02K26JJ', '2030-11-02'),
+    ship(null, null, 540000775056, 'CE18D02', '03K26JJ', null),
+    [],
+    ship(null, null, 540000775057, 'CE19D01', null, null),
+    ship('109758432', null, 540000775058, 'CE19D02', null, null),
+  ]));
+  assert.deepEqual(rows.map((r) => [r.bin_code, r.sku, r.batch_lot, r.expiry_date, r.error]), [
+    ['CE18D01', '550062463', '02K26JJ', '2030-11-02', null],
+    ['CE18D02', '550062463', '03K26JJ', '2030-11-02', null],
+    ['CE19D01', '', '', null, 'Item code kosong'],
+    ['CE19D02', '', '', null, 'Item code kosong'],
+  ]);
+});
+
+test('copied pallets into one bin still sum as one putaway', () => {
+  const { rows } = parsePutawayDetail(sheetOf([
+    ship('109758431', '550062463', 540000775055, 'CE18D01', '02K26JJ', '2030-11-02'),
+    ship(null, null, 540000775056, 'CE18D01', null, null),
+  ]));
+  assert.deepEqual(rows.map((r) => [r.bin_code, r.quantity, r.error, r.pallet_lines ?? null]), [['CE18D01', 96, null, [2, 3]]]);
+});
+
 test('the WMS "data putaway" sheet (no Pallet ID) keeps its duplicate rule', () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([

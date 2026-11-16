@@ -114,6 +114,10 @@ retur, lainnya), **keterangan**, dan **nama petugas**.
 - Adjustment **di atas batas** (standar 20 unit) tidak langsung berlaku: masuk
   **Inventory → Persetujuan** dan diputuskan oleh **orang lain** dari yang
   mengajukan.
+- Pengecualian (0140): tombol **Adjust** di **Inventory → Stok** langsung
+  mencatat adjustment berapa pun jumlahnya, tanpa persetujuan orang lain.
+  Kode alasan dan nama tetap wajib; di riwayat mutasi adjustment itu tidak
+  punya nama penyetuju. Di halaman lain batasnya tetap berlaku.
 - Hasil hitung diterapkan oleh orang yang **bukan** penghitung. Selisih di atas
   batas hanya bisa diterapkan setelah dua hitungan sama.
 - Penerimaan diposting oleh orang yang **bukan** pemeriksa.

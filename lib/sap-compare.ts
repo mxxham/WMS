@@ -12,7 +12,7 @@ export type CompareLine = {
   sap_unrestricted: number; sap_blocked: number; wms_unrestricted: number; wms_blocked: number;
   pending_gi: number; pending_gr: number; auto_gi: number;
   diff_unrestricted: number; diff_blocked: number;
-  /** net adjustment posted to the WMS from this line (Investigasi selisih, 0129); the day's numbers stay as they were */
+  /** net adjustment posted to the WMS from this line (Investigasi selisih, 0129); the SAP / WMS quantities stay the day's, the gap shown is what is left */
   wms_fix?: number | null;
   sap_other: Record<string, number> | null;
   status: "OPEN" | "EXPLAINED" | "COUNT_REQUESTED" | "RESOLVED"; cause: CauseCode | null;
@@ -45,14 +45,37 @@ export const mvtLabel = (t: string) => MVT_TYPES[t] ?? `Mvt ${t}`;
 const n = (v: unknown) => Number(v ?? 0) || 0;
 const otherTotal = (l: CompareLine) => Object.values(l.sap_other ?? {}).reduce((s, v) => s + n(v), 0);
 
-/** Our stock minus SAP's, after the timing corrections. + = lebih, - = kurang. */
-export const gapUnrestricted = (l: CompareLine) => -n(l.diff_unrestricted);
-export const gapBlocked = (l: CompareLine) => -n(l.diff_blocked);
+/** The gap as it was on the day: our stock minus SAP's after the timing corrections, before any correction posted from the line. */
+export const dayGapTotal = (l: CompareLine) => -(n(l.diff_unrestricted) + n(l.diff_blocked));
+/** Net stock correction posted from this line (Investigasi selisih): + = stock added, - = stock removed. */
+export const fixTotal = (l: CompareLine) => n(l.wms_fix);
+
+/**
+ * What is still open: the day's gap plus the corrections posted since (15 Nov 2026: a line corrected
+ * to zero kept showing its old gap in the list, the chart and the accuracy). `wms_fix` is one number
+ * per line, so it closes the free gap first, then the blocked one, and anything left lands on free.
+ * `stock_recon_summary` (0139) does the same arithmetic in SQL.
+ */
+function openGap(l: CompareLine): { u: number; b: number } {
+  let u = -n(l.diff_unrestricted), b = -n(l.diff_blocked), f = fixTotal(l);
+  const close = (g: number) => {
+    if (!g || !f || Math.sign(g) === Math.sign(f)) return g;
+    const t = Math.sign(f) * Math.min(Math.abs(f), Math.abs(g));
+    f -= t;
+    return g + t;
+  };
+  u = close(u); b = close(b);
+  return { u: u + f, b };
+}
+
+/** Our stock minus SAP's, after the timing corrections and the posted corrections. + = lebih, - = kurang. */
+export const gapUnrestricted = (l: CompareLine) => openGap(l).u;
+export const gapBlocked = (l: CompareLine) => openGap(l).b;
 export const gapTotal = (l: CompareLine) => gapUnrestricted(l) + gapBlocked(l);
 export const sapTotal = (l: CompareLine) => n(l.sap_unrestricted) + n(l.sap_blocked);
 export const wmsTotal = (l: CompareLine) => n(l.wms_unrestricted) + n(l.wms_blocked);
 export const timingTotal = (l: CompareLine) => n(l.pending_gi) + n(l.auto_gi) - n(l.pending_gr);
-export const hasGap = (l: CompareLine) => n(l.diff_unrestricted) !== 0 || n(l.diff_blocked) !== 0;
+export const hasGap = (l: CompareLine) => { const g = openGap(l); return g.u !== 0 || g.b !== 0; };
 
 export type Direction = "MATCH" | "MORE" | "LESS" | "MIXED";
 /** MIXED: e.g. more unrestricted but less blocked (stock in the wrong status). */

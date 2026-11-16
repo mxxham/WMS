@@ -6,7 +6,7 @@ import { unstable_cache } from "next/cache";
 import { PageHeader } from "@/components/app/page-header";
 import { TabsNav } from "@/components/app/tabs-nav";
 import { parsePolicy } from "@/lib/inventory-control";
-import { InventoryClient, type InvLine, type OpenTask } from "./inventory-client";
+import { InventoryClient, type EmptyRackBin, type InvLine, type OpenTask } from "./inventory-client";
 import { FefoTab, type FefoException } from "./tabs/fefo-tab";
 import { StayTab } from "./tabs/stay-tab";
 import { HoldsTab, type HoldRow } from "./tabs/holds-tab";
@@ -91,31 +91,26 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   async function stockTab(p: Params) {
     const aisle = /^[A-Z]{2}$/.test(p.aisle?.toUpperCase() ?? "") ? p.aisle!.toUpperCase() : undefined;
     const level = /^[A-E]$/.test(p.level?.toUpperCase() ?? "") ? p.level!.toUpperCase() : undefined;
-    const [lines, tasks, empty] = await Promise.all([
+    const [lines, tasks, emptyRack] = await Promise.all([
       fetchAll<InvLine>((a, b) => supabase.from("inventory_detail")
         .select("bin_code, zone, rack, level, bin_status, sku, description, uom, upp, item_abc, batch_lot, quantity, expiry_date, received_date, days_remaining, held, hold_reasons")
         .order("sku").order("bin_code").order("id").range(a, b)),
       fetchAll<OpenTask>((a, b) => supabase.from("pick_task_detail")
         .select("task_type, sku, from_bin, to_bin, batch_lot, expiry_date, quantity, wave_no, planned_date")
         .eq("status", "PLANNED").in("wave_status", ["PENDING", "RESCHEDULED"]).order("id").range(a, b)),
-      // Opened from the dashboard's occupancy grid: the empty rack positions of that aisle / level too.
-      aisle || level
-        ? fetchAll<{ bin_code: string; status: string }>((a, b) => {
-            // 0132: only positions Shell can use; CKB 3PL racks, missing and planned bins are not free space.
-            let qb = supabase.from("bin_summary").select("bin_code, status").not("rack", "is", null).eq("total_qty", 0)
-              .eq("status", "active").eq("owner", "SHELL");
-            if (aisle) qb = qb.eq("zone", aisle);
-            if (level) qb = qb.eq("level", level);
-            return qb.order("bin_code").range(a, b);
-          })
-        : Promise.resolve([]),
+      // Every empty rack position: listed with quantity 0 in "Per lokasi" and when a search finds it.
+      // 0132: only positions Shell can use; CKB 3PL racks, missing and planned bins are not free space.
+      fetchAll<EmptyRackBin>((a, b) => supabase.from("bin_summary").select("bin_code, zone, rack, level")
+        .not("rack", "is", null).eq("total_qty", 0).eq("status", "active").eq("owner", "SHELL").order("bin_code").range(a, b)),
     ]);
+    // Opened from the dashboard's occupancy grid: the empty positions of that aisle / level as a card too.
+    const empty = aisle || level ? emptyRack.filter((e) => (!aisle || e.zone === aisle) && (!level || e.level === level)) : [];
     return (
       <>
       <div className="px-4 pt-4 lg:px-8"><BinOnHandLookup /></div>
       <InventoryClient packed={packLines(lines)} tasks={tasks} canAdjust={supervisor} initialQuery={p.q ?? ""} initialAbc={p.abc} initialSort={p.sort}
         initialAisle={aisle} initialLevel={level} initialView={p.view === "line" || aisle || level ? "line" : "sku"}
-        emptyBins={empty.map((e) => ({ code: e.bin_code, blocked: e.status === "blocked" }))} />
+        emptyBins={empty.map((e) => ({ code: e.bin_code, blocked: false }))} emptyRack={emptyRack} />
       </>
     );
   }

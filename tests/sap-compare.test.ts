@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
 import { dateFromFileName, defaultSlocs, parseMb51, parseMb52, splitBySloc } from '../lib/sap-stock';
-import { compareStats, cutoffIso, defaultCutoff, direction, filterLines, flags, gapTotal, hint, isFuture, nowWib, type CompareLine } from '../lib/sap-compare';
+import { causeBreakdown, compareStats, cutoffIso, dayGapTotal, defaultCutoff, direction, filterLines, flags, gapBlocked, gapTotal, gapUnrestricted, hasGap, hint, isFuture, nowWib, type CompareLine } from '../lib/sap-compare';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -123,6 +123,42 @@ test('cut-off: 00:00 WIB of the SAP stock date, sent with the +07:00 offset', ()
   assert.equal(nowWib(at), '2026-10-28T10:00');
   assert.equal(isFuture('2026-10-28T09:59', at), false);
   assert.equal(isFuture('2026-10-28T10:01', at), true);
+});
+
+// A correction posted from Investigasi selisih (wms_fix) closes the gap everywhere it is read.
+test('+310 corrected by -310 reads as a match; the day\'s gap stays readable', () => {
+  const l = { ...db({ sap_unrestricted: 1601, wms_unrestricted: 1911 }), wms_fix: -310, status: 'RESOLVED' as const };
+  assert.equal(dayGapTotal(l), 310);
+  assert.equal(gapTotal(l), 0);
+  assert.equal(hasGap(l), false);
+  assert.equal(direction(l), 'MATCH');
+  assert.deepEqual(filterLines([l], 'match', '', 'gap').length, 1);
+  assert.deepEqual(filterLines([l], 'more', '', 'gap').length, 0);
+});
+test('a partial correction leaves the rest, one past zero turns the gap around', () => {
+  const l = db({ sap_unrestricted: 1601, wms_unrestricted: 1911 });
+  assert.equal(gapTotal({ ...l, wms_fix: -200 }), 110);
+  assert.equal(gapTotal({ ...l, wms_fix: -320 }), -10);
+  assert.equal(direction({ ...l, wms_fix: -320 }), 'LESS');
+});
+test('a blocked-only gap closed by its correction is a match, not a free vs blocked difference', () => {
+  const l = { ...db({ sap_blocked: 0, wms_blocked: 5 }), wms_fix: -5 };
+  assert.deepEqual([gapUnrestricted(l), gapBlocked(l), hasGap(l)], [0, 0, false]);
+  // free first, then blocked: WMS 4 free and 3 blocked short, 6 found
+  const m = { ...db({ sap_unrestricted: 10, sap_blocked: 5, wms_unrestricted: 6, wms_blocked: 2 }), wms_fix: 6 };
+  assert.deepEqual([gapUnrestricted(m), gapBlocked(m)], [0, -1]);
+});
+test('stats and the cause chart count what is left after corrections', () => {
+  const lines = [
+    db({ sku: 'a', sap_unrestricted: 100, wms_unrestricted: 100 }),
+    { ...db({ sku: 'b', sap_unrestricted: 1601, wms_unrestricted: 1911 }), wms_fix: -310, status: 'RESOLVED' as const, cause: 'COUNT' as const },
+    db({ sku: 'c', sap_unrestricted: 50, wms_unrestricted: 40 }),
+    { ...db({ sku: 'd', sap_unrestricted: 20, wms_unrestricted: 32 }), wms_fix: -4, status: 'RESOLVED' as const, cause: 'COUNT' as const },
+  ];
+  const s = compareStats(lines);
+  assert.deepEqual([s.match, s.more, s.less, s.moreQty, s.lessQty, s.open], [2, 1, 1, 8, 10, 1]);
+  assert.deepEqual([s.sapQty, s.wmsQty], [1771, 2083]); // the day's stock, unchanged
+  assert.deepEqual(causeBreakdown(lines), [{ cause: null, lines: 1, qty: 10 }, { cause: 'COUNT', lines: 1, qty: 8 }]);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

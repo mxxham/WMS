@@ -23,7 +23,7 @@ test('the committed list matches node_modules (run npm run notices if not)', () 
 test('every package with a licence file points at its text, published as public/licenses/<id>.txt', () => {
   for (const p of committed.packages) if (p.text) {
     assert.ok(committed.texts[p.text], `${p.name}: text ${p.text} missing`);
-    assert.equal(readFileSync(`public/licenses/${p.text}.txt`, 'utf8'), committed.texts[p.text] + '\n', `${p.name}: public/licenses/${p.text}.txt stale`);
+    assert.equal(readFileSync(`public/licenses/${p.text}.txt`, 'utf8').replace(/\r\n/g, '\n'), committed.texts[p.text] + '\n', `${p.name}: public/licenses/${p.text}.txt stale`);
   }
 });
 test('every direct dependency is listed', () => {

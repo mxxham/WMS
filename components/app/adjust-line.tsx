@@ -19,8 +19,11 @@ export type AdjustLine = { bin_code: string; sku: string; batch_lot: string; exp
  * as the note); up to the policy's approval limit it is posted as an adjustment
  * movement, above it it becomes a request someone else approves
  * (Inventory → Persetujuan, 0018).
+ *
+ * `direct` (Inventory → Stok only, 0140): above the limit it is posted at once
+ * through `adjust_stock_line` instead of becoming a request.
  */
-export function AdjustLineButton({ line }: { line: AdjustLine }) {
+export function AdjustLineButton({ line, direct = false }: { line: AdjustLine; direct?: boolean }) {
   const router = useRouter();
   const [person, setPerson] = usePersonName();
   const [open, setOpen] = useState(false);
@@ -35,7 +38,8 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
   const v = Number(value);
   const delta = value.trim() === "" || !Number.isFinite(v) ? null : mode === "count" ? v - cur : v;
   const after = delta === null ? null : cur + delta;
-  const needsApproval = delta !== null && limit !== null && Math.abs(delta) > limit;
+  const overLimit = delta !== null && limit !== null && Math.abs(delta) > limit;
+  const needsApproval = overLimit && !direct;
   const problem = delta === null ? null
     : !Number.isInteger(v) ? "Isi bilangan bulat."
     : delta === 0 ? "Tidak ada perubahan."
@@ -56,7 +60,12 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
     const db = createClient();
     let err: { message: string } | null = null;
     const adjNote = REASON_CODES[reason];
-    if (needsApproval) {
+    if (overLimit && direct) {
+      ({ error: err } = await db.rpc("adjust_stock_line", {
+        p_bin_code: line.bin_code, p_sku: line.sku, p_batch: line.batch_lot, p_expiry: line.expiry_date, p_qty: delta,
+        p_reason_code: reason, p_note: adjNote, p_by_name: person,
+      }));
+    } else if (needsApproval) {
       ({ error: err } = await db.rpc("request_adjustment", {
         p_bin_code: line.bin_code, p_sku: line.sku, p_batch: line.batch_lot, p_expiry: line.expiry_date, p_qty: delta,
         p_reason_code: reason, p_note: adjNote, p_by_name: person,
@@ -106,7 +115,9 @@ export function AdjustLineButton({ line }: { line: AdjustLine }) {
           {delta !== null && !problem && (
             <p className="rounded-md bg-plate/30 p-3 text-base">
               {line.bin_code} · {line.sku}: {fmtNum(cur)} → <b>{fmtNum(after!)}</b> ({delta > 0 ? "+" : ""}{fmtNum(delta)}).
-              {needsApproval ? ` Di atas batas ${fmtNum(limit!)} unit: diajukan, lalu disetujui orang lain di Inventory → Persetujuan.` : " Langsung tercatat sebagai adjustment."}
+              {needsApproval ? ` Di atas batas ${fmtNum(limit!)} unit: diajukan, lalu disetujui orang lain di Inventory → Persetujuan.`
+                : overLimit ? ` Di atas batas ${fmtNum(limit!)} unit: langsung tercatat sebagai adjustment, tanpa persetujuan orang lain.`
+                : " Langsung tercatat sebagai adjustment."}
             </p>
           )}
           {problem && <p className="text-sm text-bad">{problem}</p>}

@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
  * skeleton is the search form and the paragraph that says what a result will show: where the batch
  * is now, which shipments and customers it went to, and its whole movement history.
  *
- * The four result cards (summary, shipments, positions, history) exist only after a batch has been
- * looked up; drawing them would say a batch had been found.
+ * The result (batch header, numbers, the four tabs) exists only after a batch has been looked up;
+ * drawing it would say a batch had been found.
  */
 export default function Loading() {
   return (

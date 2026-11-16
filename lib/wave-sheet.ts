@@ -203,7 +203,14 @@ export function sheetNotes(lines: SheetLine[], initial: Map<string, SheetLine>, 
       const q = Number(s.qty);
       if (s.qty.trim() !== "" && (!Number.isInteger(q) || q < 0)) notes.push({ tone: "bad", text: `Jumlah "${s.qty}" tidak valid.` });
     }
-    if (up(l.moveTo) && !(Number(l.moveQty) > 0)) notes.push({ tone: "bad", text: "Isi jumlah sisa Bin To Bin, atau kosongkan tujuannya." });
+    if (up(l.moveTo) && !(Number(l.moveQty) > 0)) {
+      // Bin To Bin moves what stays in the pick bin. The system may say it is empty while the floor
+      // still holds cartons: the typed sisa wins and the difference is booked as a correction.
+      const left = l.pick && !l.posted && up(first.bin) ? leftoverAfter(l, stock) : null;
+      notes.push({ tone: "bad", text: left === 0
+        ? `Sistem: ${up(first.bin)} kosong setelah pick. Bila di lantai masih ada sisa, isi jumlahnya (selisih dikoreksi); bila tidak, kosongkan tujuannya.`
+        : "Isi jumlah sisa Bin To Bin, atau kosongkan tujuannya." });
+    }
 
     // What differs from the plan: allowed, shown.
     if (l.pick) {

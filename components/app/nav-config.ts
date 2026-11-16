@@ -1,4 +1,4 @@
-import { LayoutGrid, UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, BookOpen, BarChart3, type LucideIcon } from "lucide-react";
+import { LayoutGrid, UserCheck, ListTodo, Route, Boxes, ClipboardCheck, Package, ClipboardList, PackageCheck, MapPin, ShieldCheck, LayoutDashboard, ListChecks, PackagePlus, Printer, ScanLine, Settings, Upload, History, SlidersHorizontal, Truck, Tags, Barcode, Users, BookOpen, BarChart3, PackageOpen, type LucideIcon } from "lucide-react";
 import type { Job } from "@/lib/jobs";
 
 /**
@@ -26,6 +26,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
   ] },
   { title: "Stok", links: [
     { href: "/inventory", label: "Inventory", blurb: "Stok per bin, SKU, batch dan expired.", icon: Package, jobs: ALL_JOBS },
+    { href: "/staging", label: "Staging", blurb: "Barang di staging dan pindah ke rak.", icon: PackageOpen, jobs: [IV, AI, LD, AD] },
     { href: "/warehouse", label: "Gudang 3D", blurb: "Denah rak 3D dengan isi tiap bin.", icon: Boxes, jobs: [IV, OP, LD, AD] },
     { href: "/racks", label: "Rak & Lokasi", blurb: "Denah rak, status bin, pinjam ke CKB, rak baru.", icon: LayoutGrid, jobs: [AI, AO, IV, LD, AD] },
     { href: "/adjust", label: "Adjust stok", blurb: "Koreksi stok dengan alasan dan persetujuan.", icon: SlidersHorizontal, jobs: [IV, LD, AD] },

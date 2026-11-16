@@ -11,10 +11,11 @@ import { Input, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { RECON_STATUS } from "@/lib/inventory-control";
 import {
-  CAUSES, FILTERS, FLAG_LABEL, SORTS, causeBreakdown, direction, filterLines, flags, gapBlocked, gapTotal, gapUnrestricted, hasGap, hint,
+  CAUSES, FILTERS, FLAG_LABEL, SORTS, causeBreakdown, dayGapTotal, direction, filterLines, flags, gapBlocked, gapTotal, gapUnrestricted, hasGap, hint,
   mvtLabel, sapTotal, signed, timingTotal, wmsTotal, type CauseCode, type FilterKey, type SortKey,
 } from "@/lib/sap-compare";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
+import { ManagerReport } from "./manager-report";
 import type { PrevGap, ReconLine, ReconSummary, SapMove } from "./types";
 
 const num = (v: unknown) => Number(v ?? 0) || 0;
@@ -131,6 +132,8 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person, onInve
           </button>
         ))}
       </div>
+      {/* Cocok: the warehouse manager's report (0137) in place of the list. */}
+      {filter === "match" ? <ManagerReport run={run} lines={lines} /> : <>
       <div className="flex flex-wrap items-end gap-2">
         <div className="relative min-w-56 flex-1">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-steel-400" />
@@ -152,7 +155,7 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person, onInve
         {bulkMsg && <p className="text-sm text-ok">{bulkMsg} <Link className="underline" href="/counts">Buka Hitung</Link></p>}
       </div>
       <p className="text-xs text-steel-500">
-        Selisih = stok WMS − stok SAP setelah koreksi timing (pending GI + GI otomatis − pending GR). <b>Lebih</b> = kita punya lebih dari SAP, <b>Kurang</b> = kita punya kurang dari SAP.
+        Selisih = stok WMS − stok SAP setelah koreksi timing (pending GI + GI otomatis − pending GR), dikurangi koreksi stok yang sudah diposting dari Investigasi selisih: SKU yang sudah dikoreksi sampai habis terbaca cocok. <b>Lebih</b> = kita punya lebih dari SAP, <b>Kurang</b> = kita punya kurang dari SAP.
         {otherSlocs.length > 0 && <> Kolom &quot;Lokasi SAP lain&quot; = stok SAP di {otherSlocs.join(", ")}, tidak ikut dibandingkan.</>}
       </p>
 
@@ -230,16 +233,16 @@ export function StockCompare({ run, lines, moves, prev, prevAsOf, person, onInve
           )}
         </>
       )}
+      </>}
     </div>
   );
 }
 
-/** "dikoreksi +48 · sisa 0": what Investigasi selisih already posted for this SKU. */
+/** "selisih awal +48 · dikoreksi -48": the gap shown is what is left after what Investigasi selisih posted for this SKU. */
 function FixNote({ l }: { l: ReconLine }) {
   const fix = num(l.wms_fix);
   if (!fix) return null;
-  const rest = gapTotal(l) + fix;
-  return <div className="text-xs font-semibold text-steel-700">dikoreksi {signed(fix)} · sisa {rest ? signed(rest) : "0"}</div>;
+  return <div className="text-xs font-semibold text-steel-700">selisih awal {signed(dayGapTotal(l))} · dikoreksi {signed(fix)}</div>;
 }
 
 function FlagChips({ l }: { l: ReconLine }) {
@@ -295,9 +298,10 @@ function SkuDetail({ l, moves, run, person, editable, onInvestigate }: {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {([
           ["SAP bebas", num(l.sap_unrestricted)], ["SAP blok", num(l.sap_blocked)], ["WMS bebas", num(l.wms_unrestricted)], ["WMS blok", num(l.wms_blocked)],
-          ["Pending GI", num(l.pending_gi)], ["GI otomatis", num(l.auto_gi)], ["Pending GR", num(l.pending_gr)], ["Selisih", gapTotal(l)],
+          ["Pending GI", num(l.pending_gi)], ["GI otomatis", num(l.auto_gi)], ["Pending GR", num(l.pending_gr)],
+          ...(num(l.wms_fix) ? [["Selisih awal", dayGapTotal(l)], ["Koreksi WMS", num(l.wms_fix)]] as const : []), ["Selisih", gapTotal(l)],
         ] as const).map(([k, v]) => (
-          <div key={k} className="rounded bg-white p-2"><div className="text-xs text-steel-500">{k}</div><div className="font-semibold tabular">{k === "Selisih" ? signed(v) : fmtNum(v)}</div></div>
+          <div key={k} className="rounded bg-white p-2"><div className="text-xs text-steel-500">{k}</div><div className="font-semibold tabular">{k === "Selisih" || k === "Selisih awal" || k === "Koreksi WMS" ? signed(v) : fmtNum(v)}</div></div>
         ))}
       </div>
       {h && <p className="rounded-md bg-plate/30 p-2">{h.text}</p>}

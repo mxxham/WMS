@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { readSheet } from "@/lib/read-sheet";
-import { ACTIONS, KIND_LABELS, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawayDetail, pickPutawaySheet, sheetDay, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
+import { ACTIONS, KIND_LABELS, isStagingKind, stagingProblem, fixLinesFor, fixPayload, fixProblem, fixSummary, parsePutawayDetail, pickPutawaySheet, sheetDay, type FixLine, type PutawayAction, type PutawayKind, type PutawayRow, type PutawayVerdict } from "@/lib/putaway-sheet";
 import { masterFromWorkbook } from "@/lib/master-from-workbook";
 import { cn, fmtDate, fmtDateTime, fmtNum } from "@/lib/utils";
 import { addDays, jakartaDay } from "@/lib/ledger/dates";
@@ -20,7 +20,7 @@ import { StatusIcon } from "@/components/ui/status-icon";
 
 type Step = "upload" | "review" | "done";
 type Status = PutawayVerdict["status"] | "error";
-type Result = { rows: PutawayVerdict[]; movements: number; count_tasks?: number; set_over_limit?: number[]; requests?: number };
+type Result = { rows: PutawayVerdict[]; movements: number; count_tasks?: number; set_over_limit?: number[]; requests?: number; staging?: number };
 
 const STATUS: Record<Status, { label: string; dot: string; row: string }> = {
   new: { label: "Baru (akan diposting)", dot: "bg-ok", row: "" },
@@ -56,10 +56,13 @@ export function PutawayClient() {
   const [name, setName] = useState("");
   // Tanggal barang datang (0117): the team posts a day's putaway the next day, so yesterday by default.
   const [arrival, setArrival] = useState(() => addDays(jakartaDay(), -1));
+  // The arrival date the last check ran with: staging rows are "already recorded" per arrival day (0134), so a
+  // date changed after the check must be checked again before posting.
+  const [checkedArrival, setCheckedArrival] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [limit, setLimit] = useState(20);
   const [historyKey, setHistoryKey] = useState(0);
-  // Rekap inbound: pallets on the sheet with no BIN Location yet (still in staging), not posted.
+  // Rekap inbound: pallets on the sheet with no BIN Location filled in yet (not staging), not posted.
   const [pending, setPending] = useState<{ pallets: number; quantity: number }>({ pallets: 0, quantity: 0 });
   const [draftBanner, setDraftBanner] = useState<{ source: string; rows: number; updated_at: string } | null>(null);
 
@@ -112,14 +115,15 @@ export function PutawayClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a snapshot: restored once on mount when the page still holds an empty upload step, like wave-sheet's file tab
   }, [step, rows.length]);
 
-  async function call(apply: boolean, acts: typeof actions, sheetRows = rows): Promise<Result | null> {
+  async function call(apply: boolean, acts: typeof actions, sheetRows = rows, day = arrival): Promise<Result | null> {
     const body = sheetRows.filter((r) => !r.error).map(({ error: _, ...r }) => ({
       ...r, action: acts[r.line] ?? null, fix: acts[r.line] === "fix" ? fixPayload(fixes[r.line] ?? []) : undefined,
     }));
     const { data, error } = await createClient().rpc("putaway_import_arrival", {
-      p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null, p_arrival_date: apply ? arrival || null : null,
+      p_rows: body, p_source: fileName, p_apply: apply, p_by_name: name.trim() || null, p_arrival_date: day || null, // also on preview: a day's staging lines already posted show as such (0134)
     });
     if (error) { setError(error.message); return null; }
+    if (!apply) setCheckedArrival(day || null);
     return data as Result;
   }
 
@@ -149,7 +153,8 @@ export function PutawayClient() {
       const day = sheetDay(name, file);
       if (day) setArrival(day);
       setRows(parsed); setActions({}); setFixes({}); setConfirming(false);
-      const res = await call(false, {}, parsed);
+      // setArrival has not applied yet: the check is given the day itself.
+      const res = await call(false, {}, parsed, day ?? arrival);
       if (!res) return;
       setVerdicts(new Map(res.rows.map((v) => [v.line, v])));
       setFilter(res.rows.some((v) => v.status === "conflict") ? "conflict" : "all");
@@ -232,6 +237,7 @@ export function PutawayClient() {
   const toCount = rows.filter((r) => { const v = verdicts.get(r.line); return v?.status === "conflict" && !actions[r.line] && (v.kind === "qty_differs" || v.kind === "bin_occupied" || v.kind === "moved_in"); }).length;
   const shown = filter === "all" ? rows : rows.filter((r) => statusOf(r) === filter);
   // SKUs the item master does not have yet, with their data from this file's master sheets (0040).
+  const dateStale = rows.some((r) => r.bin_code === "STAGING") && arrival !== checkedArrival;
   const unknownSkus = [...new Set(rows.filter((r) => verdicts.get(r.line)?.kind === "sku_unknown").map((r) => r.sku))];
   const fromFile = wb && unknownSkus.length ? masterFromWorkbook(wb, unknownSkus) : [];
   const notInFile = unknownSkus.filter((u) => !fromFile.some((m) => m.sku === u));
@@ -252,7 +258,8 @@ export function PutawayClient() {
       const m = v.moved_in;
       return `${KIND_LABELS.moved_in}. Bin To Bin ${m.quantity} dari ${m.from_bin ?? "?"} (batch ${m.batch_lot || "–"}, ${new Date(m.at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "short", timeStyle: "short" })}).`;
     }
-    return v?.kind ? KIND_LABELS[v.kind] : "";
+    if (v && isStagingKind(v.kind)) return stagingProblem({ kind: v.kind, recorded: v.recorded });
+    return v?.kind ? KIND_LABELS[v.kind as PutawayKind] : "";
   }
 
   async function downloadReport() {
@@ -264,7 +271,7 @@ export function PutawayClient() {
         "Baris Excel": r.line, Status: statusOf(r) === "error" ? "ERROR" : "KONFLIK", "Kode bin": r.bin_code, SKU: r.sku, Batch: r.batch_lot,
         Qty: r.quantity, Expired: r.expiry_date, Masalah: problem(r),
         "Isi bin di sistem": v?.current.map((c) => `${c.sku} / ${c.batch_lot || "-"} / ${c.expiry_date ?? "-"} / ${c.quantity}`).join("; ") ?? "",
-        Keputusan: v?.kind && actions[r.line] ? actionLabel(v.kind, actions[r.line]!) : "Dilewati",
+        Keputusan: v?.kind && !isStagingKind(v.kind) && actions[r.line] ? actionLabel(v.kind, actions[r.line]!) : "Dilewati",
       };
     });
     const book = XLSX.utils.book_new();
@@ -299,7 +306,7 @@ export function PutawayClient() {
 
       {step !== "upload" && pending.pallets > 0 && (
         <p className="rounded-md bg-steel-100 p-3 text-sm">
-          {fmtNum(pending.pallets)} palet di sheet ini belum punya BIN Location ({fmtNum(pending.quantity)} qty): belum di-putaway, tidak diposting. Upload ulang setelah bin-nya terisi.
+          {fmtNum(pending.pallets)} palet belum diisi BIN Location di sheet ini (belum diposting). Upload ulang setelah BIN Location-nya diisi.
         </p>
       )}
 
@@ -318,6 +325,7 @@ export function PutawayClient() {
             <Card><CardContent className="space-y-2">
               <p className="font-cond text-xl font-semibold">Putaway diposting</p>
               <p className="text-sm">{fmtNum(result.movements)} mutasi dibuat dan tercatat di <Link className="underline" href="/movements">Riwayat mutasi</Link>. Konflik tanpa keputusan dan baris error tidak diposting.</p>
+              {!!result.staging && <p className="text-sm"><b>{fmtNum(result.staging)}</b> baris masuk staging. <Link className="underline" href="/staging">Lihat Staging</Link></p>}
               {!!result.count_tasks && <p className="text-sm"><b>{fmtNum(result.count_tasks)}</b> bin dengan konflik qty/isi masuk daftar <Link className="underline" href="/counts">Hitung stok</Link> untuk dihitung ulang.</p>}
               {!!result.requests && <p className="text-sm"><b>{fmtNum(result.requests)}</b> adjustment di atas batas {fmtNum(limit)} karton menunggu persetujuan orang kedua di <Link className="underline" href="/adjust">Adjust stok</Link>.</p>}
               {!!result.set_over_limit?.length && <p className="text-sm">Baris {result.set_over_limit.join(", ")}: &quot;samakan dengan sheet&quot; melebihi batas adjustment, jadi tidak diposting dan dihitung ulang dulu.</p>}
@@ -362,21 +370,26 @@ export function PutawayClient() {
               <Table>
                 <thead><tr><Th>Baris</Th><Th>Bin</Th><Th>SKU</Th><Th>Batch</Th><Th className="text-right">Qty</Th><Th>Expired</Th><Th>Masalah</Th><Th>{step === "done" ? "Isi bin saat diperiksa" : "Isi bin sekarang"}</Th><Th>Keputusan</Th></tr></thead>
                 <tbody>{shown.map((r) => {
-                  const st = statusOf(r); const v = verdicts.get(r.line); const opts = v?.kind ? ACTIONS[v.kind] : [];
+                  const st = statusOf(r); const v = verdicts.get(r.line); const staged = isStagingKind(v?.kind);
+                  const opts = v?.kind && !isStagingKind(v.kind) ? ACTIONS[v.kind] : [];
                   return (
                     <tr key={r.line} className={STATUS[st].row}>
-                      <Td>{r.line}</Td><Td className="font-semibold">{r.bin_code}
-                        {r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}
-                        {r.pallet_lines && <span className="block text-xs font-normal text-steel-500">{r.pallet_lines.length} palet (baris {r.pallet_lines.join(", ")})</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
+                      <Td>{r.line}</Td><Td className="font-semibold">{staged
+                          ? <span className="rounded-plate bg-plate px-1.5 py-0.5 font-cond font-bold text-steel">{r.bin_code}</span>
+                          : r.bin_code}
+                        {staged && <span className="block text-xs font-normal text-steel-500">ke staging{r.sheet_bin && r.sheet_bin !== r.bin_code ? ` (di sheet ${r.sheet_bin})` : ""}</span>}
+                        {!staged && r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}
+                        {r.pallet_lines && <span className="block text-xs font-normal text-steel-500">{r.pallet_lines.length} palet (baris {r.pallet_lines.join(", ")})</span>}
+                        {r.filled_from && <span className="block text-xs font-normal text-steel-500">item, batch, expired dari baris {r.filled_from}</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
                       <Td className="text-right tabular">{r.quantity ?? "–"}</Td>
                       <Td>{fmtDate(r.expiry_date)}{v?.expiry_expected && <div className="text-xs font-semibold text-warn" title="Expired menurut kode batch">batch → {fmtDate(v.expiry_expected)}</div>}</Td>
                       <Td className="text-xs">{problem(r) || (st === "same" ? "Isi bin sudah sama" : "")}</Td>
-                      <Td className="text-xs">{v?.current.length ? v.current.map((c, i) => <div key={i}>{c.sku} · {c.batch_lot || "–"} · {fmtDate(c.expiry_date)} · <b>{fmtNum(c.quantity)}</b></div>) : st === "new" ? "Kosong" : ""}</Td>
+                      <Td className="text-xs">{v?.current.length ? v.current.map((c, i) => <div key={i}>{c.sku} · {c.batch_lot || "–"} · {fmtDate(c.expiry_date)} · <b>{fmtNum(c.quantity)}</b></div>) : st === "new" && !staged ? "Kosong" : ""}</Td>
                       <Td>
                         {st === "conflict" && step === "review" && (opts.length ? (
                           <Select aria-label={`Keputusan baris ${r.line}`} value={actions[r.line] ?? ""} onChange={(e) => choose(r, (e.target.value || undefined) as PutawayAction | undefined)}>
                             <option value="">Lewati</option>
-                            {opts.map((a) => <option key={a} value={a}>{actionLabel(v!.kind!, a)}</option>)}
+                            {opts.map((a) => <option key={a} value={a}>{actionLabel(v!.kind as PutawayKind, a)}</option>)}
                           </Select>
                         ) : v?.kind === "sku_unknown" ? <span className="text-xs text-steel-500">Tambahkan SKU ke master (di atas)</span> : null)}
                         {st === "conflict" && step === "review" && actions[r.line] === "fix" && (
@@ -390,7 +403,7 @@ export function PutawayClient() {
                             }} />
                         )}
                         {step === "review" && v?.fix_error && actions[r.line] !== "fix" && <p className="mt-1 text-xs text-bad">{v.fix_error}</p>}
-                        {step === "review" && (st === "conflict" || r.sheet_bin) && v?.kind !== "sku_unknown" && (
+                        {step === "review" && (st === "conflict" || r.sheet_bin) && v?.kind !== "sku_unknown" && !staged && (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             <Input aria-label={`Bin sebenarnya baris ${r.line}`} className="h-8 w-28" placeholder="bin lain" value={moveTo[r.line] ?? ""}
                               onChange={(e) => setMoveTo((m) => ({ ...m, [r.line]: e.target.value.toUpperCase() }))} />
@@ -437,8 +450,12 @@ export function PutawayClient() {
                 <div className="max-w-xs"><Label htmlFor="putaway-name">Nama Anda{fixRows.length > 0 ? " (wajib)" : ""}</Label>
                   <Input id="putaway-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="nama yang memposting" /></div>
               </div>
+              {dateStale && (
+                <p className="text-warn">Tanggal barang datang berubah setelah diperiksa: baris staging harus diperiksa ulang untuk tanggal ini.
+                  <Button size="sm" variant="outline" className="ml-2" disabled={busy || !arrival} onClick={() => void review()}>Periksa ulang</Button></p>
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={post} disabled={busy || !arrival || (fixRows.length > 0 && name.trim().length < 2)}><Upload className="h-4 w-4" />{busy ? "Memposting…" : "Ya, posting"}</Button>
+                <Button onClick={post} disabled={busy || !arrival || dateStale || (fixRows.length > 0 && name.trim().length < 2)}><Upload className="h-4 w-4" />{busy ? "Memposting…" : "Ya, posting"}</Button>
                 <Button variant="outline" onClick={() => setConfirming(false)} disabled={busy}>Batal</Button>
               </div>
             </CardContent></Card>

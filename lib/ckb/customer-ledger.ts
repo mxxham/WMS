@@ -7,7 +7,7 @@
  * touches Shell stock or any Shell table.
  *
  * Pure: sheet rows in (already read by lib/read-sheet.ts, Excel row numbers included), snapshot rows
- * out. No fs, no xlsx, no database — like lib/allocator.
+ * out. No fs, no xlsx, no database — pure like the Shell allocator engine.
  *
  * Formats (one deterministic parser each, header detection first, refusal instead of guessing):
  *   SIP        "STOCK": Code | Date In | Date out | DO Inbound | Item Code | Item Description |

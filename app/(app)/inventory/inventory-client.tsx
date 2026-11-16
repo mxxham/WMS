@@ -29,7 +29,12 @@ export type OpenTask = {
   batch_lot: string; expiry_date: string; quantity: number; wave_no: string; planned_date: string;
 };
 
-type Line = InvLine & { loc: LocType; bucket: ShelfBucket; reserved: number; incoming: number; available: number; waves: string[] };
+/** an empty rack position Shell can use: listed with quantity 0 */
+export type EmptyRackBin = { bin_code: string; zone: string; rack: string | null; level: string | null };
+
+type Line = InvLine & { loc: LocType; bucket: ShelfBucket; reserved: number; incoming: number; available: number; waves: string[];
+  /** an empty bin, not a stock line: no SKU, quantity 0, nothing to adjust */
+  empty?: boolean };
 type SkuRow = {
   sku: string; description: string; uom: string | null; upp: number | null; abc: string | null;
   total: number; byLoc: Record<LocType, number>; reserved: number; held: number; available: number; pallets: number;
@@ -43,7 +48,9 @@ const SORTS: Sort[] = ["sku", "qty", "expiry", "reserved"];
 
 const LEVELS = ["A", "B", "C", "D", "E"];
 
-export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initialSort, initialAisle, initialLevel, initialView, emptyBins = [], canAdjust = false }: {
+export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initialSort, initialAisle, initialLevel, initialView, emptyBins = [], emptyRack = [], canAdjust = false }: {
+  /** every empty rack position: a row with quantity 0 in "Per lokasi", and under "Per SKU" when the search finds it */
+  emptyRack?: EmptyRackBin[];
   /** the stock lines, packed (lib/inventory-pack): each SKU and bin once */
   packed: PackedLines; tasks: OpenTask[]; initialQuery: string; initialAbc?: string; initialSort?: string;
   /** supervisors adjust a line right here (AdjustLineButton) instead of finding it again on Adjust stok */
@@ -104,7 +111,21 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
       && (aisle === "all" || (l.rack !== null && l.zone === aisle))
       && (level === "all" || (l.rack !== null && l.level === level)));
   }, [enriched, q, loc, abc, bucket, onlyReserved, onlyHeld, aisle, level]);
-  const aisles = useMemo(() => [...new Set(lines.filter((l) => l.rack).map((l) => l.zone))].sort(), [lines]);
+  // Empty bins have no SKU, batch, expiry, reservation or hold: any filter on those leaves them out.
+  const emptyRows: Line[] = useMemo(() => {
+    if ((loc !== "all" && loc !== "rack") || abc !== "all" || bucket !== "all" || onlyReserved || onlyHeld) return [];
+    const needle = q.trim().toLowerCase();
+    return emptyRack
+      .filter((e) => (!needle || e.bin_code.toLowerCase().includes(needle))
+        && (aisle === "all" || e.zone === aisle) && (level === "all" || e.level === level))
+      .map((e) => ({
+        bin_code: e.bin_code, zone: e.zone, rack: e.rack, level: e.level, bin_status: "active" as const,
+        sku: "", description: "", uom: null, upp: null, item_abc: null, batch_lot: "", quantity: 0, expiry_date: null,
+        received_date: null, days_remaining: null, held: 0, hold_reasons: null,
+        loc: "rack" as const, bucket: shelfBucket(null), reserved: 0, incoming: 0, available: 0, waves: [], empty: true,
+      }));
+  }, [emptyRack, q, loc, abc, bucket, onlyReserved, onlyHeld, aisle, level]);
+  const aisles = useMemo(() => [...new Set([...lines.filter((l) => l.rack).map((l) => l.zone), ...emptyRack.map((e) => e.zone)])].sort(), [lines, emptyRack]);
   // Empty positions came from the server for the aisle/level the page was opened with.
   const showEmpty = emptyBins.length > 0 && aisle === (initialAisle ?? "all") && level === (initialLevel ?? "all");
   const occupiedBins = new Set(filtered.map((l) => l.bin_code)).size;
@@ -138,11 +159,14 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
       : a.sku.localeCompare(b.sku));
   }, [filtered, sort]);
 
-  const lineRows = useMemo(() => [...filtered].sort((a, b) =>
+  // Stock first in the chosen order, then the empty bins (quantity 0) by bin code.
+  const lineRows = useMemo(() => [...[...filtered].sort((a, b) =>
     sort === "qty" ? Number(b.quantity) - Number(a.quantity)
     : sort === "expiry" ? (a.expiry_date ?? "9999").localeCompare(b.expiry_date ?? "9999")
     : sort === "reserved" ? b.reserved - a.reserved
-    : a.sku.localeCompare(b.sku) || a.bin_code.localeCompare(b.bin_code)), [filtered, sort]);
+    : a.sku.localeCompare(b.sku) || a.bin_code.localeCompare(b.bin_code)), ...emptyRows], [filtered, sort, emptyRows]);
+  // "Per SKU" has no row for a bin without a SKU: a search that finds empty bins lists them under the table.
+  const searchedEmpty = q.trim() ? emptyRows : [];
 
   const totals = useMemo(() => ({
     skus: new Set(filtered.map((l) => l.sku)).size,
@@ -165,7 +189,7 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
       Bin: r.bins, Batch: r.batches, "Expired terdekat": r.earliest ?? "",
     }))), "Per SKU");
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(lineRows.map((l) => ({
-      Bin: l.bin_code, Lokasi: LOC_LABEL[l.loc], "Status bin": l.bin_status, SKU: l.sku, Deskripsi: l.description,
+      Bin: l.bin_code, Lokasi: LOC_LABEL[l.loc], "Status bin": l.bin_status, SKU: l.sku, Deskripsi: l.empty ? "Kosong" : l.description,
       Batch: l.batch_lot, Expired: l.expiry_date ?? "", "Sisa hari": l.days_remaining ?? "", Qty: Number(l.quantity),
       Dipesan: l.reserved, Ditahan: l.held, "Alasan hold": l.hold_reasons ?? "", Tersedia: l.available, "Masuk (replenish)": l.incoming, Wave: l.waves.join(", "), "Tgl terima": l.received_date ?? "",
     }))), "Per lokasi");
@@ -224,7 +248,7 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
               </button>
             ))}
           </div>
-          <Button variant="outline" onClick={exportXlsx} disabled={filtered.length === 0}><Download className="h-4 w-4" />Excel</Button>
+          <Button variant="outline" onClick={exportXlsx} disabled={lineRows.length === 0}><Download className="h-4 w-4" />Excel</Button>
         </div>
       </div>
 
@@ -252,7 +276,9 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
 
       <Card>
         <CardContent>
-          {filtered.length === 0 ? <p className="text-sm text-steel-500">Tidak ada stok untuk filter ini.</p> : view === "sku" ? (
+          {(view === "sku" ? filtered.length === 0 : lineRows.length === 0)
+            ? (view === "sku" && searchedEmpty.length > 0 ? null : <p className="text-sm text-steel-500">Tidak ada stok untuk filter ini.</p>)
+            : view === "sku" ? (
             <Table>
               <thead><tr>
                 <Th /><Th>SKU</Th><Th>Deskripsi</Th><Th>ABC</Th><Th className="text-right">Total</Th><Th className="text-right">Rak</Th>
@@ -284,6 +310,12 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
               ))}</tbody>
             </Table>
           ) : <LineTable lines={lineRows.slice(0, limit)} canAdjust={canAdjust} />}
+          {view === "sku" && searchedEmpty.length > 0 && (
+            <div className={cn(filtered.length > 0 && "mt-4")}>
+              <p className="mb-2 text-sm"><b>{fmtNum(searchedEmpty.length)} bin kosong</b> cocok dengan pencarian ini.</p>
+              <LineTable lines={searchedEmpty.slice(0, PAGE)} canAdjust={canAdjust} />
+            </div>
+          )}
           {(view === "sku" ? skuRows.length : lineRows.length) > limit && (
             <Button variant="outline" className="mt-3" onClick={() => setLimit(limit + PAGE)}>
               Tampilkan lebih banyak ({fmtNum((view === "sku" ? skuRows.length : lineRows.length) - limit)} lagi)
@@ -475,16 +507,16 @@ function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boo
           <Td><Link className="font-semibold underline" href={`/bin/${encodeURIComponent(l.bin_code)}`} onClick={(e) => e.stopPropagation()}>{l.bin_code}</Link>
             {l.bin_status === "blocked" && <span className="ml-1 text-xs text-bad">diblokir</span>}</Td>
           <Td className="text-xs">{LOC_LABEL[l.loc]}</Td>
-          {!compact && <><Td className="font-semibold">{l.sku}</Td><Td className="text-xs">{l.description}</Td></>}
+          {!compact && <><Td className="font-semibold">{l.sku || "–"}</Td><Td className="text-xs">{l.empty ? "Kosong" : l.description}</Td></>}
           <Td>{l.batch_lot || "–"}</Td>
-          <Td className="whitespace-nowrap text-xs">{fmtDate(l.expiry_date)} <ExpiryBadge status={expiryStatus(l.expiry_date)} /></Td>
+          <Td className="whitespace-nowrap text-xs">{l.empty ? "–" : <>{fmtDate(l.expiry_date)} <ExpiryBadge status={expiryStatus(l.expiry_date)} /></>}</Td>
           <Td className="text-right tabular">{fmtNum(Number(l.quantity))} <span className="text-xs text-steel-500">{l.uom}</span></Td>
           <Td className="text-right tabular">{l.reserved ? fmtNum(l.reserved) : "–"}{l.incoming ? <span className="block text-xs text-ok">+{fmtNum(l.incoming)} masuk</span> : null}</Td>
           <Td className={cn("text-right tabular", l.held > 0 && "text-warn")}>{l.held ? fmtNum(l.held) : "–"}{l.hold_reasons && <span className="block text-[11px]">{l.hold_reasons}</span>}</Td>
           <Td className="text-right font-semibold tabular">{fmtNum(l.available)}</Td>
           <Td className="text-xs">{l.waves.join(", ") || "–"}</Td>
           <Td className="whitespace-nowrap text-xs">{fmtDate(l.received_date)}</Td>
-          {canAdjust && <Td className="flex items-center gap-1"><AdjustLineButton line={l} /><CorrectIdentityButton line={l} /></Td>}
+          {canAdjust && <Td className="flex items-center gap-1">{!l.empty && <><AdjustLineButton line={l} direct /><CorrectIdentityButton line={l} /></>}</Td>}
         </tr>
       ))}</tbody>
     </Table>

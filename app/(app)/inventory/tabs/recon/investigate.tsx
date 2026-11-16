@@ -14,7 +14,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { LEVEL_COLORS_WEB } from "@/config/warehouse";
 import { REASON_CODES } from "@/lib/inventory-control";
-import { CAUSES, gapTotal, sapTotal, signed, timingTotal, wmsTotal, type CauseCode } from "@/lib/sap-compare";
+import { CAUSES, dayGapTotal, gapTotal, sapTotal, signed, timingTotal, wmsTotal, type CauseCode } from "@/lib/sap-compare";
 import {
   KIND_LABEL, MINUS_REASONS, PLUS_REASONS, STRONG, checkDraft, linesQty, linesText, palletHint, planSentence, reasonLabel, topSuspects,
   type DraftLine, type FixPlan, type FixRow, type StockLine, type SuspectBin,
@@ -96,12 +96,12 @@ export function Investigation({ run, line: l, lines, person, setPerson, onBack }
   // Another phone checking a bin, a fix, or any stock movement of the day: reload.
   useLiveTables(["recon_checks", "recon_fixes", "movements"], () => { void load(); }, 4000);
 
-  const dayGap = gapTotal(l);
+  const dayGap = dayGapTotal(l);
   const fixed = num(l.wms_fix);
-  const gap = dayGap + fixed;
+  const gap = gapTotal(l);
   const pallet = palletHint(gap, upp);
   // Another SKU of this reconciliation off by the same cartons the other way: maybe swapped.
-  const partners = useMemo(() => lines.filter((o) => o.sku !== l.sku && gap !== 0 && gapTotal(o) + num(o.wms_fix) === -gap), [lines, l.sku, gap]);
+  const partners = useMemo(() => lines.filter((o) => o.sku !== l.sku && gap !== 0 && gapTotal(o) === -gap), [lines, l.sku, gap]);
   const staleDays = Math.round((Date.now() - new Date(`${run.as_of}T00:00:00+07:00`).getTime()) / 86_400_000);
   const checkedCount = (suspects ?? []).filter((b) => b.check_id && !b.check_stale).length;
 
@@ -144,7 +144,7 @@ export function Investigation({ run, line: l, lines, person, setPerson, onBack }
         {pallet && <p>{pallet} Bin yang terakhir berisi satu palet penuh SKU ini paling dicurigai.</p>}
         {partners.length > 0 && (
           <p className="flex items-start gap-1"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-            <span>SKU lain selisih sama besar, arah berlawanan: {partners.map((o) => `${o.sku} (${signed(gapTotal(o) + num(o.wms_fix))})`).join(", ")}. Mungkin tertukar: cek juga bin SKU itu.</span></p>
+            <span>SKU lain selisih sama besar, arah berlawanan: {partners.map((o) => `${o.sku} (${signed(gapTotal(o))})`).join(", ")}. Mungkin tertukar: cek juga bin SKU itu.</span></p>
         )}
         {staleDays > 2 && <p className="text-steel-700">Rekonsiliasi ini {staleDays} hari lalu. Cek bin dan koreksi memakai stok WMS <b>sekarang</b>, bukan stok hari itu.</p>}
         {(timingTotal(l) !== 0 || l.cause === "PENDING_GI" || l.cause === "PENDING_GR") && (
