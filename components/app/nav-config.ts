@@ -35,6 +35,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
     { href: "/abc", label: "Kelas ABC", blurb: "Kelas A, B, C dari frekuensi picking bulanan.", icon: BarChart3, jobs: [AO, IV, LD, AD] },
   ] },
   { title: "Kontrol", links: [
+    { href: "/stockcheck", label: "Cek stok rak", blurb: "Cek isi rak per bin, koreksi di tempat, unduh Excel.", icon: ClipboardList, jobs: [IV, LD, AD] },
     { href: "/counts", label: "Cycle count", blurb: "Jadwal dan hasil cycle count per bin.", icon: ListTodo, jobs: [IV, LD, AD] },
     { href: "/audit/picking", label: "Audit picking", blurb: "Cek hasil pick per baris dan per rak.", icon: PackageCheck, jobs: [AO, CK, LD, AD] },
     { href: "/audit/putaway", label: "Audit putaway", blurb: "Cek putaway yang sudah diposting.", icon: ClipboardCheck, jobs: [AI, CK, LD, AD] },
