@@ -47,8 +47,9 @@ test('shellBinRules: unusable rack bins join the blocked list, aisle order comes
     { bin_code: 'CI01A01', rack: '01', status: 'blocked', owner: 'SHELL' },
     { bin_code: 'STAGING', rack: null, status: 'active', owner: null },
   ], ['CA', 'CB', 'CC', 'CD', 'CE', 'CF', 'CG', 'CH', 'CI']);
-  assert.deepEqual(rules.blockedBins.filter((b) => !DEFAULT_CONFIG.blockedBins.includes(b)), ['CG01A01', 'CI01A01']);
-  assert.ok(DEFAULT_CONFIG.blockedBins.every((b) => rules.blockedBins.includes(b)), 'the offline fallback list stays');
+  // The database decides: the offline fallback list is not merged, so a bin back with Shell (CF26A01) is pickable.
+  assert.deepEqual(rules.blockedBins, ['CG01A01', 'CE33A01', 'CI01A01']);
+  assert.ok(!rules.blockedBins.includes('CF26A01'), 'a Shell-usable bin on the old fallback list is not blocked');
   assert.deepEqual(rules.aisleSequence, ['CA', 'CB', 'CC', 'CD', 'CE', 'CF', 'CG', 'CH', 'CI']);
 });
 

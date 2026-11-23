@@ -3,9 +3,6 @@
  * Pure: rows of `bin_summary` in, plan and numbers out. The SQL rules this mirrors live in
  * supabase/migrations/0132_racks_and_locations.sql (bin_state, bin_usable, plan_racks_preview).
  */
-import { DEFAULT_CONFIG } from "@/lib/allocator/config";
-
-const DEFAULT_BLOCKED = DEFAULT_CONFIG.blockedBins;
 
 export type BinState = "ACTIVE" | "BLOCKED" | "NOT_PRESENT" | "PLANNED";
 export type Owner = "SHELL" | "CKB";
@@ -148,5 +145,7 @@ export type BinRuleRow = Pick<RackBin, "bin_code" | "rack" | "status" | "owner">
  */
 export function shellBinRules(rows: BinRuleRow[], aisleOrder: string[]): { blockedBins: string[]; aisleSequence: string[] } {
   const extra = rows.filter((r) => r.rack !== null && !usableForShell(r)).map((r) => r.bin_code);
-  return { blockedBins: [...new Set([...DEFAULT_BLOCKED, ...extra])], aisleSequence: [...aisleOrder] };
+  // Not merged with DEFAULT_BLOCKED: that list is stale once a bin returns to Shell (CF21-40 level A, 23 Nov 2026:
+  // CF26A01 was owner SHELL and usable in the database yet never offered or picked).
+  return { blockedBins: [...new Set(extra)], aisleSequence: [...aisleOrder] };
 }
