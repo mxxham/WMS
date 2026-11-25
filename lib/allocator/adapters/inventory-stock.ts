@@ -1,6 +1,6 @@
-import { isStagingLocation, type AllocatorConfig } from '../config';
+import { isBlockCLocation, isStagingLocation, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
-import { parseLocation } from '../pickpath';
+import { parseBlockCSlot, parseLocation } from '../pickpath';
 import type { StockBin, Warning } from '../types';
 import { lookupUom } from '../uom-master';
 
@@ -74,8 +74,10 @@ export function inventoryToStock(rows: InventoryRow[], config: AllocatorConfig):
     }
     if (excluded.includes(location)) continue;
 
-    const parsed = parseLocation(location);
-    if (!parsed || !config.rackLocationPattern.test(location)) {
+    // 0147: a Block C floor slot is pickable like a rack bin (a stack of one SKU, picked on its own list).
+    const blockC = isBlockCLocation(location, config);
+    const parsed = blockC ? parseBlockCSlot(location) : parseLocation(location);
+    if (!parsed || !(blockC || config.rackLocationPattern.test(location))) {
       warnings.push({
         level: 'INFO',
         code: 'NON_RACK_LOCATION',

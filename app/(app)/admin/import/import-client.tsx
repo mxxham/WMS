@@ -25,6 +25,15 @@ import { cn, fmtNum } from "@/lib/utils";
 
 type Skipped = { bin_code: string; sku: string; quantity: number | null; reason: "CKB" | "TIDAK_ADA" | "RENCANA" };
 const SKIP_REASON: Record<Skipped["reason"], string> = { CKB: "rak CKB 3PL", TIDAK_ADA: "bin tidak ada", RENCANA: "rak belum dibangun" };
+// 0147: stock the Block C rule would refuse is still imported (it is physically there) and listed for a person to move.
+type SiteWarning = { bin_code: string; sku: string; quantity: number | null; reason: "BLOCKC_DI_OSO5" | "SLOT_LAIN" | "SLOT_TANPA_SKU" };
+const SITE_REASON: Record<SiteWarning["reason"], string> = {
+  BLOCKC_DI_OSO5: "SKU Block C ada di rak Oso 5: pindahkan ke slotnya",
+  SLOT_LAIN: "slot Block C ini untuk SKU lain",
+  SLOT_TANPA_SKU: "slot Block C belum punya SKU",
+};
+
+import { detectImportKind, declaredTotal, opnameLabel, countColumnFill, IMPORT_KIND_LABEL, type ImportKind } from "@/lib/import-kind";
 
 type Step = "upload" | "map" | "review" | "done";
 /** replace: the file is the whole warehouse, stock missing from it is zeroed. update: only the file's rows change. */
@@ -44,16 +53,20 @@ export function ImportClient() {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [filter, setFilter] = useState<RowStatus | "all">("all");
   const [mode, setMode] = useState<Mode>("replace");
+  const [kind, setKind] = useState<ImportKind>("wms");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   // 0132: rows the database would not book (CKB 3PL racks, bins that do not exist or are not built yet).
   const [skipped, setSkipped] = useState<Skipped[]>([]);
+  const [siteWarnings, setSiteWarnings] = useState<SiteWarning[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   function loadSheet(book: XLSX.WorkBook, name: string) {
     const d = readSheet(book, name);
     const h = detectHeader(d.rows);
     setSheet(name); setData(d); setHeaderRow(h.headerRow); setMapping(h.mapping);
+    const k = detectImportKind(d.rows, h.headerRow);
+    setKind(k); if (k === "opname") setMode("replace");
   }
 
   async function onFile(f: File) {
@@ -70,11 +83,15 @@ export function ImportClient() {
     } finally { setBusy(false); }
   }
 
+  /** Opname file: the `on hand` column is the count (blank = 0). Without it Remain Qty is used. */
+  const countFill = useMemo(() => (data ? countColumnFill(data.rows, headerRow, mapping.count_qty) : 0), [data, headerRow, mapping.count_qty]);
+  const useCount = kind === "opname" && countFill > 0;
+
   function validate() {
     if (!data) return;
     if (mapping.bin_code === undefined) return setError("Kolom kode bin wajib dipetakan.");
     setError(null);
-    setRows(validateRows(data.rows, data.lines, headerRow, mapping).rows);
+    setRows(validateRows(data.rows, data.lines, headerRow, mapping, new Date(), { useCount }).rows);
     setStep("review");
   }
 
@@ -100,15 +117,19 @@ export function ImportClient() {
     if (itemsError) { setBusy(false); setError(itemsError.message); return itemsError.message; }
     const existing = new Set((items ?? []).map((i) => i.sku as string));
     const { data: res, error } = await supabase.rpc("import_snapshot", {
-      rows: toPayload(rows, existing), full_sync: mode === "replace", source_name: fileName, keep_bins: binsWithErrors(rows),
+      rows: toPayload(rows, existing), full_sync: mode === "replace", source_name: kind === "opname" ? `stock opname ${fileName}` : fileName, keep_bins: binsWithErrors(rows),
     });
     setBusy(false);
     if (error) { setError(error.message); return error.message; }
     const skip = (res.skipped ?? []) as Skipped[];
     setSkipped(skip);
+    const siteWarn = (res.site_warnings ?? []) as SiteWarning[];
+    setSiteWarnings(siteWarn);
     setResult(`${mode === "replace" ? "Stok diganti dengan isi file" : "Stok diperbarui"}: ${fmtNum(res.rows)} baris diproses, ${fmtNum(res.movements)} mutasi penyesuaian dibuat. ${counts.error} baris error tidak diimpor.`
-      + (res.held ? ` ${fmtNum(res.held)} baris tidak dinolkan karena terakhir dipindah atau dihitung di sistem: cek di Ditahan impor di atas.` : "")
-      + (skip.length ? ` ${fmtNum(skip.length)} baris dilewati karena lokasinya bukan rak Shell yang ada (lihat di bawah).` : ""));
+      // 0143: a full import holds nothing back; holds left by earlier imports are settled by the file.
+      + (res.settled ? ` ${fmtNum(res.settled)} baris yang dulu ditahan impor sudah diputuskan mengikuti file ini.` : "")
+      + (skip.length ? ` ${fmtNum(skip.length)} baris dilewati karena lokasinya bukan rak Shell yang ada (lihat di bawah).` : "")
+      + (siteWarn.length ? ` ${fmtNum(siteWarn.length)} baris melanggar aturan Block C: tetap dicatat karena barangnya ada, tapi perlu dipindahkan (lihat di bawah).` : ""));
     setStep("done");
     router.refresh();
     return null;
@@ -124,7 +145,7 @@ export function ImportClient() {
       {step === "upload" && (
         <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-steel-300 bg-white p-10 text-center hover:bg-steel-100">
           <FileSpreadsheet className="h-10 w-10 text-steel-500" />
-          <span className="font-cond text-xl font-semibold">{busy ? "Membaca file…" : "Pilih file WMS (.xlsx / .csv)"}</span>
+          <span className="font-cond text-xl font-semibold">{busy ? "Membaca file…" : "Pilih file WMS atau hasil stock opname (.xlsx / .csv)"}</span>
           <span className="max-w-md text-sm text-steel-500">Sheet <b>WMS</b> dipilih otomatis. Stok hanya berubah lewat mutasi penyesuaian, jadi setiap import tercatat di riwayat.</span>
           <input type="file" accept=".xlsx,.xls,.csv" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
@@ -151,6 +172,18 @@ export function ImportClient() {
                   </Select></div>
               ))}
             </div>
+            <fieldset className="grid gap-2 sm:grid-cols-2">
+              <legend className="mb-2 text-sm font-medium">Jenis file{kind === "opname" && opnameLabel(data.rows, headerRow) ? ` · terdeteksi: ${opnameLabel(data.rows, headerRow)}` : ""}</legend>
+              {([
+                ["wms", "WMS harian", "File WMS biasa. Qty dibaca dari Remain Qty (stok setelah pick hari itu); cara impor dipilih nanti."],
+                ["opname", "Hasil stock opname", "Hasil hitung fisik gudang (sheet WMS dengan kolom audit). Qty dari kolom on hand. Selalu mengganti seluruh stok: yang tidak ada di file dinolkan."],
+              ] as const).map(([k, l, d]) => (
+                <label key={k} className={cn("flex cursor-pointer gap-2 rounded-lg border bg-white p-3 text-sm", kind === k ? "border-ckb ring-2 ring-ckb" : "border-steel-300")}>
+                  <input type="radio" name="kind" value={k} checked={kind === k} onChange={() => { setKind(k); if (k === "opname") setMode("replace"); }} className="mt-0.5" />
+                  <span><b>{l}</b><br /><span className="text-steel-500">{d}</span></span>
+                </label>
+              ))}
+            </fieldset>
             <div>
               <p className="mb-2 text-sm font-medium">Pratinjau 5 baris pertama</p>
               <Table><thead><tr>{FIELDS.filter((f) => mapping[f] !== undefined).map((f) => <Th key={f}>{FIELD_LABELS[f]}</Th>)}</tr></thead>
@@ -190,15 +223,31 @@ export function ImportClient() {
               {rows.length > 500 && <p className="mt-2 text-xs text-steel-500">Menampilkan 500 baris pertama dari filter ini. Laporan unduhan berisi semua baris bermasalah.</p>}
             </CardContent>
           </Card>
+          {kind === "opname" && data && (() => {
+            const total = rows.filter((r) => r.status !== "error").reduce((a, r) => a + (r.quantity ?? 0), 0);
+            const declared = declaredTotal(data.rows, headerRow, useCount ? mapping.count_qty : mapping.quantity);
+            const differs = declared !== null && total !== declared;
+            return (
+              <p className={cn("rounded-md p-3 text-sm", differs ? "bg-warn/10" : "bg-ok/10")}>
+                <b>{IMPORT_KIND_LABEL.opname}</b>: total {fmtNum(total)} karton dari baris yang diimpor.
+                {useCount
+                  ? ` Qty diambil dari kolom on hand (hasil hitung: angka yang diketik tim menimpa rumusnya); sel kosong dihitung 0, artinya tidak ada stok.`
+                  : " Kolom on hand tidak ditemukan atau kosong, jadi Qty diambil dari Remain Qty (stok sistem setelah pick hari itu, bukan hasil hitung)."}
+                {declared !== null && (differs
+                  ? ` Total di sheet ${fmtNum(declared)}, selisih ${fmtNum(total - declared)} (mis. lokasi lantai di luar rak seperti karantina, atau baris error). Periksa sebelum mengganti stok.`
+                  : ` Sama dengan total di sheet (${fmtNum(declared)}).`)}
+              </p>
+            );
+          })()}
           <ComparePanel rows={rows} fileName={fileName} />
           <Card>
             <CardContent className="space-y-3">
               <fieldset className="grid gap-2 sm:grid-cols-2">
                 <legend className="mb-2 text-sm font-medium">Cara impor</legend>
                 {([
-                  ["replace", "Ganti seluruh stok", "Isi database diganti dengan file ini. Stok di sistem yang tidak ada di file dinolkan, kecuali yang terakhir dipindah atau dihitung di sistem: itu ditahan untuk dicek."],
+                  ["replace", "Ganti seluruh stok", "Isi database diganti dengan file ini. Semua stok di sistem yang tidak ada di file dinolkan, termasuk yang dipindah, di-putaway, di-pick atau dihitung di sistem tetapi belum tercatat di file."],
                   ["update", "Perbarui saja", "Hanya baris yang ada di file yang diubah. Stok lain di sistem tetap."],
-                ] as const).map(([k, l, d]) => (
+                ] as const).filter(([k]) => kind !== "opname" || k === "replace").map(([k, l, d]) => (
                   <label key={k} className={cn("flex cursor-pointer gap-2 rounded-lg border bg-white p-3 text-sm", mode === k ? "border-ckb ring-2 ring-ckb" : "border-steel-300")}>
                     <input type="radio" name="mode" value={k} checked={mode === k} onChange={() => setMode(k)} className="mt-0.5" />
                     <span><b>{l}</b><br /><span className="text-steel-500">{d}</span></span>
@@ -210,7 +259,7 @@ export function ImportClient() {
                 <Button variant="outline" onClick={() => setStep("map")}>Ubah pemetaan</Button>
                 {mode === "replace" ? (
                   <ConfirmButton variant="danger" disabled={busy || importCount === 0} title="Ganti seluruh stok?"
-                    summary={`Stok di database akan disamakan dengan ${fileName}: ${fmtNum(importCount)} baris diimpor, dan stok lain yang tidak ada di file dinolkan (yang terakhir dipindah atau dihitung di sistem ditahan untuk dicek)${keptBins > 0 ? ` (kecuali ${fmtNum(keptBins)} bin dengan baris error)` : ""}.`}
+                    summary={`Stok di database akan disamakan dengan ${fileName}: ${fmtNum(importCount)} baris diimpor, dan semua stok lain yang tidak ada di file dinolkan, termasuk hasil pindah, putaway, pick dan hitung di sistem yang belum tercatat di file${keptBins > 0 ? ` (kecuali ${fmtNum(keptBins)} bin dengan baris error)` : ""}.`}
                     confirmLabel="Ganti stok" onConfirm={commit}>
                     <Upload className="h-4 w-4" />{busy ? "Mengimpor…" : `Ganti stok dengan ${fmtNum(importCount)} baris`}
                   </ConfirmButton>
@@ -241,13 +290,28 @@ export function ImportClient() {
               </ul>
             </div>
           )}
+          {siteWarnings.length > 0 && (
+            <div className="rounded-md border border-warn/40 bg-warn/5 p-3">
+              <p className="text-sm font-semibold">{fmtNum(siteWarnings.length)} baris melanggar aturan Block C</p>
+              <p className="mb-2 text-xs text-steel-500">Stok ini tetap dicatat karena barangnya memang ada di sana. SKU Block C tidak boleh berada di Oso 5, dan slot Block C hanya untuk SKU-nya.</p>
+              <ul className="space-y-1 text-sm">
+                {siteWarnings.map((k, i) => (
+                  <li key={`${k.bin_code}-${k.sku}-${i}`} className="flex flex-wrap gap-x-3">
+                    <span className="font-mono font-semibold">{k.bin_code}</span><span>{k.sku}</span>
+                    <span className="tabular">{fmtNum(Number(k.quantity ?? 0))} karton</span>
+                    <span className="text-steel-500">{SITE_REASON[k.reason]}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {mode === "replace" && (
             <StaleWavesNotice before={new Date().toLocaleDateString("sv-SE")}
               intro="Stok sekarang sama dengan file WMS, yang sudah memuat barang yang diambil. Tugas terbuka wave lama ini tetap menahan stok dan Bin To Bin-nya dihitung sebagai stok masuk, jadi rencana hari ini akan salah sampai wave ini diselesaikan atau dibatalkan." />
           )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={downloadReport}>Unduh laporan masalah</Button>
-            <Button onClick={() => { setStep("upload"); setRows([]); setResult(null); setSkipped([]); }}>Import file lain</Button>
+            <Button onClick={() => { setStep("upload"); setRows([]); setResult(null); setSkipped([]); setSiteWarnings([]); }}>Import file lain</Button>
           </div>
         </CardContent></Card>
       )}

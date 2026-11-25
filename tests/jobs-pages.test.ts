@@ -19,10 +19,10 @@ const EXPECTED: Record<Job, string[]> = {
   admin_inbound: ['/dashboard', '/scan', '/receiving', '/putaway', '/inventory', '/staging', '/movements', '/audit/putaway', '/labels', '/labels/pallet', '/admin/items', '/racks'],
   admin_outbound: ['/dashboard', '/scan', '/waves', '/allocate', '/inventory', '/abc', '/audit/picking', '/racks'],
   checker: ['/scan', '/receiving', '/waves', '/inventory', '/audit/picking', '/audit/putaway'],
-  inventory: ['/dashboard', '/scan', '/assign', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/data-quality', '/trace', '/admin/items', '/admin/barcode', '/racks'],
+  inventory: ['/dashboard', '/scan', '/assign', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/stockopname', '/data-quality', '/trace', '/admin/items', '/admin/barcode', '/racks'],
   operator: ['/scan', '/waves', '/inventory', '/warehouse'],
-  leader: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/racks'],
-  admin: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/admin/import', '/admin/settings', '/admin/users', '/racks'],
+  leader: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/stockopname', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/racks'],
+  admin: ['/dashboard', '/scan', '/receiving', '/waves', '/assign', '/allocate', '/putaway', '/pickfaces', '/inventory', '/staging', '/warehouse', '/adjust', '/movements', '/ledger', '/abc', '/counts', '/stockopname', '/audit/picking', '/audit/putaway', '/data-quality', '/trace', '/labels', '/labels/pallet', '/admin/items', '/admin/barcode', '/admin/import', '/admin/settings', '/admin/users', '/racks'],
 };
 
 for (const j of JOBS) {

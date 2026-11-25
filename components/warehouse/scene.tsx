@@ -4,11 +4,14 @@ import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { CameraControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 import type { BinSummary, ColorMode, Layout } from "@/lib/warehouse-types";
+import { isBlockCBin, slotBox, slotCentre } from "@/lib/block-c-view";
 import { binColor } from "./colors";
 
 type Props = {
   bins: BinSummary[]; layout: Layout; mode: ColorMode;
   highlighted: Set<string>; focusKey: number; onSelect: (b: BinSummary) => void;
+  /** Fly the camera to a building: `n` changes on every press so the same view can be asked for again. */
+  view?: { building: "oso5" | "blockc"; n: number };
 };
 
 const dummy = new THREE.Object3D();
@@ -74,6 +77,80 @@ function Bins({ bins, layout, mode, onSelect, ghost = false }: Pick<Props, "bins
       {ghost ? <meshStandardMaterial roughness={0.8} transparent opacity={0.22} depthWrite={false} /> : <meshStandardMaterial roughness={0.8} />}
     </instancedMesh>
   );
+}
+
+/**
+ * Block C floor slots (0148): one instanced mesh of unit boxes, each scaled to its own stack (a flat plate when empty,
+ * one pallet height per stacked pallet). A slot is not a rack pallet box, so it does not share the rack mesh.
+ */
+function BlockCSlots({ bins, layout, mode, onSelect, ghost = false }: Pick<Props, "bins" | "layout" | "mode"> & { onSelect?: Props["onSelect"]; ghost?: boolean }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const invalidate = useThree((st) => st.invalidate);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    bins.forEach((b, i) => {
+      const { w, h, d } = slotBox(b, layout);
+      dummy.position.set(...slotCentre(b, layout));
+      dummy.scale.set(w, h, d);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    dummy.scale.set(1, 1, 1);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    invalidate();
+  }, [bins, layout, invalidate]);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    bins.forEach((b, i) => { tmpColor.set(ghost ? "#A9D6E5" : binColor(b, mode)); mesh.setColorAt(i, tmpColor); });
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    invalidate();
+  }, [bins, mode, ghost, invalidate]);
+  if (bins.length === 0) return null;
+  return (
+    <instancedMesh
+      ref={ref} args={[undefined, undefined, bins.length]}
+      raycast={ghost ? () => null : undefined}
+      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (onSelect && e.instanceId !== undefined) onSelect(bins[e.instanceId]); }}
+      onPointerOver={() => { if (!ghost) document.body.style.cursor = "pointer"; }}
+      onPointerOut={() => (document.body.style.cursor = "")}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      {ghost ? <meshStandardMaterial roughness={0.8} transparent opacity={0.22} depthWrite={false} /> : <meshStandardMaterial roughness={0.8} />}
+    </instancedMesh>
+  );
+}
+
+/** Cages around highlighted Block C slots, sized to each slot's own stack. */
+function BlockCHighlights({ bins, layout }: { bins: BinSummary[]; layout: Layout }) {
+  return (
+    <>
+      {bins.map((b) => {
+        const { w, h, d } = slotBox(b, layout);
+        return (
+          <mesh key={b.id} position={slotCentre(b, layout)} raycast={() => null}>
+            <boxGeometry args={[w * 1.15, h * 1.15 + 0.1, d * 1.15]} />
+            <meshBasicMaterial color="#D7263D" wireframe />
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
+
+/** Flies the camera to one building (Oso 5 racks or Block C) whenever `trigger` changes. */
+function FlyTo({ controls, points, trigger }: { controls: React.RefObject<CameraControls | null>; points: THREE.Vector3[]; trigger: number }) {
+  useEffect(() => {
+    const c = controls.current;
+    if (!c || trigger === 0 || points.length === 0) return;
+    const box = new THREE.Box3().setFromPoints(points);
+    const target = box.getCenter(new THREE.Vector3());
+    const span = Math.max(box.getSize(new THREE.Vector3()).length(), 10);
+    c.setLookAt(target.x - span * 0.35, span * 0.75 + 4, target.z + span * 0.9 + 8, target.x, 0, target.z, true);
+  }, [trigger]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
 }
 
 /** Wireframe cages around searched/selected bins (a second, small instanced mesh). */
@@ -175,18 +252,32 @@ function Focus({ controls, bins, layout, focusKey }: { controls: React.RefObject
   return null;
 }
 
-export default function WarehouseScene({ bins, layout, mode, highlighted, focusKey, onSelect }: Props) {
+export default function WarehouseScene({ bins, layout, mode, highlighted, focusKey, onSelect, view }: Props) {
   const controls = useRef<CameraControls>(null);
   // 0132: a bin that does not exist (a pillar) is not drawn; a planned one is a ghost; a blocked one gets a cage.
   const all = useMemo(() => bins.filter((b) => b.pos_x !== null && b.pos_y !== null && b.pos_z !== null && b.block_kind !== "NOT_PRESENT"), [bins]);
-  const placed = useMemo(() => all.filter((b) => b.block_kind !== "PLANNED"), [all]);
-  const planned = useMemo(() => all.filter((b) => b.block_kind === "PLANNED"), [all]);
+  // 0148: Block C is another building. Its slots (no rack, code FA-01) are drawn by their own mesh and stand on their own
+  // floor, far from Oso 5, so the racks' ground, camera and extent are computed from the Oso 5 bins alone.
+  const oso = useMemo(() => all.filter((b) => !isBlockCBin(b)), [all]);
+  const blockAll = useMemo(() => all.filter(isBlockCBin), [all]);
+  const placed = useMemo(() => oso.filter((b) => b.block_kind !== "PLANNED"), [oso]);
+  const planned = useMemo(() => oso.filter((b) => b.block_kind === "PLANNED"), [oso]);
+  const blockPlaced = useMemo(() => blockAll.filter((b) => b.block_kind !== "PLANNED"), [blockAll]);
+  const blockPlanned = useMemo(() => blockAll.filter((b) => b.block_kind === "PLANNED"), [blockAll]);
   const blocked = useMemo(() => placed.filter((b) => b.status === "blocked"), [placed]);
   const hi = useMemo(() => placed.filter((b) => highlighted.has(b.id)), [placed, highlighted]);
-  const extent = useMemo(() => {
-    const xs = all.map((b) => Number(b.pos_x)), zs = all.map((b) => Number(b.pos_z));
-    return { cx: (Math.min(...xs) + Math.max(...xs)) / 2, cz: (Math.min(...zs) + Math.max(...zs)) / 2, w: Math.max(...xs) - Math.min(...xs) + 20, d: Math.max(...zs) - Math.min(...zs) + 20 };
-  }, [all]);
+  const blockHi = useMemo(() => blockPlaced.filter((b) => highlighted.has(b.id)), [blockPlaced, highlighted]);
+  const extentOf = (list: BinSummary[], pad: number) => {
+    if (!list.length) return { cx: 0, cz: 0, w: 20, d: 20 };
+    const xs = list.map((b) => Number(b.pos_x)), zs = list.map((b) => Number(b.pos_z));
+    return { cx: (Math.min(...xs) + Math.max(...xs)) / 2, cz: (Math.min(...zs) + Math.max(...zs)) / 2, w: Math.max(...xs) - Math.min(...xs) + pad, d: Math.max(...zs) - Math.min(...zs) + pad };
+  };
+  const extent = useMemo(() => extentOf(oso, 20), [oso]);
+  const blockExtent = useMemo(() => extentOf(blockAll, 8), [blockAll]);
+  const flyPoints = useMemo(() => {
+    const src = view?.building === "blockc" ? blockAll : oso;
+    return src.map((b) => new THREE.Vector3(Number(b.pos_x), 0, Number(b.pos_z)));
+  }, [view?.building, blockAll, oso]);
 
   return (
     <Canvas frameloop="demand" camera={{ position: [extent.cx - 30, 45, extent.cz + 55], fov: 45, near: 0.1, far: 2000 }} dpr={[1, 2]}>
@@ -202,9 +293,26 @@ export default function WarehouseScene({ bins, layout, mode, highlighted, focusK
       {planned.length > 0 && <Bins bins={planned} layout={layout} mode={mode} ghost />}
       <Highlights bins={blocked} layout={layout} color="#C0392B" scale={1.08} />
       <Highlights bins={hi} layout={layout} />
+      {/* Block C: its own floor, label, stacks and cages (a slot with a SKU shows as tall as its pallets). */}
+      {blockAll.length > 0 && (
+        <>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[blockExtent.cx, 0.005, blockExtent.cz]}>
+            <planeGeometry args={[blockExtent.w, blockExtent.d]} />
+            <meshStandardMaterial color="#D3DCE3" />
+          </mesh>
+          <Text position={[blockExtent.cx, 0.03, blockExtent.cz - blockExtent.d / 2 - 1.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={1.4} color="#1F2A33" anchorX="center" anchorY="middle">
+            BLOCK C
+          </Text>
+          <BlockCSlots bins={blockPlaced} layout={layout} mode={mode} onSelect={onSelect} />
+          {blockPlanned.length > 0 && <BlockCSlots bins={blockPlanned} layout={layout} mode={mode} ghost />}
+          <BlockCHighlights bins={blockHi} layout={layout} />
+        </>
+      )}
       <ZoneLabels bins={all} />
       <CameraControls ref={controls} makeDefault maxPolarAngle={Math.PI / 2.05} minDistance={3} maxDistance={400} />
       <Focus controls={controls} bins={hi} layout={layout} focusKey={focusKey} />
+      <Focus controls={controls} bins={blockHi} layout={layout} focusKey={focusKey} />
+      <FlyTo controls={controls} points={flyPoints} trigger={view?.n ?? 0} />
     </Canvas>
   );
 }

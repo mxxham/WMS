@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ISSUES, type Issue, type IssueKind } from "@/lib/data-quality";
+import { ISSUES, centuryFix, type Issue, type IssueKind } from "@/lib/data-quality";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -350,7 +350,12 @@ function BulkFix({ kind, list, counting, person }: { kind: IssueKind; list: Issu
         </div>
       )}
 
-      {/* Option 2: Terapkan sama ke semua */}
+      {/* Option 2: Koreksi 19xx -> +100 tahun */}
+      {expiredAllRows.length > 0 && (
+        <BulkCenturyFix kind={kind} list={expiredAllRows} person={person} />
+      )}
+
+      {/* Option 3: Terapkan sama ke semua */}
       {expiredAllRows.length > 0 && (
         <BulkExpirySame kind={kind} list={expiredAllRows} counting={counting} person={person} />
       )}
@@ -483,7 +488,7 @@ function BulkDialog({
         {finished && (
           <div className="mt-4 space-y-2">
             <div className="text-center text-lg font-cond">
-              Selesai: <span className="text-good">{results.ok} berhasil</span>{results.fail > 0 ? `, <span className="text-bad">{results.fail} gagal</span>` : ""}
+              Selesai: <span className="text-good">{results.ok} berhasil</span>{results.fail > 0 && <>, <span className="text-bad">{results.fail} gagal</span></>}
             </div>
             {results.fail > 0 && (
               <div className="max-h-40 overflow-auto text-xs text-bad border-t pt-2">
@@ -508,5 +513,65 @@ function BulkDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// "Koreksi tahun 19xx → +100 tahun": Excel reads a two-digit year such as "2-Nov-30" as 1930.
+// Each row keeps its own month and day; only the year moves forward 100 years.
+function BulkCenturyFix({ kind, list, person }: { kind: IssueKind; list: Issue[]; person: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0, running: false });
+  const [results, setResults] = useState<{ ok: number; fail: number; errors: string[] } | null>(null);
+
+  const rows = list.filter((i) => centuryFix(i.row.expiry_date));
+  const canRun = person.trim().length >= 2;
+  if (rows.length === 0) return null;
+
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!canRun}
+        title={!canRun ? "Isi nama petugas di atas" : "Tahun 19xx dimajukan 100 tahun, mis. 1930 → 2030"}
+        onClick={() => { setProgress({ done: 0, total: rows.length, running: false }); setResults(null); setOpen(true); }}
+      >
+        Koreksi 19xx → +100 tahun ({rows.length} baris)
+      </Button>
+      <BulkDialog
+        open={open} onClose={setOpen}
+        title={ISSUES[kind].title} count={rows.length}
+        summary={`${rows.length} dari ${list.length} baris bertahun 19xx dimajukan 100 tahun (mis. 1930 → 2030)`}
+        detail="Bulan dan tanggal tiap baris tetap, hanya tahun yang ditambah 100. Excel membaca tahun 2 digit (2-Nov-30) sebagai 1930."
+        warning="Koreksi tidak diposting untuk baris yang dipakai wave terbuka atau sudah berubah; daftar gagal ditampilkan setelahnya."
+        progress={progress} results={results}
+        canRun={canRun}
+        onConfirm={async () => {
+          setProgress((p) => ({ ...p, running: true }));
+          const errors: string[] = [];
+          let ok = 0;
+          for (let idx = 0; idx < rows.length; idx++) {
+            const r = rows[idx].row;
+            const target = centuryFix(r.expiry_date);
+            try {
+              const { error } = await createClient().rpc("correct_stock_identity", {
+                p_bin_code: r.bin_code, p_sku: r.sku, p_batch: r.batch_lot, p_expiry: r.expiry_date,
+                p_new_batch: null, p_new_expiry: target,
+                p_reason: "Tahun 19xx terbaca salah oleh Excel (2 digit); seharusnya +100 tahun", p_by_name: person,
+              });
+              if (error) errors.push(`${r.bin_code}/${r.sku}/${r.batch_lot}: ${error.message}`);
+              else ok++;
+            } catch (e) {
+              errors.push(`${r.bin_code}/${r.sku}/${r.batch_lot}: ${(e as Error).message}`);
+            }
+            setProgress((p) => ({ ...p, done: idx + 1 }));
+          }
+          setResults({ ok, fail: errors.length, errors });
+          setProgress((p) => ({ ...p, running: false }));
+          router.refresh();
+        }}
+      />
+    </div>
   );
 }

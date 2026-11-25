@@ -586,6 +586,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <span className="inline-flex items-center gap-1"><span aria-hidden className="h-0 w-5 border-t border-dashed border-steel-400" /> rata-rata {fmtNum(avgOut, 1)} L/hari</span>
               </div>
               <div className="relative mt-2 flex h-40 items-end gap-[3px] lg:h-44">
+                {flowSeries.every((v) => v.outL === 0 && v.inL === 0 && v.outB === 0 && v.inB === 0) && (
+                  <p className="pointer-events-none absolute inset-x-0 top-1/4 z-10 text-center text-sm text-steel-500">
+                    Belum ada pergerakan stok dalam {VOL_DAYS} hari terakhir.
+                  </p>
+                )}
                 {flowSeries.map((v) => {
                   const inner = (
                     <>
@@ -617,7 +622,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </div>
             </div>
           </div>
-          <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+          <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
             Liter = karton terposting × volume per karton menurut MASTER DATA (items.volume_l). Masuk = penerimaan + putaway;
             keluar = picking. Hari tanpa movement tampil sebagai garis tipis; SKU tanpa volume tidak dihitung.
           </p>
@@ -724,7 +729,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </div>
             </div>
           )}
-          <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+          <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
             Panjang batang membandingkan jumlah di dalam panel ini, bukan target. Klik satu baris untuk membuka daftar kerjanya.
           </p>
         </section>
@@ -820,7 +825,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   </div>
                 ))}
               </dl>
-              <p className="text-[11px] text-steel-500">
+              <p className="text-xs text-steel-500">
                 {fmtNum(rackTotal)} posisi rak Shell yang bisa dipakai di grid; bin lantai/staging, rak dipinjam CKB 3PL
                 {ckbBins > 0 ? ` (${fmtNum(ckbBins)})` : ""}, bin diblokir, tidak ada, dan rencana tidak dihitung.
                 Sehat 80–85% terisi — di atas 85% gudang sesak, putaway dan picking melambat.
@@ -920,7 +925,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 ))}
               </dl>
 
-              <p className="text-[11px] text-steel-500">
+              <p className="text-xs text-steel-500">
                 {expiredQty > 0
                   ? <>{fmtNum(expiredQty)} karton sudah lewat tanggal dan harus dipisahkan. </>
                   : <>Tidak ada karton yang sudah lewat tanggal. </>}
@@ -967,7 +972,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 note={lastRecon ? `${fmtDate(lastRecon.as_of)} · ${fmtNum(lastRecon.open_diffs)} selisih belum dijelaskan` : "Belum ada rekonsiliasi"}
                 tone={lastRecon?.accuracy_pct == null ? undefined : Number(lastRecon.accuracy_pct) >= 99 ? "ok" : "warn"} href="/inventory?tab=rekonsiliasi" />
             </div>
-            <p className="mt-auto border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+            <p className="mt-auto border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
               Garis kecil di batang adalah target; isian adalah capaian {ACCURACY_DAYS} hari. Klik baris untuk membuka auditnya.
             </p>
           </section>
@@ -1006,7 +1011,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   </li>
                 ))}
               </ul>
-              <p className="text-[11px] text-steel-500">
+              <p className="text-xs text-steel-500">
                 Kelas A paling sering dipicking, jadi paletnya di dekat jalur. Hitung ulang kelas di Pengaturan setelah data mutasi cukup.
               </p>
             </div>
@@ -1104,7 +1109,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </Table>
               </div>
               {riskyCount > RISKY_ROWS && (
-                <p className="border-t border-steel-100 px-4 py-2 text-[11px] text-steel-500">
+                <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
                   Menampilkan {RISKY_ROWS} dari {fmtNum(riskyCount)} posisi.{" "}
                   <Link className="underline" href="/inventory?tab=fefo">Buka daftar lengkap di Inventory</Link>.
                 </p>

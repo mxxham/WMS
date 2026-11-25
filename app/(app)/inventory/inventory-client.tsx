@@ -2,7 +2,7 @@
 import { unpackLines, type PackedLines } from "@/lib/inventory-pack";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Download, Edit2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Edit2, Plus } from "lucide-react";
 import { AdjustLineButton } from "@/components/app/adjust-line";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { OtherPersonField, PersonNameField, usePersonName } from "@/components/app/person-name";
 import { MANUAL_REASONS, REASON_CODES, type ReasonCode } from "@/lib/inventory-control";
 import { expiryStatus } from "@/config/warehouse";
-import { LOC_LABEL, SHELF_BUCKETS, locType, shelfBucket, stockKey, type LocType, type ShelfBucket } from "@/lib/inventory-view";
+import { INVENTORY_SORTS, lineSortCompare, LOC_LABEL, skuSortCompare, SHELF_BUCKETS, locType, shelfBucket, stockKey, type InventorySort, type LocType, type ShelfBucket } from "@/lib/inventory-view";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -38,13 +38,13 @@ type Line = InvLine & { loc: LocType; bucket: ShelfBucket; reserved: number; inc
 type SkuRow = {
   sku: string; description: string; uom: string | null; upp: number | null; abc: string | null;
   total: number; byLoc: Record<LocType, number>; reserved: number; held: number; available: number; pallets: number;
-  bins: number; batches: number; earliest: string | null; earliestDays: number | null; lines: Line[];
+  bins: number; batches: number; earliest: string | null; earliestDays: number | null; firstBin: string; lines: Line[];
 };
 type View = "sku" | "line";
-type Sort = "sku" | "qty" | "expiry" | "reserved";
+type Sort = InventorySort;
 const PAGE = 300;
 
-const SORTS: Sort[] = ["sku", "qty", "expiry", "reserved"];
+const SORTS: Sort[] = INVENTORY_SORTS;
 
 const LEVELS = ["A", "B", "C", "D", "E"];
 
@@ -135,12 +135,13 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
     for (const l of filtered) {
       const r = m.get(l.sku) ?? {
         sku: l.sku, description: l.description, uom: l.uom, upp: l.upp, abc: l.item_abc, total: 0,
-        byLoc: { rack: 0, staging: 0, quarantine: 0, other: 0 }, reserved: 0, held: 0, available: 0, pallets: 0,
-        bins: 0, batches: 0, earliest: null, earliestDays: null, lines: [],
+        byLoc: { rack: 0, staging: 0, quarantine: 0, mia: 0, other: 0 }, reserved: 0, held: 0, available: 0, pallets: 0,
+        bins: 0, batches: 0, earliest: null, earliestDays: null, firstBin: l.bin_code, lines: [],
       };
       const qty = Number(l.quantity);
       r.total += qty; r.byLoc[l.loc] += qty; r.reserved += l.reserved; r.held += l.held; r.available += l.available;
       r.pallets += l.upp ? qty / Number(l.upp) : 0; r.lines.push(l);
+      if (l.bin_code < r.firstBin) r.firstBin = l.bin_code;
       if (l.expiry_date && (!r.earliest || l.expiry_date < r.earliest)) { r.earliest = l.expiry_date; r.earliestDays = l.days_remaining; }
       m.set(l.sku, r);
     }
@@ -152,19 +153,11 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
       const full = (l: InvLine) => (l.upp && Number(l.quantity) >= Number(l.upp) ? 1 : 0);
       r.lines.sort((a, b) => full(a) - full(b) || (a.expiry_date ?? "9999").localeCompare(b.expiry_date ?? "9999") || a.bin_code.localeCompare(b.bin_code));
     }
-    return rows.sort((a, b) =>
-      sort === "qty" ? b.total - a.total
-      : sort === "expiry" ? (a.earliest ?? "9999").localeCompare(b.earliest ?? "9999")
-      : sort === "reserved" ? b.reserved - a.reserved
-      : a.sku.localeCompare(b.sku));
+    return rows.sort(skuSortCompare(sort));
   }, [filtered, sort]);
 
   // Stock first in the chosen order, then the empty bins (quantity 0) by bin code.
-  const lineRows = useMemo(() => [...[...filtered].sort((a, b) =>
-    sort === "qty" ? Number(b.quantity) - Number(a.quantity)
-    : sort === "expiry" ? (a.expiry_date ?? "9999").localeCompare(b.expiry_date ?? "9999")
-    : sort === "reserved" ? b.reserved - a.reserved
-    : a.sku.localeCompare(b.sku) || a.bin_code.localeCompare(b.bin_code)), ...emptyRows], [filtered, sort, emptyRows]);
+  const lineRows = useMemo(() => [...[...filtered].sort(lineSortCompare(sort)), ...emptyRows], [filtered, sort, emptyRows]);
   // "Per SKU" has no row for a bin without a SKU: a search that finds empty bins lists them under the table.
   const searchedEmpty = q.trim() ? emptyRows : [];
 
@@ -215,7 +208,7 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
           <Input id="q" value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} placeholder="SKU, deskripsi, batch, atau bin" /></div>
         <div><Label htmlFor="loc">Lokasi</Label>
           <Select id="loc" value={loc} onChange={(e) => setLoc(e.target.value as LocType | "all")}>
-            <option value="all">Semua</option>{(Object.keys(LOC_LABEL) as LocType[]).map((k) => <option key={k} value={k}>{LOC_LABEL[k]}</option>)}
+            <option value="all">Semua</option>{(Object.keys(LOC_LABEL) as LocType[]).filter((k) => k !== "mia").map((k) => <option key={k} value={k}>{LOC_LABEL[k]}</option>)}
           </Select></div>
         <div><Label htmlFor="aisle">Aisle</Label>
           <Select id="aisle" value={aisle} onChange={(e) => setAisle(e.target.value)}>
@@ -236,7 +229,7 @@ export function InventoryClient({ packed, tasks, initialQuery, initialAbc, initi
           </Select></div>
         <div><Label htmlFor="sort">Urutkan</Label>
           <Select id="sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-            <option value="sku">SKU</option><option value="qty">Stok terbanyak</option><option value="expiry">Expired terdekat</option><option value="reserved">Dipesan terbanyak</option>
+            <option value="sku">SKU</option><option value="qty">Stok terbanyak</option><option value="expiry">Expired terdekat</option><option value="reserved">Dipesan terbanyak</option><option value="bin">Bin</option>
           </Select></div>
         <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={onlyReserved} onChange={(e) => setOnlyReserved(e.target.checked)} />Hanya yang dipesan</label>
         <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={onlyHeld} onChange={(e) => setOnlyHeld(e.target.checked)} />Hanya yang ditahan</label>
@@ -495,6 +488,112 @@ function CorrectIdentityButton({ line }: { line: Line }) {
   );
 }
 
+/** Add stock to an empty bin from its row (0142): SKU, batch, expired, quantity, a reason
+ *  and a name, posted as one positive adjustment through create_stock_in_bin — apply_movement
+ *  creates the stock line. Same gating as Adjust: supervisor / admin (canAdjust), posted at
+ *  once without a second person (the same decision as 0140 for this tab). */
+function AddStockButton({ line }: { line: Line }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"form" | "confirm">("form");
+  const [person, setPerson] = usePersonName();
+  const [sku, setSku] = useState("");
+  const [batch, setBatch] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [qty, setQty] = useState("");
+  const [reason, setReason] = useState<ReasonCode | "">("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState("");
+
+  const n = Number(qty);
+  const ready = sku.trim().length > 0 && Number.isInteger(n) && n > 0 && !!expiry && !!reason && person.trim().length >= 2;
+
+  function review(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!ready || !reason) return;
+    setSummary(`${line.bin_code} (kosong) → ${sku.trim().toUpperCase()} batch ${batch.trim().toUpperCase() || "–"} exp ${fmtDate(expiry)} · ${fmtNum(n)} karton · ${REASON_CODES[reason]}`);
+    setStep("confirm");
+  }
+
+  async function commit() {
+    if (!reason) return;
+    setBusy(true); setError(null);
+    try {
+      const { error } = await createClient().rpc("create_stock_in_bin", {
+        p_bin_code: line.bin_code, p_sku: sku.trim().toUpperCase(), p_batch: batch.trim().toUpperCase(),
+        p_expiry: expiry, p_qty: n, p_reason_code: reason, p_note: REASON_CODES[reason], p_by_name: person,
+      });
+      if (error) { setError(error.message); setStep("form"); }
+      else { router.refresh(); setOpen(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Terjadi kesalahan");
+      setStep("form");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setStep("form"); setError(null); setSku(""); setBatch(""); setExpiry(""); setQty(""); setReason(""); } }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-7 px-2" title={`Tambah stok ${line.bin_code}`}>
+          <Plus className="h-4 w-4" /><span className="sr-only">Tambah stok</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent title={`Tambah stok ${line.bin_code}`} description="Bin kosong: isi SKU, batch, expired dan jumlah barang yang ada di bin sekarang.">
+        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+          {step === "confirm" ? (
+            <div className="space-y-4">
+              <p className="rounded-md bg-plate/30 p-3 text-base">{summary}</p>
+              {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" size="lg" onClick={() => { setError(null); setStep("form"); }}>Ubah</Button>
+                <Button size="lg" onClick={commit} disabled={busy}>{busy ? "Menyimpan…" : "Konfirmasi"}</Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={review} className="space-y-4">
+              <div className="rounded-md bg-steel-100 p-3 text-sm">
+                <p>Bin <b>{line.bin_code}</b> · {LOC_LABEL[line.loc]} · status kosong</p>
+                <p>Tercatat sebagai adjustment (riwayat mutasi dan Buku stok), bukan penerimaan dokumen.</p>
+              </div>
+              <div>
+                <Label htmlFor="as-sku">SKU</Label>
+                <Input id="as-sku" inputMode="numeric" value={sku} onChange={(e) => setSku(e.target.value)} required />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="as-batch">Batch</Label>
+                  <Input id="as-batch" value={batch} onChange={(e) => setBatch(e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="as-exp">Expired</Label>
+                  <Input id="as-exp" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} required />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="as-qty">Jumlah (karton)</Label>
+                <Input id="as-qty" type="number" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} required />
+              </div>
+              <div>
+                <Label htmlFor="as-reason">Kode alasan</Label>
+                <Select id="as-reason" value={reason} onChange={(e) => setReason(e.target.value as ReasonCode)} required>
+                  <option value="">Pilih…</option>
+                  {MANUAL_REASONS.map((c) => <option key={c} value={c}>{REASON_CODES[c]}</option>)}
+                </Select>
+              </div>
+              <PersonNameField id="as-person" value={person} onChange={setPerson} label="Nama Anda" />
+              {error && <p role="alert" className="rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>}
+              <Button type="submit" size="lg" className="w-full" disabled={!ready}>Lanjut ke konfirmasi</Button>
+            </form>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boolean; canAdjust?: boolean }) {
   return (
     <Table>
@@ -516,7 +615,7 @@ function LineTable({ lines, compact, canAdjust }: { lines: Line[]; compact?: boo
           <Td className="text-right font-semibold tabular">{fmtNum(l.available)}</Td>
           <Td className="text-xs">{l.waves.join(", ") || "–"}</Td>
           <Td className="whitespace-nowrap text-xs">{fmtDate(l.received_date)}</Td>
-          {canAdjust && <Td className="flex items-center gap-1">{!l.empty && <><AdjustLineButton line={l} direct /><CorrectIdentityButton line={l} /></>}</Td>}
+          {canAdjust && <Td className="flex items-center gap-1">{l.empty ? <AddStockButton line={l} /> : <><AdjustLineButton line={l} direct /><CorrectIdentityButton line={l} /></>}</Td>}
         </tr>
       ))}</tbody>
     </Table>

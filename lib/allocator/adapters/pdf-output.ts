@@ -95,7 +95,7 @@ function drawPicklistHeader(doc: jsPDF, pl: Picklist, geo: PageGeometry): void {
 
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text(`PICKLIST ${pl.picklistId}`, geo.marginLeft, y + 4);
+  doc.text(`PICKLIST ${pl.picklistId}${pl.site === 'BLOCKC' ? '  -  BLOCK C' : ''}`, geo.marginLeft, y + 4);
   y += 9;
 
   doc.setFontSize(10);

@@ -105,6 +105,7 @@ calls, reading the same table. Sub-routes follow their parent (`/audit/picking/.
 | Buku stok (0116, 28 Oct 2026) | | | | ✓ | | ✓ | ✓ |
 | Kelas ABC (0126, 1 Nov 2026) | | ✓ | | ✓ | | ✓ | ✓ |
 | Cycle count | | | | ✓ | | ✓ | ✓ |
+| Stock Opname Rak (0144, 17 Nov 2026) | | | | ✓ | | ✓ | ✓ |
 | Audit picking | | ✓ | ✓ | | | ✓ | ✓ |
 | Audit putaway | ✓ | | ✓ | | | ✓ | ✓ |
 | Kualitas data | | | | ✓ | | ✓ | ✓ |

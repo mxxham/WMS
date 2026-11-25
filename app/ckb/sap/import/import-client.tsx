@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Table, Th, Td } from "@/components/ui/table";
 import { Notice } from "@/components/ckb/ui";
-import { SAP_FIELD_LABEL, type SapField, type SnapshotRow } from "@/lib/ckb/sap-import";
+import { SAP_FIELD_LABEL, type CountIdentity, type MergePlan, type SapField, type SnapshotRow } from "@/lib/ckb/sap-import";
 import { fmtNum } from "@/lib/utils";
 
 type Preview = {
@@ -15,6 +15,7 @@ type Preview = {
   columns: Partial<Record<SapField, { index: number; header: string }>>; fileErrors: string[]; rowCount: number; totalQty: number;
   duplicateIdentities: number; errorCount: number; errors: { line: number; message: string }[]; sample: SnapshotRow[];
   duplicateOf: { ref_no: string; imported_at: string } | null; mappingVerified: boolean;
+  mappingSource: "CUSTOMER" | "GLOBAL"; countIdentity: CountIdentity; plan: MergePlan;
 };
 
 const today = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
@@ -91,6 +92,15 @@ export function ImportClient({ customers }: { customers: { id: string; name: str
             </p>
             {preview.duplicateOf && <Notice tone="bad">File yang sama persis sudah diimpor untuk customer ini sebagai {preview.duplicateOf.ref_no}. Snapshot tidak dibuat dua kali.</Notice>}
             {preview.fileErrors.map((e) => <Notice key={e} tone="bad">{e}</Notice>)}
+            <p className="text-sm text-steel-500">
+              Pemetaan kolom: <b>{preview.mappingSource === "CUSTOMER" ? "khusus customer ini" : "umum (semua customer)"}</b>
+              {preview.countIdentity === "MATERIAL_BIN" ? " · hitung per material dan bin (kode batch hanya informasi)" : ""}
+            </p>
+            {preview.countIdentity === "MATERIAL_BIN" && preview.plan.merged > 0 && (
+              <Notice tone="info" title={`${fmtNum(preview.plan.lines)} baris menjadi ${fmtNum(preview.plan.tasks)} tugas hitung`}>
+                {fmtNum(preview.plan.merged)} baris digabung ke tugas yang sama karena hanya kode batchnya berbeda ({fmtNum(preview.plan.mergedTasks)} tugas berisi lebih dari satu kode). Qty SAP dijumlahkan per material dan bin.
+              </Notice>
+            )}
             {!preview.mappingVerified && <Notice tone="warn">Pemetaan kolom belum diverifikasi: cocokkan contoh baris di bawah dengan file aslinya sebelum mengimpor.</Notice>}
             {Object.keys(preview.columns).length > 0 && (
               <p className="text-sm text-steel-500">Kolom dibaca: {Object.entries(preview.columns).map(([f, c]) => `${SAP_FIELD_LABEL[f as SapField]} ← "${c!.header}"`).join(" · ")}</p>

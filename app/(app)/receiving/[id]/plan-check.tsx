@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { LEFTOVER_LEVELS, LEVELS, packOf, planPutaway } from "@/lib/inbound/putaway-plan";
+import { mfgDateSku } from "@/lib/form-checker/mfg";
 import type { PutawaySetup } from "@/lib/inbound/load";
 import { cn, fmtNum } from "@/lib/utils";
 import { applyLot, lotFromBatch, lotFromMfg, type Lot } from "@/lib/inbound/lot";
@@ -45,8 +46,8 @@ export function PlanCheck({ receiptId, setup, actuals, shelfLife, defaultShelfLi
   const [error, setError] = useState<string | null>(null);
   const item = (sku: string) => setup.allItems[sku];
   const months = (sku: string) => shelfLife[sku.trim()] ?? defaultShelfLife;
-  /** Only drum / pail / IBC / fluidbag need a production date: the pallet card prints it (0119). Cartons never carry one. */
-  const needsMfg = (sku: string) => { const it = item(sku.trim()); const p = it ? packOf(sku.trim(), it.uom, it.description) : null; return !!p && p !== "Carton"; };
+  /** Only drum / pail / IBC / fluidbag need a production date: the pallet card prints it (0119). Cartons never carry one, except the SKUs listed by request (MFG_DATE_SKUS). */
+  const needsMfg = (sku: string) => { if (mfgDateSku(sku)) return true; const it = item(sku.trim()); const p = it ? packOf(sku.trim(), it.uom, it.description) : null; return !!p && p !== "Carton"; };
   const mfgFor = <T extends Lot>(sku: string, lot: T): T => (needsMfg(sku) ? lot : { ...lot, mfg: "" });
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const setCount = (i: number, p: Partial<Count>) => setCounts((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));
@@ -68,7 +69,9 @@ export function PlanCheck({ receiptId, setup, actuals, shelfLife, defaultShelfLi
       const it = item(c.sku.trim());
       return { line: i + 1, sku: c.sku.trim(), uom: it.uom, description: it.description, quantity: Number(c.good), upp: it.upp };
     });
-    const r = planPutaway({ lines, emptyBins: setup.emptyBins, pickfaces: new Map(Object.entries(setup.pickfaces)), occupied: setup.occupied });
+    const r = planPutaway({ lines, emptyBins: setup.emptyBins, pickfaces: new Map(Object.entries(setup.pickfaces)), occupied: setup.occupied,
+      // planPutaway consumes the room as it places pallets: hand it a copy so a second press starts fresh
+      blockC: Object.fromEntries(Object.entries(setup.blockC).map(([k, v]) => [k, v.map((x) => ({ ...x }))])) });
     const out: Row[] = r.pallets.map((p) => ({ key: `${p.sku}-${p.pallet_no}`, sku: p.sku, quantity: p.quantity, damaged: 0, bin: p.bin ?? "",
       ...lotOf(p.sku), why: p.why, full: p.full }));
     for (const c of counts) if (c.sku.trim() && Number(c.damaged) > 0) {

@@ -1,7 +1,7 @@
 import { parseLocation } from "@/lib/allocator/pickpath";
 
 /**
- * Cek stok rak (0144): the stock of one aisle, bin by bin, for a check done on paper or on screen.
+ * Stock Opname Rak (0144): the stock of one aisle, bin by bin, for a check done on paper or on screen.
  * Pure: the page loads the rows (lib/stockcheck-data.ts), this file orders them, turns what was typed
  * into the changes `apply_rack_check` takes, and finds the mistakes before anything is sent.
  */

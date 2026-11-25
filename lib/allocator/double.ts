@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIG, isBlockCLocation } from './config';
 import type {
   AllocationLine,
   AllocationResult,
@@ -49,6 +50,8 @@ function detectDoublePicks(lines: AllocationLine[]): DoubleEntry[] {
   const byKey = new Map<string, AllocationLine[]>();
   for (const l of lines) {
     if (isLevelA(l.location)) continue;
+    // A Block C slot is a stack of several pallets: picking more than once from it is normal, not a double.
+    if (isBlockCLocation(l.location, DEFAULT_CONFIG)) continue;
     const key = identityKey(l.location, l.sku, l.batch, l.expiryDate);
     const arr = byKey.get(key) ?? [];
     arr.push(l);

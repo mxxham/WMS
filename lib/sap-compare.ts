@@ -29,6 +29,7 @@ export const CAUSES = {
   DAMAGED: "Rusak / blok",
   RETURN: "Retur",
   MISPLACED: "Salah lokasi (Bin To Bin tidak tercatat)",
+  MIA: "MIA (belum ketemu)",
   OTHER: "Lainnya",
 } as const;
 export type CauseCode = keyof typeof CAUSES;
@@ -76,6 +77,21 @@ export const sapTotal = (l: CompareLine) => n(l.sap_unrestricted) + n(l.sap_bloc
 export const wmsTotal = (l: CompareLine) => n(l.wms_unrestricted) + n(l.wms_blocked);
 export const timingTotal = (l: CompareLine) => n(l.pending_gi) + n(l.auto_gi) - n(l.pending_gr);
 export const hasGap = (l: CompareLine) => { const g = openGap(l); return g.u !== 0 || g.b !== 0; };
+
+/**
+ * How far the work on the differences is: of the SKUs that still have a gap, how many carry an explanation
+ * (status EXPLAINED or RESOLVED), how many wait for a recount, how many are untouched.
+ */
+export function handledStats(lines: CompareLine[]): { withGap: number; handled: number; requested: number; untouched: number } {
+  let withGap = 0, handled = 0, requested = 0;
+  for (const l of lines) {
+    if (!hasGap(l)) continue;
+    withGap++;
+    if (l.status === "EXPLAINED" || l.status === "RESOLVED") handled++;
+    else if (l.status === "COUNT_REQUESTED") requested++;
+  }
+  return { withGap, handled, requested, untouched: withGap - handled - requested };
+}
 
 export type Direction = "MATCH" | "MORE" | "LESS" | "MIXED";
 /** MIXED: e.g. more unrestricted but less blocked (stock in the wrong status). */

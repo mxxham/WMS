@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getBinDetail } from "@/lib/bin-data";
@@ -12,6 +13,8 @@ export default async function BinPage({ params, searchParams }: { params: Promis
   const user = await requirePage("/bin");
   const { code } = await params;
   const { scan } = await searchParams;
+  // MIA is not a place on the floor: its stock and moves live on Inventory -> MIA.
+  if (decodeURIComponent(code).toUpperCase() === "MIA") redirect("/inventory?tab=mia");
   const supabase = await createClient();
   const detail = await getBinDetail(supabase, code);
   const shown = decodeURIComponent(code).toUpperCase();

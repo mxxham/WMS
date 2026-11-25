@@ -35,7 +35,7 @@ export const SECTIONS: { title: string | null; links: NavLink[] }[] = [
     { href: "/abc", label: "Kelas ABC", blurb: "Kelas A, B, C dari frekuensi picking bulanan.", icon: BarChart3, jobs: [AO, IV, LD, AD] },
   ] },
   { title: "Kontrol", links: [
-    { href: "/stockcheck", label: "Cek stok rak", blurb: "Cek isi rak per bin, koreksi di tempat, unduh Excel.", icon: ClipboardList, jobs: [IV, LD, AD] },
+    { href: "/stockopname", label: "Stock Opname Rak", blurb: "Cek isi rak per bin, koreksi di tempat, unduh Excel.", icon: ClipboardList, jobs: [IV, LD, AD] },
     { href: "/counts", label: "Cycle count", blurb: "Jadwal dan hasil cycle count per bin.", icon: ListTodo, jobs: [IV, LD, AD] },
     { href: "/audit/picking", label: "Audit picking", blurb: "Cek hasil pick per baris dan per rak.", icon: PackageCheck, jobs: [AO, CK, LD, AD] },
     { href: "/audit/putaway", label: "Audit putaway", blurb: "Cek putaway yang sudah diposting.", icon: ClipboardCheck, jobs: [AI, CK, LD, AD] },
@@ -91,4 +91,17 @@ export function pageAllowed(job: Job, path: string): boolean {
   let best: NavLink | null = null;
   for (const l of LINKS) if (under(path, l.href) && (!best || l.href.length > best.href.length)) best = l;
   return best ? best.jobs.includes(job) : false;
+}
+
+/**
+ * The one link that is "current" for a path: the longest href that is the path or one of its parents
+ * (`/labels/pallet` lights `Kartu palet`, not `Label` too). Matches on a path-segment boundary, so
+ * `/inventory` never claims `/inventory2`. Undefined when nothing matches.
+ */
+export function activeHref(path: string, hrefs: string[]): string | undefined {
+  let best: string | undefined;
+  for (const h of hrefs) {
+    if ((path === h || path.startsWith(`${h}/`)) && (!best || h.length > best.length)) best = h;
+  }
+  return best;
 }

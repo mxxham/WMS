@@ -8,6 +8,7 @@ import { LEGENDS } from "@/components/warehouse/colors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BinDetail } from "@/lib/bin-data";
+import { isBlockCBin } from "@/lib/block-c-view";
 import { offlineFetch } from "@/lib/net";
 import type { Role } from "@/lib/types";
 import type { BinSummary, ColorMode, Layout } from "@/lib/warehouse-types";
@@ -28,6 +29,8 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
   const [focusKey, setFocusKey] = useState(0);
+  // 0148: Block C is another building; the buttons fly the camera between the two.
+  const [view, setView] = useState<{ building: "oso5" | "blockc"; n: number }>({ building: "oso5", n: 0 });
   const [message, setMessage] = useState<string | null>(null);
   const [selected, setSelected] = useState<BinSummary | null>(null);
   const [detail, setDetail] = useState<BinDetail | null>(null);
@@ -96,10 +99,11 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
   }
 
   const unplaced = useMemo(() => (bins ?? []).filter((b) => b.pos_x === null).length, [bins]);
+  const hasBlockC = useMemo(() => (bins ?? []).some((b) => isBlockCBin(b) && b.pos_x !== null), [bins]);
 
   return (
     <main className="relative h-[calc(100dvh-4.5rem)] lg:h-screen">
-      {bins && <Scene bins={bins} layout={layout} mode={mode} highlighted={highlighted} focusKey={focusKey} onSelect={select} />}
+      {bins && <Scene bins={bins} layout={layout} mode={mode} highlighted={highlighted} focusKey={focusKey} onSelect={select} view={view} />}
       {!bins && <p className="p-6 text-sm text-steel-500">Memuat 2.500+ bin…</p>}
 
       {/* Controls overlay */}
@@ -113,6 +117,12 @@ export function WarehouseClient({ layout, role }: { layout: Layout; role: Role }
             <button key={m.id} onClick={() => setMode(m.id)} className={cn("flex-1 rounded px-2 py-1.5", mode === m.id ? "bg-ckb text-white" : "hover:bg-steel-100")}>{m.label}</button>
           ))}
         </div>
+        {hasBlockC && (
+          <div className="flex rounded-md bg-white/95 p-1 text-sm" role="group" aria-label="Pindah gedung">
+            <button onClick={() => setView((v) => ({ building: "oso5", n: v.n + 1 }))} className="flex-1 rounded px-2 py-1.5 hover:bg-steel-100">Oso 5 (rak)</button>
+            <button onClick={() => setView((v) => ({ building: "blockc", n: v.n + 1 }))} className="flex-1 rounded px-2 py-1.5 hover:bg-steel-100">Block C (lantai)</button>
+          </div>
+        )}
         <span className="self-start rounded-md bg-white/95 px-2 py-1"><LiveDot status={live} /></span>
         {message && <p className="rounded-md bg-white/95 px-3 py-2 text-sm">{message}</p>}
         <ul className="rounded-md bg-white/95 p-2 text-xs">

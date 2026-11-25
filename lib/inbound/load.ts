@@ -11,6 +11,8 @@ export type PutawaySetup = {
   items: PlanItem[]; emptyBins: string[]; pickfaces: Record<string, string>; allItems: Record<string, Omit<PlanItem, "expected">>;
   /** Where each SKU already is: bins with stock, and bins other receipts waiting to be posted have chosen. Groups pallets by SKU. */
   occupied: { bin: string; sku: string }[];
+  /** Block C (0147): each Block C SKU's slots, in order, with the pallets of room left. Empty until slots have SKUs. */
+  blockC: Record<string, { bin: string; free: number }[]>;
 };
 
 /**
@@ -19,16 +21,17 @@ export type PutawaySetup = {
  * posted) and every SKU's pickface. The database re-checks each bin on save (record_receipt_check, 0118).
  */
 export async function loadPutawaySetup(supabase: Supabase, receiptId: string): Promise<PutawaySetup> {
-  const [expected, bins, stocked, reserved, pickfaces, items] = await Promise.all([
+  const [expected, bins, stocked, reserved, pickfaces, items, slots] = await Promise.all([
     supabase.from("receipt_expected").select("quantity, items(sku, description, uom, upp)").eq("receipt_id", receiptId).order("line_no"),
     fetchAll<{ bin_code: string; zone: string; status: "active" | "blocked"; owner: "SHELL" | "CKB" | null }>((a, b) =>
       supabase.from("bins").select("bin_code, zone, status, owner").eq("status", "active").order("bin_code").range(a, b) as unknown as Res),
-    fetchAll<{ bin_id: string; bins: { bin_code: string } | null; items: { sku: string } | null }>((a, b) =>
-      supabase.from("inventory").select("bin_id, bins(bin_code), items(sku)").gt("quantity", 0).order("id").range(a, b) as unknown as Res),
+    fetchAll<{ bin_id: string; quantity: number; bins: { bin_code: string } | null; items: { sku: string; upp: number | null } | null }>((a, b) =>
+      supabase.from("inventory").select("bin_id, quantity, bins(bin_code), items(sku, upp)").gt("quantity", 0).order("id").range(a, b) as unknown as Res),
     supabase.from("inbound_reserved_bins").select("bin_code, receipt_id, item_id").neq("receipt_id", receiptId),
     supabase.from("pickfaces").select("items(sku), bins(bin_code)"),
     fetchAll<{ id: string; sku: string; description: string; uom: string | null; upp: number | null }>((a, b) =>
       supabase.from("items").select("id, sku, description, uom, upp").order("sku").range(a, b) as unknown as Res),
+    supabase.from("bins").select("bin_code, assigned_sku, capacity").eq("site", "BLOCKC").eq("status", "active").not("assigned_sku", "is", null).order("bin_code"),
   ]);
   const taken = new Set<string>([
     ...stocked.map((s) => s.bins?.bin_code).filter((c): c is string => !!c),
@@ -50,8 +53,24 @@ export async function loadPutawaySetup(supabase: Supabase, receiptId: string): P
     ...stocked.flatMap((s) => (s.bins && s.items ? [{ bin: s.bins.bin_code, sku: s.items.sku }] : [])),
     ...((reserved.data ?? []) as { bin_code: string; item_id: string }[]).flatMap((r) => (skuOf.has(r.item_id) ? [{ bin: r.bin_code, sku: skuOf.get(r.item_id)! }] : [])),
   ];
+  // Block C: pallets already in a slot = ceil(cartons / UPP); a slot another receipt chose counts one pallet per pick.
+  const palletsIn = new Map<string, number>();
+  const cartons = new Map<string, number>();
+  for (const s of stocked) {
+    const code = s.bins?.bin_code;
+    if (code && s.items?.upp && Number(s.items.upp) > 0) cartons.set(code, (cartons.get(code) ?? 0) + Number(s.quantity) / Number(s.items.upp));
+    else if (code) palletsIn.set(code, (palletsIn.get(code) ?? 0) + 1);
+  }
+  for (const [code, p] of cartons) palletsIn.set(code, (palletsIn.get(code) ?? 0) + Math.ceil(p - 1e-9));
+  for (const r of (reserved.data ?? []) as { bin_code: string }[]) palletsIn.set(r.bin_code, (palletsIn.get(r.bin_code) ?? 0) + 1);
+  const blockC: PutawaySetup["blockC"] = {};
+  for (const b of (slots.data ?? []) as { bin_code: string; assigned_sku: string; capacity: number | null }[]) {
+    (blockC[b.assigned_sku] ??= []).push({ bin: b.bin_code, free: Math.max(0, Number(b.capacity ?? 1) - (palletsIn.get(b.bin_code) ?? 0)) });
+  }
+  // Slots with room first, in code order; full slots last.
+  for (const list of Object.values(blockC)) list.sort((a, b) => (a.free === 0 ? 1 : 0) - (b.free === 0 ? 1 : 0) || a.bin.localeCompare(b.bin));
   return {
-    items: [...merged.values()], emptyBins, pickfaces: pf, occupied,
+    items: [...merged.values()], emptyBins, pickfaces: pf, occupied, blockC,
     allItems: Object.fromEntries(items.map(({ id: _, ...i }) => [i.sku, { ...i, upp: i.upp === null ? null : Number(i.upp) }])),
   };
 }

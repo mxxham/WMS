@@ -66,7 +66,7 @@ export default async function PhotosPage({ searchParams }: { searchParams: Promi
         <FilterBar fields={[
           { name: "customer", label: "Customer", kind: "select", options: (customers ?? []).map((c) => ({ value: c.id, label: c.name })) },
           { name: "type", label: "Data", kind: "select", options: [
-            { value: "STOCKTAKE", label: "Stock take" }, { value: "COUNT_TASK", label: "Tugas hitung" }, { value: "INSPECTION", label: "Inspeksi" },
+            { value: "STOCKTAKE", label: "Stock take" }, { value: "COUNT_TASK", label: "Tugas hitung" }, { value: "STOCKTAKE_BIN", label: "Foto bin" }, { value: "INSPECTION", label: "Inspeksi" },
             ...(isStaff(user.ckbRole) ? [{ value: "REBAGGING", label: "Rebagging" }] : [])] },
           { name: "from", label: "Dari", kind: "date" }, { name: "to", label: "Sampai", kind: "date" },
         ]} />

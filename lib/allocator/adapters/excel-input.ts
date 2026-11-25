@@ -1,8 +1,8 @@
 import { assignWaves } from '../wave-numbers';
 import ExcelJS from 'exceljs';
-import { isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
+import { isBlockCLocation, isStagingLocation, NO_EXPIRY, type AllocatorConfig } from '../config';
 import { stagingBin } from '../staging';
-import { parseLocation } from '../pickpath';
+import { parseBlockCSlot, parseLocation } from '../pickpath';
 import type { DemandLine, StockBin, Warning } from '../types';
 import { addOrder } from '../orders';
 import { lookupUom } from '../uom-master';
@@ -82,8 +82,10 @@ export async function loadWorkbook(path: string, config: AllocatorConfig): Promi
     }
     if (config.excludedLocations.some((x) => location === x.toUpperCase())) continue;
 
-    const parsed = parseLocation(location);
-    if (!parsed || !config.rackLocationPattern.test(location)) {
+    // 0147: a Block C floor slot is pickable like a rack bin (a stack of one SKU, picked on its own list).
+    const blockC = isBlockCLocation(location, config);
+    const parsed = blockC ? parseBlockCSlot(location) : parseLocation(location);
+    if (!parsed || !(blockC || config.rackLocationPattern.test(location))) {
       warnings.push({
         level: 'INFO',
         code: 'NON_RACK_LOCATION',

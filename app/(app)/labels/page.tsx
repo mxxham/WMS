@@ -15,7 +15,7 @@ export default async function LabelsPage() {
     racks[r.zone] ??= [];
     if (!racks[r.zone].includes(r.rack!)) racks[r.zone].push(r.rack!);
   }
-  const { data: floor } = await supabase.from("bins").select("zone").is("rack", null);
+  const { data: floor } = await supabase.from("bins").select("zone").is("rack", null).neq("zone", "MIA");
   for (const f of floor ?? []) racks[f.zone] ??= [];
   const { data: logs } = await supabase.from("print_logs").select("id, bin_ids, printed_at, note, profiles(name)").order("printed_at", { ascending: false }).limit(8);
   return (

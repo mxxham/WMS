@@ -3,7 +3,7 @@ import { fetchAll } from "@/lib/fetch-all";
 import type { StockLine } from "@/lib/stockcheck";
 
 /**
- * The rows of Cek stok rak for one aisle: the bins Shell may use, every stock line in the aisle
+ * The rows of Stock Opname Rak for one aisle: the bins Shell may use, every stock line in the aisle
  * (also in a bin Shell may not use, stock is stock) and what open wave tasks have promised on each.
  * Used by the page (server client) and by the Excel download (browser client).
  */
@@ -12,8 +12,12 @@ export async function loadAisle(db: SupabaseClient, aisle: string): Promise<{ bi
   type Inv = Omit<StockLine, "reserved" | "waves"> & { quantity: number };
   const [bins, inv, tasks] = await Promise.all([
     // Only positions Shell can use are listed when empty (CKB 3PL, missing and planned bins are not free space).
-    fetchAll<{ bin_code: string }>((a, b) => db.from("bin_summary").select("bin_code")
-      .like("bin_code", like).not("rack", "is", null).eq("status", "active").eq("owner", "SHELL").order("bin_code").range(a, b)),
+    // 0147: a Block C lane (FA, FB) lists its active floor slots, in slot order; a rack aisle lists Shell's rack positions.
+    /^F[A-Z]$/.test(aisle)
+      ? fetchAll<{ bin_code: string }>((a, b) => db.from("bins").select("bin_code")
+          .eq("site", "BLOCKC").eq("zone", aisle).eq("status", "active").order("bin_code").range(a, b))
+      : fetchAll<{ bin_code: string }>((a, b) => db.from("bin_summary").select("bin_code")
+          .like("bin_code", like).not("rack", "is", null).eq("status", "active").eq("owner", "SHELL").order("bin_code").range(a, b)),
     fetchAll<Inv>((a, b) => db.from("inventory_detail")
       .select("bin_code, sku, description, uom, batch_lot, quantity, expiry_date, held")
       .like("bin_code", like).gt("quantity", 0).order("bin_code").order("sku").order("batch_lot").order("id").range(a, b)),
@@ -39,5 +43,9 @@ export async function loadAisle(db: SupabaseClient, aisle: string): Promise<{ bi
 export async function loadAisles(db: SupabaseClient): Promise<string[]> {
   const { data } = await db.from("settings").select("value").eq("key", "layout").maybeSingle();
   const order = ((data?.value as { aisle_order?: string[] } | null)?.aisle_order ?? []).filter((a) => /^[A-Z]{2}$/.test(a));
-  return order.length ? order : ["CA", "CB", "CC", "CD", "CE", "CF"];
+  const racks = order.length ? order : ["CA", "CB", "CC", "CD", "CE", "CF"];
+  // Block C lanes (0147) after the rack aisles, once they have active slots.
+  const { data: slots } = await db.from("bins").select("zone").eq("site", "BLOCKC").eq("status", "active");
+  const lanes = [...new Set((slots ?? []).map((r) => r.zone as string))].filter((z) => /^F[A-Z]$/.test(z)).sort();
+  return [...racks, ...lanes.filter((z) => !racks.includes(z))];
 }

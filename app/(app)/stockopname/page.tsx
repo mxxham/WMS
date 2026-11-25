@@ -2,10 +2,10 @@ import Link from "next/link";
 import { requirePage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/app/page-header";
-import { loadAisle, loadAisles } from "@/lib/stockopname-data";
-import type { RackCheckReport } from "@/lib/stockopname";
+import { loadAisle, loadAisles } from "@/lib/stockcheck-data";
+import type { RackCheckReport } from "@/lib/stockcheck";
 import { cn } from "@/lib/utils";
-import { StockCheckClient } from "./stockopname-client";
+import { StockCheckClient } from "./stockcheck-client";
 import { Reports } from "./reports";
 
 export const dynamic = "force-dynamic";

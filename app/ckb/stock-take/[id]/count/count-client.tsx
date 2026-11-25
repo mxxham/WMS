@@ -18,9 +18,11 @@ import { CountScreen } from "./count-screen";
  * a time; on a desktop the list and the open line side by side. Counters never see an SAP number (the
  * database does not send it); leads do.
  */
-export function CountClient({ sessionId, sessionStatus, tasks, evidence, lead, canCount, rules, title, subtitle }: {
+export function CountClient({ sessionId, sessionStatus, tasks, evidence, lead, canCount, rules, batchInfoOnly, binScope, bins, title, subtitle }: {
   sessionId: string; sessionStatus: StocktakeStatus; tasks: TaskRow[]; evidence: TaskEvidence[];
-  lead: boolean; canCount: boolean; rules: { photoRules: boolean; customerAlways: boolean };
+  lead: boolean; canCount: boolean; rules: { photoRules: boolean; customerAlways: boolean; photoScope: "TASK" | "BIN" }; batchInfoOnly: boolean;
+  /** 0163: one photo per bin; `bins` = the bins this account may count and how many photos each has */
+  binScope: boolean; bins: { storage_bin: string; bin_id: string | null; photos: number; lines: number }[];
   title: string; subtitle: string;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -48,13 +50,14 @@ export function CountClient({ sessionId, sessionStatus, tasks, evidence, lead, c
 
       <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:items-start md:gap-4">
         <div className={cn(open && "hidden md:block")}>
-          <CountList tasks={tasks} openId={openId} onOpen={setOpenId} lead={lead}
-            found={canCount && sessionStatus === "COUNTING" ? <FoundLine sessionId={sessionId} onCreated={setOpenId} /> : undefined} />
+          <CountList tasks={tasks} openId={openId} onOpen={setOpenId} lead={lead} sessionId={sessionId}
+            binGate={binScope && canCount && sessionStatus === "COUNTING"} bins={bins}
+            found={canCount && sessionStatus === "COUNTING" ? <FoundLine sessionId={sessionId} onCreated={setOpenId} batchInfoOnly={batchInfoOnly} /> : undefined} />
         </div>
         <div className={cn(!open && "hidden md:block", "md:sticky md:top-4")}>
           {open ? (
             <CountScreen key={open.id} t={open} photos={evidence.filter((e) => e.entity_id === open.id)} rules={rules}
-              canCount={canCount && countOpen(sessionStatus, open.status)} lead={lead}
+              canCount={canCount && countOpen(sessionStatus, open.status)} lead={lead} batchInfoOnly={batchInfoOnly}
               onSent={next} onBack={() => setOpenId(null)} progressText={`${p.done} dari ${p.total} selesai`} />
           ) : (
             <p className="hidden rounded-2xl border-2 border-dashed border-steel-300 p-8 text-center text-sm text-steel-500 md:block">Pilih baris di daftar untuk mulai menghitung.</p>
@@ -66,7 +69,7 @@ export function CountClient({ sessionId, sessionStatus, tasks, evidence, lead, c
 }
 
 /** Stock on the floor that is not on the list: the line first (ckb_add_found_line), then it opens to be counted with its photo. */
-function FoundLine({ sessionId, onCreated }: { sessionId: string; onCreated: (id: string) => void }) {
+function FoundLine({ sessionId, onCreated, batchInfoOnly }: { sessionId: string; onCreated: (id: string) => void; batchInfoOnly: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -100,10 +103,12 @@ function FoundLine({ sessionId, onCreated }: { sessionId: string; onCreated: (id
           </div>
           <div><Label htmlFor="f-mat">Material</Label><Input id="f-mat" name="material" autoCapitalize="characters" /></div>
           <div><Label htmlFor="f-desc">Deskripsi</Label><Input id="f-desc" name="description" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label htmlFor="f-batch">Batch</Label><Input id="f-batch" name="batch" /></div>
-            <div><Label htmlFor="f-exp">Expired</Label><Input id="f-exp" name="expiry" type="date" /></div>
-          </div>
+          {!batchInfoOnly && (
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label htmlFor="f-batch">Batch</Label><Input id="f-batch" name="batch" /></div>
+              <div><Label htmlFor="f-exp">Expired</Label><Input id="f-exp" name="expiry" type="date" /></div>
+            </div>
+          )}
           <div><Label htmlFor="f-note">Catatan</Label><Input id="f-note" name="note" /></div>
           {error && <p role="alert" className="text-sm text-bad">{error}</p>}
           <Button type="submit" size="lg" className="w-full" disabled={busy}>{busy ? "Menyimpan…" : "Catat lalu hitung"}</Button>

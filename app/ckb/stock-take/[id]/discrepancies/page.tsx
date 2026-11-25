@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireCkb } from "@/lib/ckb/auth";
 import { loadHistory, loadSession, loadTaskEvidence, loadTasks } from "@/lib/ckb/stocktake-data";
-import { CLASSIFICATION, TASK_STATUS, type Classification } from "@/lib/ckb/stocktake";
+import { CLASSIFICATION, TASK_STATUS, batchText, stockTypeTag, type Classification } from "@/lib/ckb/stocktake";
 import { CkbHeader, CkbBody, EmptyState, Notice, Pill } from "@/components/ckb/ui";
 import { Button } from "@/components/ui/button";
 import { fmtDate, fmtNum } from "@/lib/utils";
@@ -42,8 +42,9 @@ export default async function DiscrepanciesPage({ params, searchParams }: { para
                 <li key={t.id} className="rounded-lg border border-steel-100 bg-white p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="font-medium"><span className="mr-2 rounded-plate bg-plate px-1.5 font-cond font-bold text-steel">{t.storage_bin || "–"}</span>#{t.seq} {t.material_code}</p>
-                      <p className="text-sm text-steel-500">{t.description} · {t.batch || "tanpa batch"}{t.expiry_date ? ` · exp ${fmtDate(t.expiry_date)}` : ""} · {t.uom}</p>
+                      <p className="font-medium"><span className="mr-2 rounded-plate bg-plate px-1.5 font-cond font-bold text-steel">{t.storage_bin || "–"}</span>#{t.seq} {t.material_code}
+                        {stockTypeTag(t.stock_type) && <span className="ml-1.5 rounded-plate bg-warn/15 px-1.5 py-0.5 font-cond text-xs font-bold text-[#8a5a00]">{stockTypeTag(t.stock_type)}</span>}</p>
+                      <p className="text-sm text-steel-500">{t.description} · {batchText(t, fmtDate)} · {t.uom}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-1">
                       {cls && <Pill tone={cls.tone}>{cls.label}</Pill>}

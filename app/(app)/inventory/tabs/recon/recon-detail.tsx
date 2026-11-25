@@ -66,7 +66,7 @@ export function ReconDetail({ run, lines, moves, ships, shipError, prev, prevAsO
   ];
 
   if (invLine) {
-    return <Investigation run={run} line={invLine} lines={lines} person={person} setPerson={setPerson} onBack={() => investigate(null)} />;
+    return <Investigation key={invLine.id} run={run} line={invLine} lines={lines} person={person} setPerson={setPerson} onBack={() => investigate(null)} onOpenSku={investigate} />;
   }
 
   return (

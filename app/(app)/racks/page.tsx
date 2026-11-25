@@ -15,7 +15,7 @@ export default async function RacksPage({ searchParams }: { searchParams: Promis
   const user = await requirePage("/racks");
   const sp = await searchParams;
   const data = await loadRacks(await createClient());
-  const tab = sp.tab === "denah" || sp.tab === "daftar" || sp.tab === "riwayat" ? sp.tab : null;
+  const tab = sp.tab === "denah" || sp.tab === "daftar" || sp.tab === "blockc" || sp.tab === "riwayat" ? sp.tab : null;
   return (
     <main>
       <PageHeader title="Rak & Lokasi" live={["bins", "bin_changes", "movements"]} liveDebounceMs={3000} />

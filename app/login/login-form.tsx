@@ -20,7 +20,10 @@ export function LoginForm({ next }: { next: string }) {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState(false); // after first blur / failed native validation
+  // Each field is judged on its own: leaving the username empty does not accuse the password. A refused submit judges both.
+  const [touchedUser, setTouchedUser] = useState(false);
+  const [touchedPass, setTouchedPass] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
   const [shake, setShake] = useState(false);
   // No internet: the server action never runs, so the refusal is decided here,
   // before the request — the same alert slot, the same message the app shows
@@ -29,7 +32,7 @@ export function LoginForm({ next }: { next: string }) {
   const leaving = !!state.to;
   const serverMsg = netErr ? NETWORK_MSG : state.error;
 
-  // Signed in. To Home: the login line drives on out to the right (`floor-exit`, globals.css), then
+  // Signed in. To a home (Shell /home or CKB /ckb): the login line drives on out to the right (`floor-exit`, globals.css), then
   // Home opens and its line comes in from the left, the same arrow arriving. Home is prefetched while
   // the line runs. Anywhere else, or with reduced motion: straight there, as before. The button keeps
   // its busy state until the page is gone.
@@ -38,7 +41,7 @@ export function LoginForm({ next }: { next: string }) {
     const to = state.to;
     if (!to) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (to !== "/home" || reduce) { window.location.assign(to); return; }
+    if ((to !== "/home" && to !== "/ckb") || reduce) { window.location.assign(to); return; }
     router.prefetch(to);
     document.querySelector("main")?.classList.add("floor-exit");
     // Navigate while the line is still leaving: by the time Home renders, it is gone.
@@ -70,8 +73,8 @@ export function LoginForm({ next }: { next: string }) {
     }
   }, [serverMsg]);
 
-  const usernameEmpty = touched && username.length === 0;
-  const passwordEmpty = touched && password.length === 0;
+  const usernameEmpty = touchedUser && username.length === 0;
+  const passwordEmpty = touchedPass && password.length === 0;
 
   return (
     <form
@@ -86,6 +89,7 @@ export function LoginForm({ next }: { next: string }) {
           setNetErr(false);
         }
       }}
+      onInvalidCapture={() => { setTouchedUser(true); setTouchedPass(true); }}
       className={cn("space-y-5", shake && "animate-shake")}
     >
       <input type="hidden" name="next" value={next} />
@@ -100,7 +104,7 @@ export function LoginForm({ next }: { next: string }) {
             name="username"
             value={username}
             onChange={(e) => setUsername(e.target.value.trimStart())}
-            onBlur={() => setTouched(true)}
+            onBlur={() => setTouchedUser(true)}
             autoComplete="username"
             autoCapitalize="none"
             autoCorrect="off"
@@ -137,7 +141,9 @@ export function LoginForm({ next }: { next: string }) {
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onBlur={() => setTouched(true)}
+            onBlur={() => setTouchedPass(true)}
+            onKeyUp={(e) => setCapsLock(e.getModifierState("CapsLock"))}
+            onKeyDown={(e) => setCapsLock(e.getModifierState("CapsLock"))}
             autoComplete="current-password"
             required
             disabled={pending}
@@ -159,6 +165,12 @@ export function LoginForm({ next }: { next: string }) {
             {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
           </button>
         </div>
+        {capsLock && !passwordEmpty && (
+          <p role="status" className="mt-1.5 flex items-center gap-1 text-xs text-warn">
+            <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" />
+            Caps Lock menyala
+          </p>
+        )}
         {passwordEmpty && (
           <p id="password-error" role="alert" className="mt-1.5 flex items-center gap-1 text-xs text-bad">
             <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" />

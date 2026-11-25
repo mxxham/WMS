@@ -7,7 +7,11 @@ const MM = 72 / 25.4; // PDF points per millimetre
 const BLACK = rgb(0, 0, 0);
 const WHITE = rgb(1, 1, 1);
 
-export type LabelBin = { bin_code: string; zone: string; rack: string | null; level: string | null; position: string | null; abc_class: string | null };
+export type LabelBin = {
+  bin_code: string; zone: string; rack: string | null; level: string | null; position: string | null; abc_class: string | null;
+  /** Block C floor slots (0147): the sign names the slot's one SKU and its stack height. */
+  site?: string; assigned_sku?: string | null; capacity?: number | null;
+};
 export type LabelOptions = {
   layout: "cell" | "strip";     // cell = one 80x85 mm page per bin; strip = rack uprights, two per A4 sheet
   colorMode: "color" | "mono";  // mono for direct-thermal printers (black only)
@@ -128,7 +132,9 @@ function drawCell(page: PDFPage, bin: LabelBin, originY: number, opt: LabelOptio
   // Info line
   const info = bin.rack
     ? `Aisle ${bin.zone}  Rak ${bin.rack}  Level ${bin.level}  Pos ${bin.position}  ABC ${bin.abc_class ?? "-"}`
-    : `Area ${bin.zone}${bin.position ? `  Lajur ${bin.position}` : ""}  ABC ${bin.abc_class ?? "-"}`;
+    : bin.site === "BLOCKC"
+      ? `Block C  SKU ${bin.assigned_sku ?? "belum ditentukan"}${bin.capacity ? `  max ${bin.capacity} palet` : ""}`
+      : `Area ${bin.zone}${bin.position ? `  Lajur ${bin.position}` : ""}  ABC ${bin.abc_class ?? "-"}`;
   const infoSize = Math.max(LABEL.minInfoPt, 9);
   centered(page, info, fonts.reg, infoSize, cx, bandY - d.infoGapMm * MM - infoSize * 0.8, BLACK);
 }

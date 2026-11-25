@@ -1,5 +1,5 @@
-import type { AllocatorConfig } from './config';
-import { pickSequenceKey, parseLocation } from './pickpath';
+import { isBlockCLocation, type AllocatorConfig } from './config';
+import { locationSequenceKey } from './pickpath';
 import type { StockBin } from './types';
 
 /** Mutable working copy of a bin during a run — shared by allocation and replenishment. */
@@ -12,13 +12,29 @@ export interface Ledger {
 }
 
 export function toLedger(bin: StockBin, config: AllocatorConfig): Ledger {
-  const parsed = parseLocation(bin.location);
   return {
     bin,
     remaining: bin.qtyCartons,
     opened: !bin.isFullPallet,
-    seqKey: parsed ? pickSequenceKey(parsed, config) : Number.MAX_SAFE_INTEGER,
+    seqKey: locationSequenceKey(bin.location, config),
   };
+}
+
+/**
+ * The working ledgers of one stock row. A rack bin or staging row is one ledger. A Block C slot is a STACK: its
+ * pallets are stacked up to 3 high, one batch and one expiry (user, 20 Nov 2026), so FEFO sees the stack as one
+ * expiry date and the pallet rules below apply per pallet: each full pallet is a sealed ledger of `upp` cartons and
+ * the loose part (qty % upp) is one already-open pallet. Every ledger points at the same bin, so the picks they
+ * produce all name the slot; selectNextBin needs no special case.
+ */
+export function toLedgers(bin: StockBin, config: AllocatorConfig): Ledger[] {
+  if (!isBlockCLocation(bin.location, config) || !(bin.upp > 0)) return [toLedger(bin, config)];
+  const seqKey = locationSequenceKey(bin.location, config);
+  const out: Ledger[] = [];
+  for (let i = 0; i < Math.floor(bin.qtyCartons / bin.upp); i++) out.push({ bin, remaining: bin.upp, opened: false, seqKey });
+  const loose = bin.qtyCartons % bin.upp;
+  if (loose > 0) out.push({ bin, remaining: loose, opened: true, seqKey });
+  return out;
 }
 
 /**

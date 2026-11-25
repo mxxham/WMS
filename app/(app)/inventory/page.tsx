@@ -14,6 +14,8 @@ import { AccuracyTab, type AccuracyRow, type AdjustmentRow } from "./tabs/accura
 import { ReconTab, type PrevGap, type ReconLine, type ReconSummary, type SapMove, type ShipMatch } from "./tabs/recon-tab";
 import { ApprovalsTab, type RequestRow } from "./tabs/approvals-tab";
 import { EmptyTab, type EmptyBin } from "./tabs/empty-tab";
+import { MiaTab } from "./tabs/mia-tab";
+import { canMoveMia, type MiaEvent, type MiaStockRow } from "@/lib/mia";
 import { WmsDayDownload } from "./wms-day-download";
 import { BinOnHandLookup } from "@/components/bin/bin-day-stock";
 
@@ -27,6 +29,7 @@ const TABS = [
   { key: "hold", label: "Hold & karantina" },
   { key: "akurasi", label: "Akurasi & adjustment" },
   { key: "rekonsiliasi", label: "Rekonsiliasi SAP" },
+  { key: "mia", label: "MIA" },
   { key: "persetujuan", label: "Persetujuan" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -84,6 +87,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       {tab === "hold" && supervisor && await holdTab()}
       {tab === "akurasi" && supervisor && await accuracyTab(policy.ira_target_pct)}
       {tab === "rekonsiliasi" && supervisor && await reconTab(sp.recon, sp.rv, sp.inv)}
+      {tab === "mia" && supervisor && await miaTab()}
       {tab === "persetujuan" && supervisor && await approvalsTab(policy.adjust_approval_qty)}
     </main>
   );
@@ -139,6 +143,17 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       .select("bin_code, zone, rack, bin_status, sku, description, uom, batch_lot, quantity, expiry_date, received_date, days_remaining, held")
       .order("received_date", { nullsFirst: false }).order("sku").order("id").range(a, b));
     return <StayTab lines={lines} />;
+  }
+
+  async function miaTab() {
+    const [{ data: stock }, { data: events }] = await Promise.all([
+      supabase.from("mia_stock").select("item_id, sku, description, upp, batch_lot, expiry_date, quantity, since").order("sku").order("expiry_date"),
+      supabase.from("mia_events").select("id, kind, batch_lot, expiry_date, quantity, note, by_name, created_at, line_id, items(sku, description), bins(bin_code)")
+        .order("created_at", { ascending: false }).limit(100),
+    ]);
+    const history = ((events ?? []) as unknown as (Omit<MiaEvent, "sku" | "description" | "bin_code"> & { items: { sku: string; description: string | null } | null; bins: { bin_code: string } | null })[])
+      .map(({ items, bins, ...e }) => ({ ...e, sku: items?.sku ?? "–", description: items?.description ?? null, bin_code: bins?.bin_code ?? null }));
+    return <MiaTab stock={(stock ?? []) as MiaStockRow[]} events={history} canMove={canMoveMia(user.job)} />;
   }
 
   async function holdTab() {

@@ -86,3 +86,11 @@ export function findIssues(rows: StockRow[], todayIso: string, shelfLifeBySku: M
   }
   return out;
 }
+
+/** Excel stores a two-digit year such as "2-Nov-30" as 1930; the real expiry is 100 years later. */
+export function centuryFix(expiry: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2}-\d{2})/.exec(expiry ?? "");
+  if (!m) return null;
+  const y = Number(m[1]);
+  return y >= 1900 && y < 2000 ? `${y + 100}-${m[2]}` : null;
+}

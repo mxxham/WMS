@@ -13,8 +13,8 @@ import { cn, fmtNum } from "@/lib/utils";
 import {
   bayOf, buildCheckRows, changesOf, diffOf, multiSkuBins, payloadOf, reportPayload, summarize,
   type Added, type CheckRow, type Edit, type StockLine,
-} from "@/lib/stockopname";
-import { loadAisle } from "@/lib/stockopname-data";
+} from "@/lib/stockcheck";
+import { loadAisle } from "@/lib/stockcheck-data";
 import { DiffChips, ReviewSummary } from "./review-summary";
 
 
@@ -111,7 +111,7 @@ export function StockCheckClient({ aisle, aisles, bins, lines, items }: {
   async function download(all: boolean) {
     setBusy(all ? "all" : "aisle"); setFileError(null);
     try {
-      const { downloadStockCheck } = await import("@/lib/stockopname-workbook");
+      const { downloadStockCheck } = await import("@/lib/stockcheck-workbook");
       const date = today();
       if (!all) {
         await downloadStockCheck([{ aisle, rows }], { date }, `cek_stok_rak_${aisle}_${date}.xlsx`);

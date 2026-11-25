@@ -60,6 +60,37 @@ export function pickSequenceKey(loc: ParsedLocation, config: AllocatorConfig): n
   return lane * 10_000_000 + alongRank * 100_000 + levelRank * 1_000 + face * 100 + loc.position;
 }
 
+/**
+ * FA-01 -> { aisle: 'FA', bay: 1, level: 'A', position: 1 }: only for building a StockBin of a Block C slot. NOT
+ * parseLocation, which stays rack-only on purpose (pickface and replenishment treat a parsed location as a rack bin).
+ */
+export function parseBlockCSlot(raw: string): ParsedLocation | null {
+  const location = String(raw ?? '').trim().toUpperCase();
+  const m = /^([A-Z]{2})-(\d{2})$/.exec(location);
+  return m ? { location, aisle: m[1], bay: Number(m[2]), level: 'A', position: 1 } : null;
+}
+
+/**
+ * Where a Block C slot sits on its own short route: down the first lane (FA-01 -> FA-20), back up the second
+ * (FB-20 -> FB-01), so the picker never returns empty. Later lanes continue the same way. Every key sorts after any
+ * rack key, but Block C lines print on their own picklist anyway.
+ */
+export function blockCSequenceKey(location: string, config: AllocatorConfig): number {
+  const m = /^([A-Z]{2})-(\d{2})$/.exec(String(location ?? '').trim().toUpperCase());
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  const idx = config.blockCLanes.indexOf(m[1]);
+  const lane = idx === -1 ? config.blockCLanes.length : idx;
+  const slot = Number(m[2]);
+  return 5_000_000_000 + lane * 1_000 + (config.serpentine && lane % 2 === 1 ? 99 - slot : slot);
+}
+
+/** Walking-route key of any pickable location: a rack bin, a Block C slot, or MAX for anything else (staging). */
+export function locationSequenceKey(location: string, config: AllocatorConfig): number {
+  const parsed = parseLocation(location);
+  if (parsed) return pickSequenceKey(parsed, config);
+  return blockCSequenceKey(location, config);
+}
+
 /** 2-digit scan-verification digit derived from the location code. */
 export function checkDigit(location: string): string {
   let sum = 0;

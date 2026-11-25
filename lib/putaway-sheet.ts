@@ -1,5 +1,6 @@
 import { excelBatchText } from "@/lib/allocator/excel-date";
 import { toDate } from "@/lib/import-validate";
+import { centuryFix } from "@/lib/data-quality";
 import type { SheetRows } from "@/lib/read-sheet";
 
 /** One row of the "data putaway" sheet: a pallet that now sits in a bin. */
@@ -13,6 +14,8 @@ export type PutawayRow = {
   pallet_lines?: number[];
   /** Rekap inbound: Item Code / Batch No / Expired Date were blank and copied from this earlier row of the shipment */
   filled_from?: number;
+  /** The sheet's expiry was a 19xx year (Excel reads "2-Nov-30" as 1930); this is that date as the file held it, expiry_date is +100 years */
+  expiry_sheet_year?: string;
 };
 
 /** Resolution of a conflict, chosen per row by the supervisor. "fix": the sheet is right, the bin is corrected (0066). */
@@ -237,7 +240,12 @@ export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pendi
     const batch_lot = excelBatchText(get("batch_lot"));
     const rawQty = get("quantity");
     const quantity = typeof rawQty === "number" ? rawQty : /^\d+(\.\d+)?$/.test(String(rawQty ?? "").trim()) ? Number(rawQty) : null;
-    const exp = toDate(get("expiry_date"));
+    let exp = toDate(get("expiry_date"));
+    // Excel turns a two-digit year 30..99 into 1930..1999, so "2-Nov-30" arrives as 1930. No stock expires
+    // in the 1900s: read it as the same day 100 years later (1930 -> 2030).
+    const century = centuryFix(exp.iso);
+    let expiry_sheet_year: string | undefined;
+    if (century) { expiry_sheet_year = exp.iso!; exp = toDate(century); }
 
     let error: string | null = null;
     if (!bin_code) error = "Kode bin kosong";
@@ -260,6 +268,7 @@ export function parsePutawayDetail(data: SheetRows): { rows: PutawayRow[]; pendi
     const row: PutawayRow = { line: data.lines[i], bin_code, sku, batch_lot, quantity, expiry_date: exp.iso, error };
     if (bin_code !== sheetBin) row.sheet_bin = sheetBin;
     if (filled_from !== undefined) row.filled_from = filled_from;
+    if (expiry_sheet_year) row.expiry_sheet_year = expiry_sheet_year;
     if (!error) {
       const key = `${bin_code}|${sku}|${batch_lot}|${exp.iso}`;
       if (!firstOf.has(key)) firstOf.set(key, { row, pallets: new Set(pallet ? [pallet] : []) });

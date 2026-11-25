@@ -66,7 +66,9 @@ function RequestLine({ r, person }: { r: RequestRow; person: string }) {
   const [busy, setBusy] = useState(false);
   const self = person.trim().toLowerCase() === r.requested_by_name.trim().toLowerCase();
   async function decide(approve: boolean) {
-    setBusy(true); setError(null);
+    setError(null);
+    if (!approve && !note.trim()) return setError("Isi catatan keputusan dulu: alasan penolakan wajib diisi.");
+    setBusy(true);
     const { error } = await createClient().rpc("decide_adjustment", { p_id: r.id, p_approve: approve, p_note: note || null, p_by_name: person });
     setBusy(false);
     if (error) return setError(error.message);
@@ -86,8 +88,9 @@ function RequestLine({ r, person }: { r: RequestRow; person: string }) {
         <Input aria-label="Catatan keputusan" className="h-8" value={note} onChange={(e) => setNote(e.target.value)} placeholder="catatan (wajib jika ditolak)" />
         <div className="mt-1 flex gap-1">
           <Button size="sm" onClick={() => decide(true)} disabled={busy || self || person.trim().length < 2}>Setujui</Button>
-          <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={busy || self || !note.trim() || person.trim().length < 2}>Tolak</Button>
+          <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={busy || self || person.trim().length < 2}>Tolak</Button>
         </div>
+        {!self && person.trim().length < 2 && <p className="mt-1 text-xs text-bad">Isi &quot;Nama penyetuju&quot; di atas dulu.</p>}
         {self && <p className="mt-1 text-xs text-bad">Anda yang mengajukan: harus diputuskan orang lain.</p>}
         {error && <p role="alert" className="mt-1 text-xs text-bad">{error}</p>}
       </Td>

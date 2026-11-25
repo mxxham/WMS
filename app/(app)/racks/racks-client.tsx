@@ -5,6 +5,8 @@ import { buildFloorPlan, narrowLevels, rackTiles, stateOf, type RackBin } from "
 import { cn } from "@/lib/utils";
 import { useIsPhone } from "../waves/use-is-phone";
 import { AddRacks, PlannedDialog } from "./add-racks";
+import { BlockCPanel } from "./block-c";
+import type { BlockCSlot } from "./racks-data";
 import { BinList } from "./bin-list";
 import { AttrDialog, ChangeDialog, type ChangeKind } from "./change-dialog";
 import { History } from "./history";
@@ -12,16 +14,16 @@ import { Denah } from "./denah";
 import { SelectionBar } from "./selection-bar";
 import { Tiles } from "./tiles";
 
-export type Tab = "denah" | "daftar" | "riwayat";
-const TABS: { key: Tab; label: string }[] = [{ key: "denah", label: "Denah" }, { key: "daftar", label: "Daftar bin" }, { key: "riwayat", label: "Riwayat" }];
+export type Tab = "denah" | "daftar" | "blockc" | "riwayat";
+const TABS: { key: Tab; label: string }[] = [{ key: "denah", label: "Denah" }, { key: "daftar", label: "Daftar bin" }, { key: "blockc", label: "Block C" }, { key: "riwayat", label: "Riwayat" }];
 
 /**
  * The page body. One selection (bin codes) is shared by the floor plan and the list, so racks picked on
  * the plan stay picked when the list is opened, and the selection bar acts on both.
  * Phones open on Daftar bin: a plan of ~3,000 positions does not fit a phone's width.
  */
-export function RacksClient({ bins, aisleOrder, baysPerSide, role, initialTab }: {
-  bins: RackBin[]; aisleOrder: string[]; baysPerSide: number; role: Role; initialTab: Tab | null;
+export function RacksClient({ bins, aisleOrder, baysPerSide, blockC, role, initialTab }: {
+  bins: RackBin[]; aisleOrder: string[]; baysPerSide: number; blockC: BlockCSlot[]; role: Role; initialTab: Tab | null;
 }) {
   const phone = useIsPhone();
   const [tab, setTab] = useState<Tab | null>(initialTab);
@@ -90,12 +92,13 @@ export function RacksClient({ bins, aisleOrder, baysPerSide, role, initialTab }:
           </button>
         ))}
       </nav>
-      {admin && <div className="ml-auto pb-1.5"><AddRacks aisleOrder={aisleOrder} /></div>}
+      {admin && active !== "blockc" && <div className="ml-auto pb-1.5"><AddRacks aisleOrder={aisleOrder} /></div>}
       </div>
       {active === "daftar" && <BinList bins={bins} aisles={aisles} selected={selected} onToggle={toggle} />}
       {active === "denah" && <Denah plan={plan} selected={selected} onToggle={toggle} onSet={setAll} onClear={clear} />}
+      {active === "blockc" && <BlockCPanel slots={blockC} role={role} />}
       {active === "riwayat" && <History />}
-      {active !== "riwayat" && (
+      {active !== "riwayat" && active !== "blockc" && (
         <SelectionBar bins={selectedBins} onKeepLevels={keepLevels} onClear={clear}>
           {admin && planned.length > 0 && <PlannedDialog codes={planned} mode="activate" onDone={clear} />}
           {admin && planned.length > 0 && <PlannedDialog codes={planned} mode="cancel" onDone={clear} />}

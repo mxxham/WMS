@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dayEndExclusiveISO, dayStartISO, validDay } from "@/lib/movement-view";
 
 export type MovementFilters = { from?: string; to?: string; type?: string; user?: string; bin?: string; sku?: string; reason?: string; person?: string };
 
 export const MOVEMENT_SELECT =
-  "id, type, quantity, batch_lot, created_at, note, reason_code, by_name, approved_by_name, items(sku, description, uom), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name)";
+  "id, type, quantity, batch_lot, expiry_date, created_at, note, reason_code, by_name, approved_by_name, items(sku, description, uom), from_bin:bins!movements_from_bin_id_fkey(bin_code), to_bin:bins!movements_to_bin_id_fkey(bin_code), profiles(name)";
 
 /**
  * Resolves bin code / SKU to ids once, then returns a builder that applies
@@ -24,8 +25,10 @@ export async function movementQuery(supabase: SupabaseClient, f: MovementFilters
   }
   return (from: number, to: number) => {
     let q = supabase.from("movements").select(MOVEMENT_SELECT).order("created_at", { ascending: false });
-    if (f.from) q = q.gte("created_at", `${f.from}T00:00:00+07:00`); // WIB
-    if (f.to) q = q.lte("created_at", `${f.to}T23:59:59+07:00`);
+    // WIB days. The end is exclusive (start of the next day), so a movement in the last second is kept.
+    const from_ = validDay(f.from), to_ = validDay(f.to);
+    if (from_) q = q.gte("created_at", dayStartISO(from_));
+    if (to_) q = q.lt("created_at", dayEndExclusiveISO(to_));
     if (f.type) q = q.eq("type", f.type);
     if (f.user) q = q.eq("user_id", f.user);
     if (binId) q = q.or(`from_bin_id.eq.${binId},to_bin_id.eq.${binId}`);

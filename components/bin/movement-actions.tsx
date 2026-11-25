@@ -172,6 +172,38 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
   const mismatch = newStock ? expiryCheck(batch, expiry, shelfLife) : null;
   const needsApproval = action === "adjust" && limit !== null && Math.abs(n) > limit;
 
+  // Block C (0147): a Block C SKU can only go to its own dedicated slots, up to the stack height. Offer them with the
+  // room each has left, and fill the first one with room, so nobody has to know or type the slot. The database still
+  // refuses any other bin, in either direction.
+  const [blockSlots, setBlockSlots] = useState<{ code: string; free: number }[]>([]);
+  const lineSku = line?.sku, lineItem = line?.item_id;
+  useEffect(() => {
+    setBlockSlots([]);
+    if (action !== "transfer" || !lineSku || !lineItem) return;
+    let cancelled = false;
+    (async () => {
+      const { data: slots } = await supabase.from("bins").select("id, bin_code, capacity")
+        .eq("site", "BLOCKC").eq("assigned_sku", lineSku).eq("status", "active").order("bin_code");
+      if (cancelled || !slots?.length) return;
+      const [{ data: item }, { data: stock }] = await Promise.all([
+        supabase.from("items").select("upp").eq("id", lineItem).maybeSingle(),
+        supabase.from("inventory").select("bin_id, quantity").eq("item_id", lineItem).in("bin_id", slots.map((x) => x.id)),
+      ]);
+      if (cancelled) return;
+      const upp = Number(item?.upp) || 0;
+      const have = new Map<string, number>();
+      for (const r of stock ?? []) have.set(r.bin_id as string, (have.get(r.bin_id as string) ?? 0) + Number(r.quantity));
+      setBlockSlots(slots.filter((x) => x.bin_code !== bin.bin_code).map((x) => {
+        const cap = Number(x.capacity ?? 1), used = upp > 0 ? Math.ceil((have.get(x.id as string) ?? 0) / upp - 1e-9) : 0;
+        return { code: x.bin_code as string, free: Math.max(0, cap - used) };
+      }));
+    })();
+    return () => { cancelled = true; };
+  }, [action, lineSku, lineItem, bin.bin_code, supabase]);
+  useEffect(() => {
+    if (blockSlots.length && !dstCode) setDstCode((blockSlots.find((x) => x.free > 0) ?? blockSlots[0]).code);
+  }, [blockSlots]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** Build the movement row + a sentence for the confirmation step. */
   async function build(): Promise<{ row: Record<string, unknown>; summary: string } | string> {
     if (!Number.isFinite(n) || n === 0) return "Isi jumlah yang valid.";
@@ -314,7 +346,21 @@ function MovementForm({ action, bin, lines, onDone, initialLineIdx = 0, initialN
           )}
 
           {action === "transfer" && (
-            <div><Label htmlFor="dst">Bin tujuan</Label><Input id="dst" value={dstCode} onChange={(e) => setDstCode(e.target.value)} placeholder="Scan atau ketik, mis. CB12A01" required /></div>
+            <div><Label htmlFor="dst">Bin tujuan</Label><Input id="dst" value={dstCode} onChange={(e) => setDstCode(e.target.value)} placeholder="Scan atau ketik, mis. CB12A01" required />
+              {blockSlots.length > 0 && (
+                <div className="mt-2 text-xs text-steel-500">
+                  <p>SKU ini khusus Block C: hanya boleh ke slotnya sendiri. Pilih slot:</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {blockSlots.map((x) => (
+                      <button key={x.code} type="button" onClick={() => setDstCode(x.code)} disabled={x.free === 0}
+                        className={`rounded border px-2 py-1 font-mono text-sm ${dstCode.trim().toUpperCase() === x.code ? "border-ckb bg-ckb/10 text-ckb" : "border-steel-100"} disabled:opacity-40`}>
+                        {x.code} · {x.free === 0 ? "penuh" : `${x.free} palet kosong`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {action === "adjust" && !adjNewLine && (

@@ -1,9 +1,9 @@
-import { daysBetween, hasExpiry, isStagingLocation, minShelfLifeDays, type AllocatorConfig } from './config';
-import { selectNextBin, toLedger, type Ledger } from './binselect';
+import { DEFAULT_CONFIG, daysBetween, hasExpiry, isBlockCLocation, isStagingLocation, minShelfLifeDays, type AllocatorConfig } from './config';
+import { selectNextBin, toLedgers, type Ledger } from './binselect';
 import { derivePickfaces } from './pickface';
 import { stockIdentityKey } from './ledger';
 import { compareWaveNo } from './earlier-waves';
-import { parseLocation, pickSequenceKey, walkPosition } from './pickpath';
+import { locationSequenceKey, parseLocation, pickSequenceKey, walkPosition } from './pickpath';
 import type {
   AllocationLine,
   AllocationResult,
@@ -95,11 +95,11 @@ export function allocate(
       });
     }
 
-    const ledger = toLedger(bin, config);
+    const ledgers = toLedgers(bin, config);
     const target = isStagingLocation(bin.location, config) ? stagingBySku : bySku;
     const list = target.get(bin.sku);
-    if (list) list.push(ledger);
-    else target.set(bin.sku, [ledger]);
+    if (list) list.push(...ledgers);
+    else target.set(bin.sku, ledgers);
   }
 
   const ordered = [...demand].sort((a, b) => {
@@ -308,11 +308,11 @@ export function waveSlots(items: { waveNo: string; slotTime: string | null }[]):
  * the rows in the order the moves were planned.
  */
 export function pickRowCompare(a: AllocationLine, b: AllocationLine, config: AllocatorConfig): number {
-  const seq = (l: AllocationLine) => {
-    const parsed = parseLocation(l.location);
-    return parsed ? pickSequenceKey(parsed, config) : Number.MAX_SAFE_INTEGER;
-  };
-  return Number(a.pickType !== 'CASE') - Number(b.pickType !== 'CASE') ||
+  const seq = (l: AllocationLine) => locationSequenceKey(l.location, config);
+  // Block C (a second building, its own picklist per shipment) comes after every Oso 5 row, so the printed order,
+  // the task numbering and the Sisa replay all put it in the same place.
+  return Number(isBlockCLocation(a.location, config)) - Number(isBlockCLocation(b.location, config)) ||
+    Number(a.pickType !== 'CASE') - Number(b.pickType !== 'CASE') ||
     a.sku.localeCompare(b.sku) ||
     seq(a) - seq(b);
 }
@@ -335,6 +335,23 @@ export function executionOrder(lines: AllocationLine[], config: AllocatorConfig)
     a.shipmentNumber.localeCompare(b.shipmentNumber) ||
     pickRowCompare(a, b, config) ||
     index.get(a)! - index.get(b)!);
+}
+
+/**
+ * Whether a pick of `qty` from an identity holding `before` cartons takes a sealed pallet (PALLET), and whether a
+ * loose pick opens one. A rack bin holds ONE pallet: sealed while untouched and exactly `upp`. A Block C slot holds
+ * a stack: its full pallets are floor(before / upp) and its loose part (before % upp) is the one open pallet, so a
+ * pallet is taken whole while one exists, loose cartons come from the open pallet, and a sealed pallet only opens
+ * when the open part cannot cover the pick.
+ */
+export function palletKind(before: number, qty: number, upp: number, openedBefore: boolean, stack: boolean): { pickType: PickType; breaks: boolean } {
+  if (stack) {
+    const full = Math.floor(before / upp), loose = before % upp;
+    if (qty === upp && full >= 1) return { pickType: 'PALLET', breaks: false };
+    return { pickType: 'CASE', breaks: qty < upp && full >= 1 && loose < qty };
+  }
+  const sealed = !openedBefore && before === upp;
+  return { pickType: sealed && qty === upp ? 'PALLET' : 'CASE', breaks: sealed && qty < upp };
 }
 
 /**
@@ -478,7 +495,9 @@ export function relocateByWaveOrder(
       const pf = pickfaces.get(line.sku);
       let key = stockIdentityKey(line.location, line.sku, line.batch, line.expiryDate);
       // Follow the pallet's rest to where it was carried, else try the pickface.
-      const dest = movedTo.get(key) ?? (pf && pf.location !== line.location ? pf.location : null);
+      const stack = isBlockCLocation(line.location, config);
+      // A Block C stack never follows a pickface: its SKU cannot be carried to Oso 5.
+      const dest = stack ? null : movedTo.get(key) ?? (pf && pf.location !== line.location ? pf.location : null);
       if (get(key) < line.qtyPick && dest) {
         const destKey = stockIdentityKey(dest, line.sku, line.batch, line.expiryDate);
         if (get(destKey) - (claimed.get(destKey) ?? 0) >= line.qtyPick) {
@@ -489,7 +508,7 @@ export function relocateByWaveOrder(
           key = destKey;
         }
       }
-      line.pickType = !opened.has(key) && get(key) === line.upp && line.qtyPick === line.upp ? 'PALLET' : 'CASE';
+      line.pickType = palletKind(get(key), line.qtyPick, line.upp, opened.has(key), stack).pickType;
     }
     rows.sort((a, b) => pickRowCompare(a, b, config));
 
@@ -506,11 +525,14 @@ export function relocateByWaveOrder(
       rowsLeft.set(key, (rowsLeft.get(key) ?? 1) - 1);
       const lastInShipment = (rowsLeft.get(key) ?? 0) <= 0;
       const before = get(key);
-      const sealed = !opened.has(key) && before === line.upp;
-      line.breaksPallet = sealed && line.qtyPick < line.upp;
-      line.pickType = sealed && line.qtyPick === line.upp ? 'PALLET' : 'CASE';
+      const stack = isBlockCLocation(line.location, config);
+      const kind = palletKind(before, line.qtyPick, line.upp, opened.has(key), stack);
+      line.breaksPallet = kind.breaks;
+      line.pickType = kind.pickType;
       balance.set(key, before - line.qtyPick);
       opened.add(key);
+      // A Block C slot has no pickface, no reserve level and no Bin To Bin: what is left stays in the stack.
+      if (stack) { line.qtyRemainingInBin = get(key); continue; }
 
       const reserve = isReserveRack(line.location)
         && !pickfaceLocs.has(line.location.toUpperCase()) && !fixedLocs.has(line.location.toUpperCase());
@@ -568,6 +590,12 @@ export function mergeSameBinRows(lines: AllocationLine[]): void {
     const k = `${l.shipmentNumber}|${l.sku}|${stockIdentityKey(l.location, l.sku, l.batch, l.expiryDate)}`;
     const first = keep.get(k);
     if (!first) { keep.set(k, l); continue; }
+    // A Block C stack holds several pallets: a whole pallet is its own forklift row and never merges with
+    // another row (only loose picks of one stack merge). A rack bin keeps the old behaviour.
+    if (isBlockCLocation(l.location, DEFAULT_CONFIG) && (first.pickType === 'PALLET' || l.pickType === 'PALLET')) {
+      if (l.pickType === 'CASE') keep.set(k, l);
+      continue;
+    }
     first.qtyPick += l.qtyPick;
     first.breaksPallet ||= l.breaksPallet;
     if (l.pickType === 'CASE') first.pickType = 'CASE';

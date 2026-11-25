@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getCkbUser } from "@/lib/ckb/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -9,9 +10,10 @@ import { FilterBar } from "@/components/ckb/filter-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fmtDate, fmtDateTime } from "@/lib/utils";
-import { actionLabel } from "./activity/labels";
+import { actionLabel } from "../activity/labels";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Dashboard" };
 
 type Dash = Record<string, number>;
 
@@ -26,15 +28,17 @@ export default async function CkbDashboard({ searchParams }: { searchParams: Pro
   if (!isStaff(user.ckbRole)) return <CustomerDashboard name={user.name} customers={customers ?? []} denied={denied} />;
 
   const customer = (customers ?? []).find((c) => c.id === sp.customer)?.id ?? null;
-  const [{ data: dash, error }, { data: activity }, { data: sessions }, { data: inspections }] = await Promise.all([
+  const [{ data: dash, error }, { data: activity }, { data: sessions }, { data: inspections }, { data: hk }] = await Promise.all([
     db.rpc("ckb_dashboard", { p_customer: customer }),
     isLead(user.ckbRole)
       ? db.from("ckb_audit_events").select("id, at, actor_name, action, entity_type, customer_id").order("at", { ascending: false }).limit(8)
       : Promise.resolve({ data: [] as { id: number; at: string; actor_name: string; action: string; entity_type: string; customer_id: string | null }[] }),
     db.from("ckb_stocktakes").select("id, ref_no, status, customer_id, created_at").in("status", ["DRAFT", "COUNTING", "REVIEW"]).order("created_at", { ascending: false }).limit(6),
     db.from("ckb_inspections").select("id, ref_no, status, customer_id, inspection_date").in("status", ["DRAFT", "SUBMITTED"]).order("created_at", { ascending: false }).limit(6),
+    db.rpc("ckb_hk_dashboard", { p_customer: customer }),   // an error (migration not applied yet) just leaves the section out
   ]);
   const d = (dash ?? {}) as Dash;
+  const h = hk as Dash | null;
   const name = new Map((customers ?? []).map((c) => [c.id, c.name]));
   const filtered = <T extends { customer_id: string | null }>(rows: T[] | null): T[] => (rows ?? []).filter((r) => !customer || r.customer_id === customer);
   const lead = isLead(user.ckbRole);
@@ -76,6 +80,32 @@ export default async function CkbDashboard({ searchParams }: { searchParams: Pro
             <StatTile label="Ekspor SAP belum dikonfirmasi" value={d.exports_unconfirmed ?? 0} href={lead ? "/ckb/sap/export" : undefined} />
           </div>
         </section>
+
+        {h && (
+          <section aria-labelledby="h-hk" className="space-y-3">
+            <h2 id="h-hk" className="font-cond text-lg font-semibold">Housekeeping</h2>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+              {lead ? (
+                <>
+                  <StatTile label="Selesai hari ini" value={`${h.done_today ?? 0}/${h.expected_today ?? 0}`} href="/ckb/housekeeping" hint="rak dikirim dari yang diharapkan" />
+                  <StatTile label="Sedang dikerjakan" value={h.started_today ?? 0} href="/ckb/housekeeping" />
+                  <StatTile label="Terlewat hari kerja terakhir" value={h.missed_last ?? 0} tone={h.missed_last ? "warn" : undefined} href="/ckb/housekeeping" />
+                  <StatTile label="Terlewat minggu ini" value={h.missed_week ?? 0} href="/ckb/housekeeping" />
+                  <StatTile label="Menunggu tinjauan" value={h.awaiting_review ?? 0} tone={h.awaiting_review ? "warn" : undefined} href="/ckb/housekeeping" />
+                  <StatTile label="Area tanpa PIC" value={h.without_pic ?? 0} tone={h.without_pic ? "warn" : undefined} href="/ckb/housekeeping?tab=areas" />
+                  <StatTile label="Temuan terbuka" value={h.open_findings ?? 0} tone={h.open_findings ? "warn" : undefined} href="/ckb/housekeeping?tab=quality" />
+                  <StatTile label="Temuan menunggu verifikasi" value={h.awaiting_verify ?? 0} tone={h.awaiting_verify ? "warn" : undefined} href="/ckb/housekeeping?tab=quality" />
+                </>
+              ) : (
+                <>
+                  <StatTile label="Rak saya hari ini" value={`${h.done_today ?? 0}/${h.mine_today ?? 0}`} href="/ckb/housekeeping" hint="selesai dari yang harus dikirim" />
+                  <StatTile label="Terlewat minggu ini" value={h.missed_week ?? 0} tone={h.missed_week ? "warn" : undefined} href="/ckb/housekeeping?tab=history" />
+                  <StatTile label="Temuan di rak saya" value={h.my_findings ?? 0} tone={h.my_findings ? "warn" : undefined} href="/ckb/housekeeping?tab=findings" />
+                </>
+              )}
+            </div>
+          </section>
+        )}
 
         <div className="flex flex-wrap gap-2">
           {lead && <Button asChild><Link href="/ckb/stock-take/new">Sesi stock take baru</Link></Button>}
@@ -144,11 +174,13 @@ export default async function CkbDashboard({ searchParams }: { searchParams: Pro
 /** A representative's view: their customers' finished records only (RLS returns nothing else). */
 async function CustomerDashboard({ name, customers, denied }: { name: string; customers: { id: string; name: string }[]; denied: React.ReactNode }) {
   const db = await createClient();
-  const [{ data: sessions }, { data: inspections }, { data: adjustments }] = await Promise.all([
+  const [{ data: sessions }, { data: inspections }, { data: adjustments }, { data: hk }] = await Promise.all([
     db.from("ckb_stocktakes").select("id, ref_no, customer_id, closed_at").order("closed_at", { ascending: false }).limit(8),
     db.from("ckb_inspections").select("id, ref_no, customer_id, inspection_date, status, result").order("inspection_date", { ascending: false }).limit(8),
     db.from("ckb_adjustments").select("status"),
+    customers[0] ? db.rpc("ckb_hk_dashboard", { p_customer: customers[0].id }) : Promise.resolve({ data: null }),
   ]);
+  const h = hk as Dash | null;
   const cname = new Map(customers.map((c) => [c.id, c.name]));
   const by = (s: AdjustmentStatus) => (adjustments ?? []).filter((a) => a.status === s).length;
   return (
@@ -196,6 +228,13 @@ async function CustomerDashboard({ name, customers, denied }: { name: string; cu
             </CardContent>
           </Card>
         </div>
+        {h && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatTile label="Housekeeping hari ini" value={`${h.done_today ?? 0}/${h.expected_today ?? 0}`} href="/ckb/housekeeping" hint="rak selesai dari yang diharapkan" />
+            <StatTile label="Terlewat minggu ini" value={h.missed_week ?? 0} href="/ckb/housekeeping" />
+            <StatTile label="Temuan terbuka" value={h.open_findings ?? 0} href="/ckb/housekeeping" />
+          </div>
+        )}
         <Button asChild><Link href="/ckb/reports">Buka laporan</Link></Button>
       </CkbBody>
     </main>

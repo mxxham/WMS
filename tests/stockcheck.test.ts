@@ -1,5 +1,5 @@
 /**
- * Cek stok rak (0144): the order of the sheet (bay 01 on top, 40 at the bottom), empty bins, what typed
+ * Stock Opname Rak (0144): the order of the sheet (bay 01 on top, 40 at the bottom), empty bins, what typed
  * values become, and the mistakes caught before anything is sent. Also the Excel list taken to the rack.
  */
 import { strict as assert } from 'node:assert';

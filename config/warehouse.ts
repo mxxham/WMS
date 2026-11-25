@@ -17,8 +17,43 @@ export const RACK_BIN_REGEX = /^(C[A-Z])(\d{2})([A-E])(\d{2})$/;
 export const FLOOR_LOCATIONS: Record<string, { zone: string; status: "active" | "blocked" }> = {
   STAGING: { zone: "STAGING", status: "active" },
   QUARANTINE: { zone: "QUARANTINE", status: "blocked" },
+  RETN: { zone: "RETURN", status: "active" }, // 0136: returns location, like SAP's RETN
 };
 export const STAGING_LANE_REGEX = /^STG_(\d{2})$/;
+/** Inbound staging lanes in the 22 Nov 2026 stock-take file: STG_INBV93..STG_INBV99 (empty floor spots). */
+export const STAGING_INB_LANE_REGEX = /^STG_INBV(\d{2})$/;
+/**
+ * Names the sheet uses for a location the system already knows. The 22 Nov file lists quarantine as
+ * Z_QUARANTINE (sorted last in SAP); it is the same place as QUARANTINE, so its stock must land in that bin
+ * and not leave the old one to be zeroed.
+ */
+export const LOCATION_ALIASES: Record<string, string> = { Z_QUARANTINE: "QUARANTINE" };
+
+/**
+ * Block C (a second building, 0147): floor slots FA-01..FA-20 / FB-01..FB-20, each with ONE dedicated SKU. Mirrored in
+ * SQL by bins_normalize (site = 'BLOCKC'). Group 1 = lane (FA, FB), group 2 = slot number.
+ */
+export const BLOCK_C_SLOT_REGEX = /^(F[A-Z])-(\d{2})$/;
+export const BLOCK_C_LANES = ["FA", "FB"] as const;
+export const BLOCK_C_SLOTS_PER_LANE = 20;
+
+/**
+ * Block C slot size, from the updated floor plan (master lokasi floor block C.xlsx, 23 Nov 2026): every slot is 14
+ * pallet positions on the floor (40 slots = "TOTAL : 560 PP"), stacked by pack type: IBC, fluid bag and carton 2 high,
+ * drum 3 high (the plan also lists "DRUM 2 STACK"; drum stays 3 until the user says which drums are 2), anything
+ * else 2. The slot's capacity in pallets is positions x stack height, stored on the slot when its SKU is assigned
+ * (assign_block_c_slots) and enforced by the database. Change a number here, then assign the SKU's slots again.
+ */
+export const POSITIONS_PER_SLOT = 14;
+export const STACK_HEIGHT: Record<string, number> = { Drum: 3, Carton: 2 };
+export const STACK_HEIGHT_DEFAULT = 2;
+export function stackHeight(pack: string | null | undefined): number {
+  return (pack && STACK_HEIGHT[pack]) || STACK_HEIGHT_DEFAULT;
+}
+/** Pallets one slot can hold in all (positions x stack height): the `bins.capacity` of a Block C slot. */
+export function palletsPerSlot(pack: string | null | undefined): number {
+  return POSITIONS_PER_SLOT * stackHeight(pack);
+}
 
 /**
  * Level colours for the rack-upright label, following the reference photo of
@@ -102,6 +137,10 @@ export function parseBinCode(raw: string): (BinParts & { code: string; kind: "ra
   if (code in FLOOR_LOCATIONS) return { code, kind: "floor", zone: FLOOR_LOCATIONS[code].zone, rack: null, level: null, position: null };
   const s = code.match(STAGING_LANE_REGEX);
   if (s) return { code, kind: "floor", zone: "STAGING", rack: null, level: null, position: s[1] };
+  const si = code.match(STAGING_INB_LANE_REGEX);
+  if (si) return { code, kind: "floor", zone: "STAGING", rack: null, level: null, position: si[1] };
+  const c = code.match(BLOCK_C_SLOT_REGEX);
+  if (c) return { code, kind: "floor", zone: c[1], rack: null, level: null, position: c[2] };
   return null;
 }
 

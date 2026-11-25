@@ -1,7 +1,7 @@
 // Investigasi selisih (lib/recon-investigate.ts, 0129): clues in words, the first bins to walk to,
 // the pallet hint, the check form and the confirmation sentence.
 import { strict as assert } from 'node:assert';
-import { checkDraft, linesQty, linesText, palletHint, planSentence, reasonLabel, topSuspects, type FixPlan, type SuspectBin } from '../lib/recon-investigate';
+import { checkDraft, draftSavable, linesQty, linesText, palletHint, planSentence, reasonLabel, topSuspects, type FixPlan, type SuspectBin } from '../lib/recon-investigate';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -45,6 +45,16 @@ test('palletHint: only whole pallets of this SKU', () => {
   assert.equal(palletHint(-47, 48), null);
   assert.equal(palletHint(-48, null), null);
   assert.equal(palletHint(0, 48), null);
+});
+
+test('draftSavable: an explicit 0 can be saved, untouched rows cannot, any quantity is fine', () => {
+  const row = (quantity: string) => ({ batch_lot: 'B', expiry_date: '2030-01-01', quantity });
+  const total = (d: ReturnType<typeof row>[]) => { const r = checkDraft(d, []); return 'lines' in r ? linesQty(r.lines) : null; };
+  assert.equal(draftSavable([row('0')], total([row('0')])), true);          // the bin holds none of this batch
+  assert.equal(draftSavable([row('')], total([row('')])), false);           // nothing typed yet
+  assert.equal(draftSavable([row('48')], total([row('48')])), true);
+  assert.equal(draftSavable([row('500')], total([row('500')])), true);      // more than the system holds is allowed
+  assert.equal(draftSavable([row('x')], total([row('x')])), false);         // invalid text
 });
 
 test('checkDraft: empty rows ignored, no rows = kosong, expiry needed only for stock new to the bin', () => {

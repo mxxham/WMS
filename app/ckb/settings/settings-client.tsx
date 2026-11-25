@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Notice } from "@/components/ckb/ui";
 import { callRpc } from "@/components/ckb/rpc-button";
-import { SAP_FIELDS, SAP_FIELD_LABEL, REQUIRED_FIELDS, type SapField } from "@/lib/ckb/sap-import";
+import { MappingFields, readMapping } from "@/components/ckb/sap-mapping-fields";
+import { type SapField } from "@/lib/ckb/sap-import";
 
 type SapImport = { verified: boolean; columns: Partial<Record<SapField, string[]>> };
 type Evidence = { max_mb: number; allowed_mime: string[]; retention_days: number };
@@ -84,22 +85,8 @@ export function SettingsClient({ value }: { value: Record<string, unknown> }) {
           Judul kolom ini belum dicocokkan dengan file SAP CKB yang asli. Centang &quot;terverifikasi&quot; hanya setelah file SAP nyata
           dari customer berhasil dibaca dan angkanya dicocokkan. Setiap snapshot mencatat status ini.
         </Notice>}
-        build={(fd) => {
-          const columns: Partial<Record<SapField, string[]>> = {};
-          for (const f of SAP_FIELDS) { const v = list(String(fd.get(`col-${f}`)).toLowerCase()); if (v.length) columns[f] = v; }
-          for (const f of REQUIRED_FIELDS) if (!columns[f]) throw new Error(`Kolom wajib ${SAP_FIELD_LABEL[f]} belum dipetakan.`);
-          return { verified: fd.get("verified") === "on", columns };
-        }}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {SAP_FIELDS.map((f) => (
-            <div key={f}>
-              <Label htmlFor={`s-col-${f}`}>{SAP_FIELD_LABEL[f]}{REQUIRED_FIELDS.includes(f) ? " *" : ""}</Label>
-              <Input id={`s-col-${f}`} name={`col-${f}`} defaultValue={(sapImport.columns[f] ?? []).join(", ")} placeholder="judul kolom, pisahkan koma" />
-            </div>
-          ))}
-        </div>
-        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" name="verified" defaultChecked={sapImport.verified} className="h-4 w-4" />
-          Terverifikasi dengan file SAP CKB asli</label>
+        build={(fd) => readMapping(fd, "col")}>
+        <MappingFields prefix="col" columns={sapImport.columns} verified={sapImport.verified} />
       </Section>
 
       <Section title="Format ekspor SAP" settingKey="sap_export"

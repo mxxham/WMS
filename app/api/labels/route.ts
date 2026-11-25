@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   try {
     bins = await fetchAll<Row>((a, b) => {
       // 0132: no label for a bin that does not exist (a pillar) or is not built yet (Rencana).
-      let q = supabase.from("bins").select("id, bin_code, zone, rack, level, position, abc_class")
+      let q = supabase.from("bins").select("id, bin_code, zone, rack, level, position, abc_class, site, assigned_sku, capacity")
         .or("block_kind.is.null,block_kind.eq.BLOCKED").order("bin_code");
       if (body.scope === "bins") q = q.in("bin_code", body.codes.map((c) => c.trim().toUpperCase()).filter(Boolean));
       else if (body.scope === "rack") q = q.eq("zone", body.zone).eq("rack", body.rack);

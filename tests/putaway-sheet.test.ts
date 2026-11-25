@@ -27,6 +27,18 @@ test('real 24 Sep sheet: 60 rows, no errors, dates in Jakarta calendar', () => {
   assert.deepEqual([r.sku, r.batch_lot, r.quantity, r.expiry_date], ['550058593', '15I26JJ', 48, '2030-09-15']);
 });
 
+test('a 19xx expiry (Excel two-digit year) is read as 100 years later', () => {
+  const rows = parsePutawaySheet(sheetOf([
+    HEADER,
+    ['CD01A01', 550044709, 24, 'P1', '1930-11-02', 1],
+    ['CD01A02', 550044709, 24, 'P2', '2030-11-02', 1],
+  ]));
+  assert.deepEqual(rows.map((r) => [r.error, r.expiry_date, r.expiry_sheet_year]), [
+    [null, '2030-11-02', '1930-11-02'],
+    [null, '2030-11-02', undefined],
+  ]);
+});
+
 test('row problems are reported per line; blank rows skipped', () => {
   const rows = parsePutawaySheet(sheetOf([
     HEADER,

@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { REASON_CODES, type ReasonCode } from "@/lib/inventory-control";
 import { jakartaDateTime } from "@/lib/trace";
-import type { RackCheckReport } from "@/lib/stockopname";
+import type { RackCheckReport } from "@/lib/stockcheck";
 import { cn, fmtNum } from "@/lib/utils";
 import { ReviewSummary } from "./review-summary";
 

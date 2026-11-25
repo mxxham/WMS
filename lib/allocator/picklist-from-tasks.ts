@@ -1,8 +1,8 @@
 import { replaySteps, stockIdentityKey, type ReplayStep } from './ledger';
 import type { AllocationLine, AllocationResult, Picklist, PickType } from './types';
-import { expiryText, withConfig } from './config';
+import { expiryText, isBlockCLocation, withConfig } from './config';
 import { lookupUom } from './uom-master';
-import { restNoteAt, type RestStep } from './picklist';
+import { BLOCK_C_SUFFIX, restNoteAt, type RestStep } from './picklist';
 import { movesOfPicks } from './pair-moves';
 import { compareWaveNo } from './earlier-waves';
 
@@ -217,30 +217,40 @@ export function picklistsFromTasks(waves: WaveRow[], tasks: TaskRow[], outbound:
         restNote: sisa.get(t.id)?.restNote ?? null,
       };
       });
-      const hasPallet = lines.some((l) => l.pickType === 'PALLET');
-      const hasCase = lines.some((l) => l.pickType === 'CASE');
-      out.push({
-        picklistId: `PL-${shipment || w.wave_no}`,
-        waveNo: w.wave_no,
-        shipmentNumbers: shipment ? [shipment] : [],
-        destination: w.destination,
-        shipToLocation: w.destination,
-        transport: w.truck,
-        truckType: w.truck,
-        slotTime: w.planned_slot,
-        taskType: hasPallet && hasCase ? 'MIXED' : hasPallet ? 'PALLET' : 'CASE',
-        orderNos,
-        lines,
-        totalCartons: lines.reduce((s, l) => s + l.qtyPick, 0),
-        totalPallets: lines.filter((l) => l.pickType === 'PALLET').length,
-        distinctLocations: new Set(lines.map((l) => l.location)).size,
-        distinctSkus: new Set(lines.map((l) => l.sku)).size,
-        shortages: outbound
-          .filter((o) => o.wave_id === w.id && o.shipment_number === shipment && o.quantity_requested !== undefined
-            && Number(o.quantity_allocated ?? 0) < Number(o.quantity_requested))
-          .map((o) => ({ sku: o.sku, qtyShort: Number(o.quantity_requested) - Number(o.quantity_allocated ?? 0) }))
-          .sort((a, b) => b.qtyShort - a.qtyShort || a.sku.localeCompare(b.sku)),
-      });
+      // 0147: the shipment's Block C rows are their own list (`-BC`), after its Oso 5 list, as buildPicklists prints it.
+      const cfg = withConfig();
+      const oso = lines.filter((l) => !isBlockCLocation(l.location, cfg));
+      const blockC = lines.filter((l) => isBlockCLocation(l.location, cfg));
+      for (const [group, isBlockC] of [[oso, false], [blockC, true]] as const) {
+        if (!group.length) continue;
+        group.forEach((l, i) => { l.seq = i + 1; });
+        const hasPallet = group.some((l) => l.pickType === 'PALLET');
+        const hasCase = group.some((l) => l.pickType === 'CASE');
+        out.push({
+          picklistId: `PL-${shipment || w.wave_no}${isBlockC ? BLOCK_C_SUFFIX : ''}`,
+          waveNo: w.wave_no,
+          shipmentNumbers: shipment ? [shipment] : [],
+          destination: w.destination,
+          shipToLocation: w.destination,
+          transport: w.truck,
+          truckType: w.truck,
+          slotTime: w.planned_slot,
+          taskType: hasPallet && hasCase ? 'MIXED' : hasPallet ? 'PALLET' : 'CASE',
+          ...(isBlockC ? { site: 'BLOCKC' as const } : {}),
+          orderNos,
+          lines: group,
+          totalCartons: group.reduce((s, l) => s + l.qtyPick, 0),
+          totalPallets: group.filter((l) => l.pickType === 'PALLET').length,
+          distinctLocations: new Set(group.map((l) => l.location)).size,
+          distinctSkus: new Set(group.map((l) => l.sku)).size,
+          // The shipment's shortages print once: on its Oso 5 list, or on the Block C list when that is all it has.
+          shortages: isBlockC && oso.length ? [] : outbound
+            .filter((o) => o.wave_id === w.id && o.shipment_number === shipment && o.quantity_requested !== undefined
+              && Number(o.quantity_allocated ?? 0) < Number(o.quantity_requested))
+            .map((o) => ({ sku: o.sku, qtyShort: Number(o.quantity_requested) - Number(o.quantity_allocated ?? 0) }))
+            .sort((a, b) => b.qtyShort - a.qtyShort || a.sku.localeCompare(b.sku)),
+        });
+      }
     }
   }
   return out;

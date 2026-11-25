@@ -1,14 +1,15 @@
-import { parseBinCode, FLOOR_LOCATIONS } from "@/config/warehouse";
+import { parseBinCode, FLOOR_LOCATIONS, LOCATION_ALIASES } from "@/config/warehouse";
 import { excelBatchText, excelCalendarDay, excelDateIso } from "@/lib/allocator/excel-date";
 import { lookupUom } from "@/lib/allocator/uom-master";
+import { centuryFix } from "@/lib/data-quality";
 
-export const FIELDS = ["bin_code", "sku", "description", "batch_lot", "quantity", "expiry_date", "received_date", "uom", "upp"] as const;
+export const FIELDS = ["bin_code", "sku", "description", "batch_lot", "quantity", "expiry_date", "received_date", "uom", "upp", "count_qty"] as const;
 export type Field = (typeof FIELDS)[number];
 export type Mapping = Partial<Record<Field, number>>; // field -> column index
 
 export const FIELD_LABELS: Record<Field, string> = {
   bin_code: "Kode bin *", sku: "SKU / material", description: "Deskripsi", batch_lot: "Batch/Lot", quantity: "Qty",
-  expiry_date: "Tanggal expired", received_date: "Tanggal terima (GR)", uom: "UoM", upp: "Unit per palet (UPP)",
+  expiry_date: "Tanggal expired", received_date: "Tanggal terima (GR)", uom: "UoM", upp: "Unit per palet (UPP)", count_qty: "On hand (hasil stock opname)",
 };
 
 // Header aliases seen in CKB sheets, in priority order ("Remain Qty" beats "Qty").
@@ -22,6 +23,7 @@ const ALIASES: Record<Field, string[]> = {
   received_date: ["gr date", "received", "received_date"],
   uom: ["uom", "base unit of measure", "sales unit"],
   upp: ["upp"],
+  count_qty: ["on hand"],
 };
 
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -80,9 +82,13 @@ export function toDate(v: unknown): { iso: string | null; problem: string | null
 export type ValidationResult = { rows: ImportRow[]; skippedBlank: number };
 
 /** `lines[i]` is the Excel row number of `rows[i]` (see lib/read-sheet.ts). */
-export function validateRows(rows: unknown[][], lines: number[], headerRow: number, map: Mapping, today = new Date()): ValidationResult {
+export function validateRows(
+  rows: unknown[][], lines: number[], headerRow: number, map: Mapping, today = new Date(),
+  /** Stock-opname count: Qty comes from the `on hand` column (the team types the counted number over its formula) and a blank there is 0. */
+  opts: { useCount?: boolean } = {},
+): ValidationResult {
   const out: ImportRow[] = [];
-  const seen = new Map<string, number>();
+  const seen = new Map<string, { line: number; idx: number }>();
   const todayIso = isoDate(today);
   let skippedBlank = 0;
   const get = (r: unknown[], f: Field) => (map[f] === undefined ? undefined : r[map[f]!]);
@@ -91,7 +97,12 @@ export function validateRows(rows: unknown[][], lines: number[], headerRow: numb
     const r = rows[i] ?? [];
     const rawBin = get(r, "bin_code");
     const rawSku = get(r, "sku");
-    const rawQty = get(r, "quantity");
+    let rawQty = get(r, "quantity");
+    if (opts.useCount) {
+      const phys = get(r, "count_qty");
+      const blank = phys === null || phys === undefined || phys === "";
+      rawQty = blank ? ((rawBin ?? "") !== "" || (rawSku ?? "") !== "" ? 0 : undefined) : phys;
+    }
     if ([rawBin, rawSku, rawQty].every((v) => v === null || v === undefined || v === "")) { skippedBlank++; continue; }
 
     const msgs: string[] = [];
@@ -99,10 +110,11 @@ export function validateRows(rows: unknown[][], lines: number[], headerRow: numb
     const err = (m: string) => { msgs.push(m); status = "error"; };
     const warn = (m: string) => { msgs.push(m); if (status === "ok") status = "warning"; };
 
-    const code = String(rawBin ?? "").trim().toUpperCase();
+    const upper = String(rawBin ?? "").trim().toUpperCase();
+    const code = LOCATION_ALIASES[upper] ?? upper;
     const parsed = code ? parseBinCode(code) : null;
     if (!code) err("Kode bin kosong");
-    else if (!parsed) err(`Format kode bin "${code}" tidak dikenal (contoh: CA01C01, STAGING, STG_01)`);
+    else if (!parsed) err(`Format kode bin "${code}" tidak dikenal (contoh: CA01C01, STAGING, STG_01, FA-01)`);
 
     const sku = rawSku === null || rawSku === undefined ? "" : String(rawSku).trim();
     let qty: number | null = null;
@@ -124,7 +136,14 @@ export function validateRows(rows: unknown[][], lines: number[], headerRow: numb
 
     let expiry: string | null = null;
     if (sku && qty) {
-      const d = toDate(get(r, "expiry_date"));
+      let d = toDate(get(r, "expiry_date"));
+      // Excel turns a two-digit year 30..99 into 1930..1999 ("2-Nov-30" -> 1930). No stock expires in the 1900s:
+      // read it as the same day 100 years later and say so.
+      const century = centuryFix(d.iso);
+      if (century) {
+        warn(`Tahun expired ${d.iso!.slice(0, 4)} di file dibaca ${century.slice(0, 4)} (${century}); Excel membaca tahun 2 digit sebagai 19xx`);
+        d = toDate(century);
+      }
       expiry = d.iso;
       const isQuarantine = parsed?.zone === "QUARANTINE";
       if (d.problem === "kosong") { if (!isQuarantine) warn("Tanggal expired kosong"); }
@@ -137,8 +156,18 @@ export function validateRows(rows: unknown[][], lines: number[], headerRow: numb
 
     if (code && sku && status !== "error") {
       const key = `${code}|${sku}|${batch}|${expiry ?? ""}`;
-      if (seen.has(key)) err(`Duplikat bin+SKU+batch+expired dengan baris ${seen.get(key)}`);
-      else seen.set(key, lines[i]);
+      const first = seen.get(key);
+      if (first && parsed?.kind === "floor" && qty !== null) {
+        // A floor location (quarantine, staging) may list the same goods on two lines: they are one stock row, so the
+        // quantities add up. A rack position is one pallet place, so a duplicate there stays an error.
+        const into = out[first.idx];
+        into.quantity = (into.quantity ?? 0) + qty;
+        into.messages.push(`Digabung dengan baris ${lines[i]} (lokasi lantai, SKU, batch dan expired sama)`);
+        if (into.status === "ok") into.status = "warning";
+        continue;
+      }
+      if (first) err(`Duplikat bin+SKU+batch+expired dengan baris ${first.line}`);
+      else seen.set(key, { line: lines[i], idx: out.length });
     }
 
     const upp = Number(get(r, "upp"));

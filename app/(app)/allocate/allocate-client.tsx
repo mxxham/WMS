@@ -482,6 +482,7 @@ function PicklistTab({ run }: { run: PipelineResult }) {
         <details key={pl.picklistId} className="group" open>
           <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 px-4 py-3">
             <span className="font-cond text-lg font-semibold">{pl.picklistId}</span>
+            {pl.site === "BLOCKC" && <span className="rounded bg-ckb px-1.5 py-0.5 text-xs font-semibold text-white">Block C</span>}
             <span className="text-sm text-steel-500">NO {pl.waveNo} · {pl.destination} · slot {pl.slotTime ?? "–"} · DO {pl.orderNos.join(", ")} · {fmtNum(pl.totalCartons)} karton</span>
           </summary>
           <Table>

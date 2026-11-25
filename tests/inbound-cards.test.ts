@@ -37,6 +37,15 @@ test('cartons keep their unit and no manufacture date', () => {
   assert.equal(showsMfgDate('550070614', r.master.get('550070614')?.uom), false);
 });
 
+test('550076253 (a carton) prints its manufacture date by request: typed, else from the batch code; its unit stays Carton', () => {
+  const gear = { sku: '550076253', uom: 'CAR', description: 'AdvScooterGearOil_24*0.12L_A' };
+  const typed = receiptCards(head, [pallet({ items: gear })]);
+  assert.equal(typed.cards[0].mfgDate, '01/09/2026');
+  assert.equal(typed.master.get('550076253')?.uom, 'CAR');
+  assert.equal(showsMfgDate('550076253', typed.master.get('550076253')?.uom), true, 'the MFG DATE box is drawn');
+  assert.equal(receiptCards(head, [pallet({ items: gear, mfg_date: null, batch_lot: '14H26JJ' })]).cards[0].mfgDate, '14/08/2026');
+});
+
 test('shipment number and month come from the plan', () => {
   const c = receiptCards(head, [pallet()]).cards[0];
   assert.deepEqual([c.shipmentNo, c.month, c.vendorAsnNo, c.putawayNo], [990000103, 'OCTOBER', '990000203', '990000203-1']);

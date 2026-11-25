@@ -11,7 +11,7 @@ export type LiveTable = "waves" | "pick_tasks" | "bins" | "bin_changes" | "outbo
   | "pick_line_requests" | "import_holds" | "shipment_assignments" | "shipment_load_no" | "ledger_days" | "ledger_notes"
   | "ckb_rebagging_jobs" | "ckb_rebagging_sources" | "ckb_rebagging_outputs" | "ckb_rebagging_evidence" | "ckb_rebagging_events"
   | "ckb_stocktakes" | "ckb_counts" | "ckb_adjustments" | "ckb_inspections" | "ckb_evidence" | "ckb_sap_imports" | "ckb_sap_exports"
-  | "ckb_customers";
+  | "ckb_customers" | "recon_claims" | "ckb_hk_checkins" | "ckb_hk_findings" | "ckb_hk_scores";
 export type LiveStatus = "connecting" | "live" | "offline";
 
 /**

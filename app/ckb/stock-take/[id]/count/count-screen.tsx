@@ -6,7 +6,7 @@ import { Input, Label } from "@/components/ui/input";
 import { callRpc } from "@/components/ckb/rpc-button";
 import { offlineFetch } from "@/lib/net";
 import { photoReason } from "@/lib/ckb/count-rules";
-import { parseCountInput } from "@/lib/ckb/stocktake";
+import { parseCountInput, stockTypeTag } from "@/lib/ckb/stocktake";
 import type { TaskEvidence, TaskRow } from "@/lib/ckb/stocktake-data";
 import { cn, fmtDate, fmtNum } from "@/lib/utils";
 
@@ -18,9 +18,10 @@ const newKey = () => crypto.randomUUID();
  * The database enforces the same rule (0133), this only says it first. One key per opened form, so a retry
  * after a dropped connection cannot count twice.
  */
-export function CountScreen({ t, photos, rules, canCount, lead, onSent, onBack, progressText }: {
-  t: TaskRow; photos: TaskEvidence[]; rules: { photoRules: boolean; customerAlways: boolean };
-  canCount: boolean; lead: boolean; onSent: () => void; onBack: () => void; progressText: string;
+export function CountScreen({ t, photos, rules, canCount, lead, batchInfoOnly, onSent, onBack, progressText }: {
+  t: TaskRow; photos: TaskEvidence[]; rules: { photoRules: boolean; customerAlways: boolean; photoScope?: "TASK" | "BIN" };
+  /** the customer counts by material and bin (0161): batch codes are shown, never checked */
+  canCount: boolean; lead: boolean; batchInfoOnly: boolean; onSent: () => void; onBack: () => void; progressText: string;
 }) {
   const router = useRouter();
   const [raw, setRaw] = useState("");
@@ -96,11 +97,16 @@ export function CountScreen({ t, photos, rules, canCount, lead, onSent, onBack, 
         {t.status === "RECOUNT_REQUESTED" && <p className="rounded-lg bg-warn/10 px-3 py-2 text-sm text-[#8a5a00]">Diminta hitung lagi. Hitung dari awal.</p>}
         <div>
           <span className="inline-block rounded-plate bg-plate px-3 py-1 font-cond text-3xl font-bold leading-none tracking-tight text-steel">{t.storage_bin || "–"}</span>
-          <p className="mt-2 text-lg font-semibold leading-tight">{t.material_code}{t.origin === "FOUND" && <span className="ml-2 text-sm font-normal text-warn">temuan</span>}</p>
+          <p className="mt-2 text-lg font-semibold leading-tight">{t.material_code}{t.origin === "FOUND" && <span className="ml-2 text-sm font-normal text-warn">temuan</span>}
+            {stockTypeTag(t.stock_type) && <span className="ml-2 rounded-plate bg-warn/15 px-2 py-0.5 align-middle font-cond text-sm font-bold text-[#8a5a00]">{stockTypeTag(t.stock_type)}</span>}</p>
           <p className="text-sm text-steel-500">{t.description}</p>
-          <p className="text-xs text-steel-500">{t.batch ? `Batch ${t.batch}` : "Tanpa batch"}{t.expiry_date ? ` · exp ${fmtDate(t.expiry_date)}` : ""} · {t.uom}
+          <p className="text-xs text-steel-500">
+            {batchInfoOnly
+              ? (t.batch_codes?.length ? `Kode batch SAP (informasi): ${t.batch_codes.join(", ")}` : "Tanpa kode batch")
+              : <>{t.batch ? `Batch ${t.batch}` : "Tanpa batch"}{t.expiry_date ? ` · exp ${fmtDate(t.expiry_date)}` : ""}</>} · {t.uom}
             {lead && t.baseline_qty !== null && <span className="font-medium text-steel"> · SAP {fmtNum(Number(t.baseline_qty), 3)}</span>}</p>
           {t.identity_issue && lead && <p className="mt-1 text-xs text-warn">SAP mencatat material ini di {t.baseline_rows} baris: hitung semuanya bersama.</p>}
+          {batchInfoOnly && (t.batch_codes?.length ?? 0) > 1 && <p className="mt-1 text-xs text-steel-700">Ada {t.batch_codes!.length} kode batch di lokasi ini: hitung semuanya bersama, satu jumlah.</p>}
         </div>
 
         {canCount ? (
@@ -116,7 +122,7 @@ export function CountScreen({ t, photos, rules, canCount, lead, onSent, onBack, 
               <p className="mt-1 text-xs text-steel-500">Isi 0 jika barang tidak ada. Desimal pakai koma.</p>
             </div>
 
-            {(t.batch || t.expiry_date) && (
+            {!batchInfoOnly && (t.batch || t.expiry_date) && (
               <div className="space-y-2">
                 {t.batch && yesNo(batchOk, setBatchOk, `Batch ${t.batch}`)}
                 {t.expiry_date && yesNo(expiryOk, setExpiryOk, `Expired ${fmtDate(t.expiry_date)}`)}

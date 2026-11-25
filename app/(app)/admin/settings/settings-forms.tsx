@@ -34,6 +34,16 @@ export function SettingsForms({ layout }: { layout: Layout & { _note?: string } 
               <div><Label htmlFor="floor_x">Area lantai X (m)</Label><Input id="floor_x" name="floor_x" type="number" step="0.1" defaultValue={layout.floor_zone_origin.x} /></div>
               <div><Label htmlFor="floor_z">Area lantai Z (m)</Label><Input id="floor_z" name="floor_z" type="number" step="0.1" defaultValue={layout.floor_zone_origin.z} /></div>
             </div>
+            {/* 0148: Block C is another building, drawn in its own area of the 3D view. */}
+            <p className="pt-2 text-sm font-semibold">Block C (gedung lain)</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div><Label htmlFor="block_c_x">FA-01 di X (m)</Label><Input id="block_c_x" name="block_c_x" type="number" step="0.1" defaultValue={layout.block_c?.origin.x ?? 0} /></div>
+              <div><Label htmlFor="block_c_z">FA-01 di Z (m)</Label><Input id="block_c_z" name="block_c_z" type="number" step="0.1" defaultValue={layout.block_c?.origin.z ?? 70} /></div>
+              <div><Label htmlFor="block_c_pitch">Jarak antar slot (m)</Label><Input id="block_c_pitch" name="block_c_pitch" type="number" step="0.1" min={0.5} defaultValue={layout.block_c?.slot_pitch_m ?? 2.6} /></div>
+              <div><Label htmlFor="block_c_depth">Kedalaman satu slot (m)</Label><Input id="block_c_depth" name="block_c_depth" type="number" step="0.1" min={1} defaultValue={layout.block_c?.slot_depth_m ?? 7} /></div>
+              <div><Label htmlFor="block_c_gap">Jarak baris FA ke baris FB (m)</Label><Input id="block_c_gap" name="block_c_gap" type="number" step="0.1" min={1} defaultValue={layout.block_c?.lane_gap_m ?? 10} /></div>
+              <div><Label htmlFor="block_c_pallet">Tinggi satu palet (m)</Label><Input id="block_c_pallet" name="block_c_pallet" type="number" step="0.1" min={0.2} defaultValue={layout.block_c?.pallet_height_m ?? 1.2} /></div>
+            </div>
           </ActionForm>
         </CardContent>
       </Card>

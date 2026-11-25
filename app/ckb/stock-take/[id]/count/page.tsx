@@ -21,8 +21,11 @@ export default async function CountPage({ params }: { params: Promise<{ id: stri
   const evidence = await loadTaskEvidence(tasks.map((t) => t.id));
   const [{ data: assigned }, { data: customer }] = await Promise.all([
     db.from("ckb_stocktake_counters").select("user_id").eq("stocktake_id", id),
-    db.from("ckb_customers").select("count_photo_required").eq("id", s.customer_id).maybeSingle(),
+    db.from("ckb_customers").select("count_photo_required, count_identity, photo_scope").eq("id", s.customer_id).maybeSingle(),
   ]);
+  // 0163: a bin-photo customer: the bins this account may count and how many photos each has
+  const binScope = customer?.photo_scope === "BIN" && s.photo_rules !== false;
+  const { data: bins } = binScope ? await db.rpc("ckb_stocktake_bins_for", { p_stocktake: id }) : { data: [] };
   // 0133: the task list already holds only the lines this account may count; none = nothing assigned here.
   const notAssigned = user.ckbRole === "operator" && tasks.length === 0
     && (assigned ?? []).length > 0 && !(assigned ?? []).some((a) => a.user_id === user.id);
@@ -40,7 +43,9 @@ export default async function CountPage({ params }: { params: Promise<{ id: stri
         {notAssigned && <Notice tone="warn">Belum ada baris yang ditugaskan ke Anda di sesi ini. Minta supervisor menugaskan lokasi.</Notice>}
         <CountClient sessionId={id} sessionStatus={s.status} tasks={tasks} evidence={evidence}
           lead={lead} canCount={open && !notAssigned}
-          rules={{ photoRules: s.photo_rules !== false, customerAlways: !!customer?.count_photo_required }}
+          rules={{ photoRules: s.photo_rules !== false, customerAlways: !!customer?.count_photo_required, photoScope: customer?.photo_scope === "BIN" ? "BIN" : "TASK" }}
+          batchInfoOnly={customer?.count_identity === "MATERIAL_BIN"} binScope={binScope}
+          bins={((bins ?? []) as { storage_bin: string; bin_id: string | null; photos: number; lines: number }[])}
           title={`Hitung stok ${s.customer_name}`}
           subtitle={`${s.ref_no} · ${s.warehouse}${lead ? "" : " · ditugaskan ke Anda"}${s.blind && !lead ? " · hitung buta" : ""}`} />
       </CkbBody>

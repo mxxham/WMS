@@ -72,6 +72,12 @@ export function planPutaway(input: {
   lines: PutawayLine[]; emptyBins: string[]; pickfaces: Map<string, string>;
   /** where each SKU already is: bins with stock and bins other receipts have chosen */
   occupied?: { bin: string; sku: string }[];
+  /**
+   * Block C (0147): the dedicated slots of each Block C SKU, in the order to fill them, with the pallets of room
+   * left in each. A SKU listed here goes ONLY to these slots, never to a rack (the database refuses a Block C SKU
+   * in Oso 5). Every pallet, full or partial, takes one place in a slot.
+   */
+  blockC?: Record<string, { bin: string; free: number }[]>;
 }): { pallets: PalletPlan[]; warnings: string[] } {
   const pickfaceBins = new Set(input.pickfaces.values());
   const free = input.emptyBins.map(parse).filter((b): b is Bin => !!b && !pickfaceBins.has(b.code));
@@ -139,9 +145,16 @@ export function planPutaway(input: {
     if (upp) { for (let i = 0; i < Math.floor(l.quantity / upp); i++) sizes.push(upp); if (l.quantity % upp) sizes.push(l.quantity % upp); }
     else sizes.push(l.quantity);
 
+    const slots = input.blockC?.[l.sku];
     sizes.forEach((q, i) => {
       const full = !!upp && q === upp;
       const base = { line: l.line, sku: l.sku, pallet_no: i + 1, quantity: q, full, pack };
+      if (slots) {
+        const slot = slots.find((x) => x.free > 0);
+        if (slot) slot.free--;
+        pallets.push({ ...base, bin: slot?.bin ?? null, why: slot ? null : "Semua slot Block C untuk SKU ini penuh: pilih bin sendiri atau kosongkan slot" });
+        return;
+      }
       if (!pack) { pallets.push({ ...base, bin: null, why: "Jenis kemasan tidak dikenal: pilih bin sendiri" }); return; }
       const allowed = LEVELS[pack];
       if (!full) {

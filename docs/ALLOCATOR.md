@@ -49,6 +49,25 @@ Quantities are in **cartons (CAR)** throughout, matching SAP `Delivery quantity`
 and WMS `Qty`. `UPP` is cartons per pallet, read from the WMS row and falling
 back to `MASTER DATA`.
 
+### Block C — a second building (0147)
+
+Block C floor slots (`FA-01`..`FB-20`, `blockCLocationPattern`) are pickable like rack bins, with these differences
+(spec `docs/superpowers/specs/2026-11-20-block-c-floor-storage-design.md`):
+
+- **FEFO is global.** A Block C stack and an Oso 5 bin of the same SKU sit in one pool; the earliest expiry wins
+  whichever building it is in. `selectNextBin` is still the only ranking function.
+- **A slot is a stack, not one pallet.** Up to 3 pallets of one SKU, one batch, one expiry. `toLedgers` turns it into
+  one sealed pallet ledger per full pallet (`upp` cartons) plus one open ledger for the loose part (`qty % upp`), so the
+  rules above apply per pallet unchanged: whole pallets first, the loose rest from the open pallet, a sealed pallet only
+  opens when the open one cannot cover it. `palletKind` repeats that on the replay: PALLET when a full pallet exists,
+  `breaksPallet` when the loose part is smaller than the pick.
+- **No pickface, no replenishment, no Bin To Bin.** A Block C SKU can never enter Oso 5, so a pick never carries a rest
+  anywhere: it stays in the stack (`tetap di bin`). `relocateByWaveOrder` skips these lines.
+- **One Block C picklist per shipment**, `PL-<shipment>-BC` (`Picklist.site = 'BLOCKC'`), forklift and handpick rows
+  together. It prints after the shipment's Oso 5 list, and `pickRowCompare` puts Block C rows last, so print order, task
+  numbering and the Sisa replay stay one order. The route walks `FA` down and `FB` back up (`blockCSequenceKey`).
+- Two whole pallets from one stack are two forklift rows, never one row of two pallets.
+
 ### Pickface replenishment — the bin-to-bin part
 
 Run **after** outbound allocation, against whatever stock is left once today's

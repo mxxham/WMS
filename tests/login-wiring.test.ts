@@ -127,13 +127,54 @@ test('app/ckb/layout.tsx exists, checks ckb_3pl, and does NOT contain WaveAlerts
   assert.ok(l.includes('CkbNav') && nav.includes('action="/keluar"') && nav.includes('method="post"'), 'ckb Keluar form not a plain POST');
 });
 
-test('app/ckb/page.tsx is the CKB dashboard: real counts from the database, no Shell links', () => {
-  const p = src('app/ckb/page.tsx');
+test('app/ckb/dashboard/page.tsx is the CKB dashboard: real counts from the database, no Shell links', () => {
+  const p = src('app/ckb/dashboard/page.tsx');
   // The holding screen of 2026-10-20 became the dashboard: its numbers come from ckb_dashboard()
   // (0107) and RLS reads, never from Shell tables or fixed figures.
   assert.ok(p.includes('rpc("ckb_dashboard"'), 'dashboard does not read ckb_dashboard()');
   assert.ok(!/from\("(movements|inventory|waves|pick_tasks|bins|items)"\)/.test(p), 'dashboard reads a Shell table');
   assert.ok(!p.includes('"/scan"') && !p.includes('"/dashboard"') && !p.includes('"/waves"'), 'page must not link to Shell routes');
+});
+
+test('app/ckb/(home)/page.tsx is the CKB home: counts from the same RPCs as the dashboard, no Shell table, no Shell link', () => {
+  const p = src('app/ckb/(home)/page.tsx') + src('components/ckb/ckb-home.tsx');
+  assert.ok(p.includes('rpc("ckb_dashboard"') && p.includes('rpc("ckb_hk_dashboard"'), 'home does not read the CKB dashboard functions');
+  assert.ok(!/from\("(movements|inventory|waves|pick_tasks|bins|items|inventory_detail)"\)/.test(p), 'home reads a Shell table');
+  assert.ok(!p.includes('"/scan"') && !p.includes('"/dashboard"') && !p.includes('"/waves"') && !p.includes('"/home"'), 'home must not link to Shell routes');
+  assert.ok(p.includes('FloorLine') && p.includes('FloorDoorLink') && p.includes('data-floor-stage'), 'home must carry the floor line like the Shell home');
+});
+
+test('signing in: a CKB-only account lands on the CKB home and the login line carries on into it, like the Shell home', () => {
+  const form = src('app/login/login-form.tsx');
+  assert.ok(form.includes('to !== "/home" && to !== "/ckb"'), 'the login line does not hand over to /ckb');
+  assert.ok(form.includes('floor-exit'), 'the login line does not leave');
+  const actions = src('app/login/actions.ts');
+  assert.ok(actions.includes('home === "/" ? "/home" : home'), 'a CKB account must land on its home path (/ckb)');
+});
+
+test('the login page names no single customer or product in its headline, and lists both applications', () => {
+  const p = src('app/login/page.tsx');
+  assert.ok(!/Gudang pelumas|Shell, Surabaya/.test(p), 'login headline still names Shell');
+  assert.ok(p.includes('Shell WMS') && p.includes('CKB 3PL'), 'login page does not show the two applications');
+});
+
+test('login fields are judged one at a time', () => {
+  const form = src('app/login/login-form.tsx');
+  assert.ok(form.includes('touchedUser') && form.includes('touchedPass') && !form.includes('setTouched('), 'one shared touched flag would accuse both fields at once');
+});
+
+test('every CKB page has the footer, and the CKB legal pages exist and are gated for every CKB role', () => {
+  assert.ok(src('app/ckb/layout.tsx').includes('<CkbFooter />'), 'the CKB layout does not render the footer');
+  const f = src('components/ckb/ckb-footer.tsx');
+  assert.ok(f.includes('/ckb/lisensi') && f.includes('/ckb/privasi') && f.includes('home-credits'), 'footer links missing');
+  assert.ok(!f.includes('openWelcome') && !f.includes('href="/lisensi"') && !f.includes('href="/privasi"'), 'the CKB footer must not use Shell-only links (a CKB account cannot open them)');
+  for (const p of ['app/ckb/lisensi/page.tsx', 'app/ckb/privasi/page.tsx']) assert.ok(src(p).includes('requireCkb('), `${p} has no requireCkb gate`);
+});
+
+test('the CKB mark is the shared logo from config/brand.ts, not a typed tile', () => {
+  const nav = src('components/ckb/nav.tsx');
+  assert.ok(nav.includes('BRAND.logo'), 'CkbMark must use BRAND.logo');
+  assert.ok(!nav.includes('>\n      3PL\n'), 'the plain 3PL tile is still there');
 });
 
 test('app/akses/page.tsx redirects authorized user to app home and has Keluar form', () => {
@@ -150,8 +191,10 @@ test('app/akses/page.tsx redirects authorized user to app home and has Keluar fo
 
 test('app/ckb/** files do not import SessionProvider or Shell nav', () => {
   const layout = src('app/ckb/layout.tsx');
-  const page = src('app/ckb/page.tsx');
-  for (const f of [layout, page]) {
+  const page = src('app/ckb/dashboard/page.tsx');
+  const home = src('app/ckb/(home)/page.tsx');
+  const homeView = src('components/ckb/ckb-home.tsx');
+  for (const f of [layout, page, home, homeView]) {
     assert.ok(!f.includes('SessionProvider'), 'ckb file imports SessionProvider');
     assert.ok(!f.includes('from "@/components/app/nav"'), 'ckb file imports Shell nav');
     assert.ok(!f.includes('from "@/components/app/wave-alerts"'), 'ckb file imports WaveAlerts');

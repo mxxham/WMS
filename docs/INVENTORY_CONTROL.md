@@ -118,6 +118,12 @@ retur, lainnya), **keterangan**, dan **nama petugas**.
   mencatat adjustment berapa pun jumlahnya, tanpa persetujuan orang lain.
   Kode alasan dan nama tetap wajib; di riwayat mutasi adjustment itu tidak
   punya nama penyetuju. Di halaman lain batasnya tetap berlaku.
+- Menambah stok pada bin kosong (0142): dari baris bin kosong (jumlah 0) di
+  **Inventory → Stok**, tombol tambah mengisi SKU, batch, expired dan jumlah
+  yang benar-benar ada di bin, dengan kode alasan dan nama. Tercatat sebagai
+  satu adjustment yang membuat baris stoknya, langsung tanpa persetujuan
+  orang lain (aturan 0140 yang sama). Bin yang tidak boleh diisi — rak
+  hilang/tiang, rencana, atau yang dipinjam CKB 3PL — tetap ditolak database.
 - Hasil hitung diterapkan oleh orang yang **bukan** penghitung. Selisih di atas
   batas hanya bisa diterapkan setelah dua hitungan sama.
 - Penerimaan diposting oleh orang yang **bukan** pemeriksa.

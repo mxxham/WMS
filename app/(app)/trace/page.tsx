@@ -67,7 +67,7 @@ export default async function TracePage({ searchParams }: { searchParams: Promis
           return q.order("created_at").order("id").range(a, b);
         }),
         fetchAll<TraceStock>((a, b) => {
-          let q = supabase.from("inventory_detail").select(STOCK_COLS).ilike("batch_lot", exact(batch));
+          let q = supabase.from("inventory_detail_all").select(STOCK_COLS).ilike("batch_lot", exact(batch));
           if (sku) q = q.eq("sku", sku);
           return q.order("sku").order("bin_code").order("id").range(a, b);
         }),
@@ -133,7 +133,7 @@ export default async function TracePage({ searchParams }: { searchParams: Promis
   /** Not an exact batch code: stock whose batch, SKU, bin or description matches, and past batches by code. */
   async function findBatches(q: string, skuOnly: string) {
     const like = `%${exact(q)}%`;
-    const stockQ = () => { const s = supabase.from("inventory_detail").select(STOCK_COLS).gt("quantity", 0); return skuOnly ? s.eq("sku", skuOnly) : s; };
+    const stockQ = () => { const s = supabase.from("inventory_detail_all").select(STOCK_COLS).gt("quantity", 0); return skuOnly ? s.eq("sku", skuOnly) : s; };
     const [byBatch, bySku, byBin, byDesc, pastRes] = await Promise.all([
       fetchAll<TraceStock>((a, b) => stockQ().ilike("batch_lot", like).order("id").range(a, b)),
       fetchAll<TraceStock>((a, b) => stockQ().eq("sku", q).order("id").range(a, b)),

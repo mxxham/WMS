@@ -296,6 +296,12 @@ the real floor incident that motivated them, and that context is the point.
 Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touching anything under
 `app/ckb`, `lib/ckb`, `components/ckb` or migrations `0099`–`0107`.
 
+- **Housekeeping (0157-0158, `/ckb/housekeeping`, `lib/ckb/housekeeping.ts`, spec `docs/superpowers/specs/2026-11-24-ckb-housekeeping-design.md`,
+  `docs/CKB_3PL.md` §12)**: a PIC (CKB employee, personal account) photographs their rack **before and after** every working day
+  (Monday-Friday); submitted counts as done, a supervisor may reject. Areas are racks (seeded from the CKB racks) or manual locations; late
+  entries within 3 working days; on-behalf entries by a lead. **A customer never sees a person's name**: no customer policy on any `ckb_hk_*`
+  table, only the `ckb_hk_customer_*` / `ckb_hk_compliance` / `ckb_hk_photo_open` functions, and photos are in `ckb_hk_photos` (no name column),
+  not `ckb_evidence`. Never add a name column to what a customer reads. SQL tests 117-118.
 - **App access, CKB role and customer scope are three things** (`profiles.apps`, `ckb_user_roles`,
   `ckb_customer_members`). A Shell role grants nothing in CKB; `has_role()` (Shell) now also needs
   the `shell_wms` app, and `is_active()` refuses customer-only accounts (0105).
@@ -398,6 +404,33 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
   `ckb_stocktake_tasks`); photo rules per round are enforced by triggers on `ckb_counts` / `ckb_evidence` /
   `ckb_count_tasks` (only sessions with `photo_rules`, i.e. created after 0133). CKB SQL tests that pin 0101 behaviour set
   `photo_rules = false` on their session. `docs/CKB_3PL.md` §5.4b, SQL test 97.
+- **Dynamic release (Truk datang) was removed (0146, user decision 18 Nov 2026)**: locking a wave until its truck arrived
+  (0141) got in the way because every picklist is printed at once. Waves are never locked; `0141` stays as history and
+  `0146` unlocks any locked wave and drops `lock_waves`, `release_waves` and the posting guard. `waves.locked_at` /
+  `released_at` stay as inert columns; do not bring the lock back.
+- **A full import replaces the stock (0143, user decision 17 Nov 2026)**: `Ganti seluruh stok` zeroes every stock row
+  the file does not list, whoever moved it last. 0108's hold (stock the app moved last was kept for an admin) is gone
+  from `import_snapshot`: on 16 Nov the file booked another SKU into 26 bins next to a held one, and one bin showed two
+  SKUs (rule: one bin, one SKU). So a move recorded only in the app is undone by the next full import — the Excel is
+  the stock of record on an import day; do not bring the hold back. Open holds are settled by the next full import
+  (`KEPT` when the file lists the stock, else `ZEROED`). Still untouched: bins with rows validation rejected
+  (`keep_bins`) and CKB racks; `import_holds` / `resolve_import_holds` remain for those and for history. SQL test 70.
+- **Stock Opname Rak, formerly Cek stok rak (0144, `/stockopname`, `lib/stockcheck*.ts`, user request 17 Nov 2026)**: one aisle bin by bin (bay 01 on top,
+  40 at the bottom, then level A-E, then position), NOT blind: the system's quantity, batch and expiry are inputs filled
+  with what it holds. Typed changes go to `apply_rack_check` in ONE save, all or none: quantity = one adjustment of the
+  difference; batch / expiry = the stock moves to its new identity (-q old, +q new, merging when the bin has it; refused
+  while an open wave task points at the old identity); `add` = stock found that the system lacks (expiry required).
+  Every line carries `expected_qty` (what the page showed): a pick posted meanwhile makes it refuse, never overwrite.
+  A save that makes a bin hold a second SKU is refused (one bin, one SKU; a bin that already had two can still be fixed).
+  Like 0140 it posts without a second person at any quantity (supervisor / admin, reason, name; no `approved_by_name`).
+  A quantity left below what open waves promised is booked and returned as a warning (the wave shows stok kurang).
+  The Excel list for the rack (`stockcheck-workbook.ts`, one sheet per aisle, A4 landscape, header repeated) has blank
+  columns to write the physical count. SQL test 107, `tests/stockcheck.test.ts`.
+  The SKU on a line is an input: typing the physical SKU is a swap, sent as two lines of the same save (the system SKU to 0,
+  the physical SKU `add`), so the movement notes read as stock found, not as a swap. **Laporan tab (0145, user request
+  18 Nov 2026):** every save writes one append-only `rack_check_reports` row in the same transaction (aisle totals measured
+  by the database; the page's summary and system-vs-shelf lines stored as sent). No edit, delete or truncate, even for the
+  owner. SQL test 108.
 - **Staging (0134, `/staging`, `lib/staging.ts`, spec `docs/superpowers/specs/2026-11-08-staging-handling-design.md`)**:
   a Rekap inbound `STAGE-IN` row (`stagingCode`: any code starting `STAG`) is the `STAGING` bin; a blank `BIN Location`
   is "belum diisi", never staging. `putaway_import_arrival` posts rows into the `STAGING` bin (only that one; floor
@@ -408,6 +441,43 @@ Second app behind the same login; spec `docs/CKB_3PL.md` — read it before touc
   `staging_to_rack` (Inventory, Admin Inbound, Leader, Admin) is one transfer and checks reserved stock itself, for
   every job: `guard_reserved_stock` lets supervisor-level jobs (Inventory) through. Page age = `received_date`, the
   dashboard tally's rule. SQL test 98, `tests/staging.test.ts`.
+- **Block C (0147, `Rak & Lokasi` tab `Block C`, spec `docs/superpowers/specs/2026-11-20-block-c-floor-storage-design.md`)**:
+  a second building with 40 floor slots `FA-01..20` / `FB-01..20` (`bins.site = 'BLOCKC'`, set by `bins_normalize` from the
+  code). Each slot has ONE dedicated SKU (`bins.assigned_sku`, via `assign_block_c_slots`; the slot list is the only list of
+  Block C SKUs) and a stored stack height `bins.capacity` pallets (`PALLETS_PER_SLOT`: drum / carton 3, else 2).
+  `movements_a_site_guard` is the one rule: stock enters a Block C slot only if it is that slot's SKU and the stack fits,
+  and a Block C SKU never enters any Oso 5 bin (so Block C -> Oso 5 is refused with no separate rule; leaving is never
+  refused). **Picking (phase 2):** FEFO stays global, `selectNextBin` is untouched. A slot is a STACK (up to 3 pallets,
+  one batch and expiry): `toLedgers` (binselect.ts) splits it into one sealed ledger per full pallet plus one open
+  ledger for the loose part, and `palletKind` (allocator.ts) applies the same rule in the replay (full pallets =
+  floor(qty / upp), loose = qty % upp). No pickface, no replenishment, no Bin To Bin, no double-pick report for
+  `FA`/`FB`; two whole pallets of one stack stay two forklift rows (`mergeSameBinRows`). Each shipment gets a separate
+  Block C picklist `PL-<shipment>-BC` (`site: 'BLOCKC'`, forklift and handpick together, after its Oso 5 list in the
+  one fixed order, route FA down / FB up: `blockCSequenceKey`), also on the Wave-page reprint
+  (`picklistsFromTasks`). SQL test 110, `tests/block-c-allocator.test.ts`. `import_snapshot` turns the guard off and
+  returns `site_warnings` instead of refusing (the goods are on the floor). STAGING / QUARANTINE count as Oso 5. SQL test
+  109-111, `tests/block-c.test.ts`.
+  **3D (0148):** `layout.block_c` (origin, slot_pitch_m, lane_gap_m, pallet_height_m, lanes) places the slots in their own
+  area (`recompute_bin_positions`; the generic floor row excludes `site = 'BLOCKC'`, so STAGING / QUARANTINE do not move).
+  `saveLayoutAction` must keep `block_c` when it rewrites the layout. The scene draws slots with their own instanced mesh
+  (`BlockCSlots`, box height = stacked pallets via `lib/block-c-view.ts`); do not draw them with the rack pallet mesh.
+- **MIA, Missing In Action (0152-0154, `Inventory` tab `MIA`, `lib/mia.ts`, `Investigasi selisih` Step 4)**: the bin `MIA`
+  (zone `MIA`) holds stock nobody can find; it is **not stock on the shelves**. It stays out of the SAP comparison
+  (`wms_stock_by_sku`, `_at`, `_day`), out of `inventory_detail` / `bin_summary` (so Stok, FEFO, dashboard, 3D, Wave page),
+  out of the daily WMS report and the Buku stok book, and out of the 3D floor row; `inventory_detail_all` keeps it
+  (Lacak batch reads that one, as location `MIA`). `/bin/MIA` redirects to the tab. Never read MIA stock as a bin of the
+  floor, never add it to a total. A full import never zeroes it; Excel files cannot list it (not in `FLOOR_LOCATIONS`).
+  Stock enters or leaves only through `mia_move_in` (rack -> MIA), `mia_book` (nothing -> MIA, SAP expects it),
+  `mia_find` (MIA -> rack, one SKU per rack bin) and `mia_clear` (written off, SAP document in the note);
+  `movements_a_mia_guard` refuses every other movement unless `app.mia_movement` is on. Jobs `inventory` and `admin`
+  only (`mia_require_actor`), **no second person at any quantity** (user decision 24 Nov 2026; the movements carry no
+  `approved_by_name`, so "nobody approved" stays visible), but a move still cannot cut into stock an open wave
+  reserved or a hold keeps. Every call is one append-only `mia_events` row; from Investigasi it also moves the line's
+  `wms_fix` (move in: minus, find: plus; book: unchanged) with cause `MIA`. A case older than 7 days (`MIA_ALERT_DAYS`)
+  is flagged. Step 1 of Investigasi now ranks bins by gap sign and UPP (`lib/recon-suspect-plan.ts`: plus >= 1 pallet =
+  every bin holding the SKU, plus < 1 pallet = pickface / level A; minus = the picklist of a chosen wave day, plus
+  pickface / level A when < 1 pallet; fallback = every pickface bin; exactly one pallet counts as a pallet).
+  SQL tests 112-114, `tests/mia.test.ts`, `tests/recon-suspect-plan.test.ts`.
 - **Laporan gudang (0137, `recon/manager-report.tsx`)**: the `Cocok` filter of a `Rekonsiliasi SAP` shows the manager's
   report instead of the list: SAP vs WMS accuracy and a per-SKU sheet from that reconciliation, plus rack occupancy *now*
   from `rack_occupancy()` (locations = rack bins `bin_usable` for Shell; bays wholly lent to CKB are left off; litres =

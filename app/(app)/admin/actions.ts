@@ -23,7 +23,30 @@ export async function saveLayoutAction(_: ActionState, fd: FormData): Promise<Ac
       floor_zone_origin: { x: Number(fd.get("floor_x") ?? 0), z: Number(fd.get("floor_z") ?? -8) },
     };
     const supabase = await createClient();
-    const { error } = await supabase.from("settings").update({ value: layout, updated_at: new Date().toISOString() }).eq("key", "layout");
+    // 0148: the Block C section (origin, slot pitch, lane gap, pallet height, lane order) is kept, and edited when the form
+    // sends it. Writing the layout without it would drop the lane order and reset every dimension to its default.
+    const { data: current } = await supabase.from("settings").select("value").eq("key", "layout").maybeSingle();
+    const prev = (current?.value as { block_c?: Record<string, unknown> } | null)?.block_c;
+    const optNum = (k: string, fallback: unknown) => {
+      const raw = fd.get(k);
+      if (raw === null || String(raw).trim() === "") return fallback;
+      const v = Number(raw);
+      if (!Number.isFinite(v)) throw new Error(`${k} harus angka`);
+      return v;
+    };
+    const prevOrigin = (prev?.origin ?? { x: 0, z: 70 }) as { x: number; z: number };
+    const block_c = {
+      lanes: ["FA", "FB"], ...(prev ?? {}),
+      origin: { x: optNum("block_c_x", prevOrigin.x), z: optNum("block_c_z", prevOrigin.z) },
+      slot_pitch_m: optNum("block_c_pitch", prev?.slot_pitch_m ?? 2.6),
+      lane_gap_m: optNum("block_c_gap", prev?.lane_gap_m ?? 10),
+      slot_depth_m: optNum("block_c_depth", prev?.slot_depth_m ?? 7),
+      pallet_height_m: optNum("block_c_pallet", prev?.pallet_height_m ?? 1.2),
+    };
+    for (const [k, v] of [["jarak antar slot", block_c.slot_pitch_m], ["jarak FA ke FB", block_c.lane_gap_m], ["kedalaman slot", block_c.slot_depth_m], ["tinggi palet", block_c.pallet_height_m]] as const) {
+      if (!(Number(v) > 0)) throw new Error(`Block C: ${k} harus lebih dari 0`);
+    }
+    const { error } = await supabase.from("settings").update({ value: { ...layout, block_c }, updated_at: new Date().toISOString() }).eq("key", "layout");
     if (error) return { error: error.message };
     const { data, error: e2 } = await supabase.rpc("recompute_bin_positions");
     if (e2) return { error: e2.message };

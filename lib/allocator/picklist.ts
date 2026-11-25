@@ -1,5 +1,5 @@
 import { pickRowCompare, waveSlots } from './allocator';
-import type { AllocatorConfig } from './config';
+import { DEFAULT_CONFIG, isBlockCLocation, type AllocatorConfig } from './config';
 import type { AllocationLine, AllocationResult, DemandLine, Picklist, PickType } from './types';
 import { stockIdentityKey } from './ledger';
 import { parseLocation } from './pickpath';
@@ -42,9 +42,11 @@ export function buildPicklists(
     if (!waveByShipment.has(key)) waveByShipment.set(key, d.waveNo);
   }
 
+  // One list per shipment for Oso 5, and one more for the shipment's Block C rows (0147): the picker walks to a
+  // second building, so it is its own sheet.
   const groups = new Map<string, AllocationLine[]>();
   for (const line of result.lines) {
-    const key = line.shipmentNumber || line.waveNo;
+    const key = (line.shipmentNumber || line.waveNo) + (isBlockCLocation(line.location, config) ? BLOCK_C_SUFFIX : '');
     const bucket = groups.get(key);
     if (bucket) bucket.push(line);
     else groups.set(key, [line]);
@@ -52,7 +54,9 @@ export function buildPicklists(
 
   const picklists: Picklist[] = [];
 
-  for (const [key, rawLines] of groups) {
+  for (const [groupKey, rawLines] of groups) {
+    const blockC = groupKey.endsWith(BLOCK_C_SUFFIX);
+    const key = blockC ? groupKey.slice(0, -BLOCK_C_SUFFIX.length) : groupKey;
     const h = header.get(key);
     const waveNo = waveByShipment.get(key) ?? key;
     const shipmentNumbers = rawLines[0]?.shipmentNumber ? [rawLines[0].shipmentNumber] : [];
@@ -64,7 +68,7 @@ export function buildPicklists(
 
     chunks.forEach((lines, idx) => {
       lines.forEach((l, i) => (l.seq = i + 1));
-      const suffix = chunks.length > 1 ? `-${idx + 1}` : '';
+      const suffix = (blockC ? BLOCK_C_SUFFIX : '') + (chunks.length > 1 ? `-${idx + 1}` : '');
       const allOrderNos = [...new Set(rawLines.flatMap((l) => l.orderNos))].sort();
 
       picklists.push({
@@ -77,13 +81,15 @@ export function buildPicklists(
         truckType: h?.truckType ?? null,
         slotTime: h?.slotTime ?? null,
         taskType: 'MIXED',
+        ...(blockC ? { site: 'BLOCKC' as const } : {}),
         orderNos: allOrderNos,
         lines,
         totalCartons: lines.reduce((s, l) => s + l.qtyPick, 0),
         totalPallets: lines.filter((l) => l.pickType === 'PALLET').length,
         distinctLocations: new Set(lines.map((l) => l.location)).size,
         distinctSkus: new Set(lines.map((l) => l.sku)).size,
-        shortages: idx === 0 ? shortagesOf(result, key) : [],
+        // The shipment's shortages print once, on its Oso 5 list (or on the Block C list when it has no other).
+        shortages: idx === 0 && (!blockC || !groups.has(key)) ? shortagesOf(result, key) : [],
       });
     });
   }
@@ -97,9 +103,13 @@ export function buildPicklists(
       compareWaveNo(a.waveNo, b.waveNo) ||
       (a.slotTime ?? '99:99').localeCompare(b.slotTime ?? '99:99') ||
       (a.shipmentNumbers[0] ?? '').localeCompare(b.shipmentNumbers[0] ?? '') ||
+      Number(a.site === 'BLOCKC') - Number(b.site === 'BLOCKC') ||
       a.taskType.localeCompare(b.taskType),
   );
 }
+
+/** Appended to a shipment's picklist id for its Block C list: `PL-109661414-BC`. */
+export const BLOCK_C_SUFFIX = '-BC';
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -135,6 +145,8 @@ export interface RestStep { key: string; waveNo: string; picks: boolean; moveTo:
 export function restNoteAt(steps: RestStep[], i: number, location: string): string | null {
   // Level A is the pickface level: the rest simply stays for loose picks, no note needed (plain "tetap di bin").
   if (parseLocation(location)?.level === 'A') return null;
+  // A Block C stack keeps its rest where it is: nothing moves and nothing is waited for ("tetap di bin").
+  if (isBlockCLocation(location, DEFAULT_CONFIG)) return null;
   const takers: string[] = [];
   for (let j = i + 1; j < steps.length; j++) {
     const s = steps[j];

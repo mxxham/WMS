@@ -1,6 +1,6 @@
 "use client";
 import { cn, fmtNum } from "@/lib/utils";
-import { diffOf, type ChangeView, type FieldDiff, type Summary } from "@/lib/stockopname";
+import { diffOf, type ChangeView, type FieldDiff, type Summary } from "@/lib/stockcheck";
 
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtNum(Math.abs(n))}`;
 const tone = (n: number) => (n > 0 ? "text-ok" : n < 0 ? "text-bad" : "text-steel-500");

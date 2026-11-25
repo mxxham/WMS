@@ -144,6 +144,11 @@ export interface Picklist {
   slotTime: string | null;
   /** PALLET tasks are forklift work, CASE tasks are ground/handpick */
   taskType: PickType | 'MIXED';
+  /**
+   * 'BLOCKC' on the Block C list of a shipment (picklistId `PL-<shipment>-BC`, 0147): a second building, one list
+   * per shipment, forklift and handpick together. Absent = the Oso 5 list.
+   */
+  site?: 'BLOCKC';
   orderNos: string[];
   lines: AllocationLine[];
   totalCartons: number;

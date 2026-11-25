@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/input";
 import { Table, Th, Td } from "@/components/ui/table";
 import { Pill, EmptyState } from "@/components/ckb/ui";
 import { callRpc } from "@/components/ckb/rpc-button";
-import { CLASSIFICATION, ADJUSTMENT_STATUS, TASK_STATUS, reviewActions, classify, type AdjustmentStatus, type Classification } from "@/lib/ckb/stocktake";
+import { CLASSIFICATION, ADJUSTMENT_STATUS, TASK_STATUS, batchText, reviewActions, classify, stockTypeTag, type AdjustmentStatus, type Classification } from "@/lib/ckb/stocktake";
 import type { CountRow, NoteRow, TaskEvidence, TaskRow } from "@/lib/ckb/stocktake-data";
 import { fmtDate, fmtNum } from "@/lib/utils";
 import { TaskHistory } from "../task-history";
@@ -63,8 +63,9 @@ function TaskDecision({ t, counts, notes, evidence, me }: { t: TaskRow; counts: 
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="font-medium"><span className="mr-2 rounded-plate bg-plate px-1.5 font-cond font-bold text-steel">{t.storage_bin || "–"}</span>#{t.seq} {t.material_code}
-            {t.origin === "FOUND" && <span className="ml-1 text-xs text-warn">temuan</span>}</p>
-          <p className="text-sm text-steel-500">{t.description} · {t.batch || "tanpa batch"}{t.expiry_date ? ` · exp ${fmtDate(t.expiry_date)}` : ""} · SAP {fmtNum(Number(t.baseline_qty ?? 0), 3)} {t.uom}</p>
+            {t.origin === "FOUND" && <span className="ml-1 text-xs text-warn">temuan</span>}
+            {stockTypeTag(t.stock_type) && <span className="ml-1.5 rounded-plate bg-warn/15 px-1.5 py-0.5 font-cond text-xs font-bold text-[#8a5a00]">{stockTypeTag(t.stock_type)}</span>}</p>
+          <p className="text-sm text-steel-500">{t.description} · {batchText(t, fmtDate)} · SAP {fmtNum(Number(t.baseline_qty ?? 0), 3)} {t.uom}</p>
         </div>
         <div className="flex flex-wrap gap-1">
           <Pill tone={CLASSIFICATION[cls].tone}>{CLASSIFICATION[cls].label}</Pill>

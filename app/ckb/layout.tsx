@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { requireAppAccess } from "@/lib/auth";
 import { getCkbUser } from "@/lib/ckb/auth";
 import { loginRequired } from "@/lib/auth-route";
+import { createClient } from "@/lib/supabase/server";
 import { CkbNav } from "@/components/ckb/nav";
+import { CkbFooter } from "@/components/ckb/ckb-footer";
 import { NoRole } from "./no-role";
 
 /** CKB 3PL app shell — outside the Shell WMS (app) route group; the root layout owns <html>/<body>. */
@@ -17,12 +19,15 @@ export default async function CkbLayout({ children }: { children: React.ReactNod
 
   // The Shell session context stays out of CKB: the rebagging person-name field then works as on
   // the shared account (typed, remembered on the device), exactly as before this layout existed.
+  // Sidebar badge: one light function (a lead: check-ins to review; a PIC: racks not done today). An error shows no badge.
+  const badge = user.ckbRole === "customer" || !user.ckbRole ? 0 : Number((await (await createClient()).rpc("ckb_hk_badge")).data ?? 0) || 0;
   return (
     <div className="min-h-screen">
-      <CkbNav role={user.ckbRole} name={user.name} username={user.username} loginRequired={loginRequired()} />
+      <CkbNav role={user.ckbRole} name={user.name} username={user.username} loginRequired={loginRequired()} badges={{ "/ckb/housekeeping": badge }} />
       <div className="pb-20 lg:pb-0 lg:pl-72">
         {/* An account with the app but no CKB role sees why, not an empty app. Pages also refuse on their own. */}
         {user.ckbRole ? children : <NoRole shellAdmin={user.role === "admin" && user.apps.includes("shell_wms")} shared={user.shared} name={user.name} schemaMissing={user.schemaMissing} />}
+        <CkbFooter />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { BRAND } from "../config/brand";
 import { bayOf, type CheckRow } from "./stockcheck";
 
 /**
- * The list to take to the rack (Cek stok rak): what the system holds, bin by bin in the order of the
+ * The list to take to the rack (Stock Opname Rak): what the system holds, bin by bin in the order of the
  * screen, with empty columns to write what is really there. One sheet per aisle, A4 landscape, header
  * repeated on every printed page. Every colour and border is set on the cells themselves (table styles
  * are not drawn by LibreOffice / WPS, see wms-day-workbook.ts).
@@ -51,7 +51,7 @@ export async function buildStockCheckWorkbook(sheets: StockCheckSheet[], meta: {
         margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 },
         printTitlesRow: "4:4",
       },
-      headerFooter: { oddFooter: "&LCek stok rak " + s.aisle + "&CHalaman &P dari &N&RDiperiksa oleh: ____________" },
+      headerFooter: { oddFooter: "&LStock Opname Rak " + s.aisle + "&CHalaman &P dari &N&RDiperiksa oleh: ____________" },
     });
     ws.columns = COLUMNS.map((c) => ({ width: c.width }));
 
@@ -65,7 +65,7 @@ export async function buildStockCheckWorkbook(sheets: StockCheckSheet[], meta: {
     ws.getCell(2, 1).value = `Tanggal sistem: ${meta.date} · ${stockRows.length} baris stok di ${new Set(s.rows.map((r) => r.bin)).size} bin · ${cartons.toLocaleString("id-ID")} karton menurut sistem`;
     ws.getCell(2, 1).font = { ...FONT, color: { argb: C.grey } };
     ws.mergeCells(3, 1, 3, COLUMNS.length);
-    ws.getCell(3, 1).value = "Tulis hasil hitung di kolom kuning. Bin kosong yang ternyata berisi: tulis SKU di Catatan. Lalu ketik ke sistem di halaman Cek stok rak.";
+    ws.getCell(3, 1).value = "Tulis hasil hitung di kolom kuning. Bin kosong yang ternyata berisi: tulis SKU di Catatan. Lalu ketik ke sistem di halaman Stock Opname Rak.";
     ws.getCell(3, 1).font = { ...FONT, italic: true };
 
     const head = ws.getRow(4);

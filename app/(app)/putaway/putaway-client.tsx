@@ -380,7 +380,7 @@ export function PutawayClient() {
                         {staged && <span className="block text-xs font-normal text-steel-500">ke staging{r.sheet_bin && r.sheet_bin !== r.bin_code ? ` (di sheet ${r.sheet_bin})` : ""}</span>}
                         {!staged && r.sheet_bin && <span className="block text-xs font-normal text-warn">di sheet {r.sheet_bin}</span>}
                         {r.pallet_lines && <span className="block text-xs font-normal text-steel-500">{r.pallet_lines.length} palet (baris {r.pallet_lines.join(", ")})</span>}
-                        {r.filled_from && <span className="block text-xs font-normal text-steel-500">item, batch, expired dari baris {r.filled_from}</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
+                        {r.filled_from && <span className="block text-xs font-normal text-steel-500">item, batch, expired dari baris {r.filled_from}</span>}{r.expiry_sheet_year && <span className="block text-xs font-normal text-steel-500">expired di file {r.expiry_sheet_year.slice(0, 4)}, dibaca {r.expiry_date?.slice(0, 4)}</span>}</Td><Td>{r.sku}</Td><Td>{r.batch_lot || "–"}</Td>
                       <Td className="text-right tabular">{r.quantity ?? "–"}</Td>
                       <Td>{fmtDate(r.expiry_date)}{v?.expiry_expected && <div className="text-xs font-semibold text-warn" title="Expired menurut kode batch">batch → {fmtDate(v.expiry_expected)}</div>}</Td>
                       <Td className="text-xs">{problem(r) || (st === "same" ? "Isi bin sudah sama" : "")}</Td>

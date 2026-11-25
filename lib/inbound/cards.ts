@@ -1,6 +1,7 @@
 import type { CardMaster } from "@/lib/form-checker/pdf";
 import type { FormCheckerCard } from "@/lib/form-checker/types";
 import { batchMfgDate } from "@/lib/batch-code";
+import { mfgDateSku } from "@/lib/form-checker/mfg";
 import { packOf } from "./putaway-plan";
 
 const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
@@ -14,7 +15,7 @@ export type ReceiptPallet = {
 
 /**
  * One pallet card per pallet with good stock of a checked receipt, with the bin the auto putaway chose (0118).
- * Drum / pail / IBC / fluidbag print the manufacture date (0119): the date entered at the check, else the
+ * Drum / pail / IBC / fluidbag (and the carton SKUs in MFG_DATE_SKUS) print the manufacture date (0119): the date entered at the check, else the
  * date in a Shell date-coded batch. The card's unit is the packaging (a 209 L drum recorded as EA is a Drum),
  * so the card shows the MFG DATE box for it.
  */
@@ -25,7 +26,8 @@ export function receiptCards(r: ReceiptHead, pallets: ReceiptPallet[]): { cards:
     const sku = a.items?.sku ?? "";
     const pack = packOf(sku, a.items?.uom ?? null, a.items?.description ?? "");
     master.set(sku, { uom: pack && pack !== "Carton" ? pack : (a.items?.uom ?? null) });
-    const mfg = pack && pack !== "Carton" ? (a.mfg_date ?? batchMfgDate(a.batch_lot)) : null;
+    // Also the carton SKUs listed by request (mfg.ts MFG_DATE_SKUS); their unit stays Carton.
+    const mfg = (pack && pack !== "Carton") || mfgDateSku(sku) ? (a.mfg_date ?? batchMfgDate(a.batch_lot)) : null;
     return {
       month: day ? MONTHS[Number(day.slice(5, 7)) - 1] : "", userName: r.checked_by_name ?? "",
       shipmentNo: Number(r.shipment_no ?? r.doc_no) || 0, itemCode: Number(sku), qtyOrder: Number(a.quantity),

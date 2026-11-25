@@ -3,10 +3,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as D from "@radix-ui/react-dialog";
-import { Menu, X } from "lucide-react";
+import { ChevronDown, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Job } from "@/lib/jobs";
-import { mobileLinksFor, sectionsFor } from "./nav-config";
+import { activeHref, mobileLinksFor, sectionsFor } from "./nav-config";
 import { AccountBox, AccountSwitch } from "./account";
 import { BRAND } from "@/config/brand";
 
@@ -24,6 +24,7 @@ import { BRAND } from "@/config/brand";
  * with the login-rise curve. `prefers-reduced-motion` already kills every animation in globals.css's
  * base layer, so this needs no exception of its own.
  */
+const FOLD_KEY = "navFolded:v1";
 const SHEET_CSS = `@keyframes nav-sheet-rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
 .nav-sheet-rise{animation:nav-sheet-rise 240ms cubic-bezier(0.2,0.7,0.2,1) both}`;
 
@@ -39,6 +40,19 @@ export function Nav({ job }: { job: Job }) {
   const sections = sectionsFor(job);
   const mobile = mobileLinksFor(job);
   const [moreOpen, setMoreOpen] = useState(false);
+  // One current link, not every link whose address starts the same (Label / Kartu palet).
+  const current = activeHref(path, sections.flatMap((s) => s.links.map((l) => l.href)));
+  // Sidebar groups the person folded away. Starts empty so server and browser render the same;
+  // the saved choice is read after mount. The group holding the current page never folds.
+  const [folded, setFolded] = useState<string[]>([]);
+  useEffect(() => {
+    try { const v = JSON.parse(localStorage.getItem(FOLD_KEY) ?? "[]"); if (Array.isArray(v)) setFolded(v.filter((x) => typeof x === "string")); } catch { /* storage unreadable: all open */ }
+  }, []);
+  const toggle = (title: string) => setFolded((f) => {
+    const next = f.includes(title) ? f.filter((t) => t !== title) : [...f, title];
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(next)); } catch { /* not remembered */ }
+    return next;
+  });
 
   // Any route change closes the sheet, including one nobody tapped here (back button, a deep link):
   // a menu left hanging over a page it did not open reads as a stuck screen.
@@ -59,16 +73,26 @@ export function Nav({ job }: { job: Job }) {
           </span>
         </Link>
         <nav className="sidebar-scroll flex-1 space-y-3 overflow-y-auto px-2 pb-4">
-          {sections.map((sec) => (
-            <div key={sec.title ?? "top"} className="space-y-0.5">
-              {sec.title && <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/50">{sec.title}</div>}
-              {sec.links.map(({ href, label, icon: Icon }) => (
-                <Link key={href} href={href} className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm", path.startsWith(href) ? "bg-ckb-dark font-medium text-jeir-teal" : "text-white/85 hover:bg-ckb-dark")}>
-                  <Icon className="h-4 w-4" />{label}
-                </Link>
-              ))}
-            </div>
-          ))}
+          {sections.map((sec) => {
+            const holdsCurrent = sec.links.some((l) => l.href === current);
+            const open = !sec.title || holdsCurrent || !folded.includes(sec.title);
+            return (
+              <div key={sec.title ?? "top"} className="space-y-0.5">
+                {sec.title && (
+                  <button type="button" onClick={() => toggle(sec.title!)} aria-expanded={open} disabled={holdsCurrent}
+                    className="flex w-full items-center justify-between rounded px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/50 hover:text-white/80 disabled:cursor-default disabled:hover:text-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plate">
+                    {sec.title}
+                    <ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
+                  </button>
+                )}
+                {open && sec.links.map(({ href, label, icon: Icon }) => (
+                  <Link key={href} href={href} aria-current={href === current ? "page" : undefined} className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm", href === current ? "bg-ckb-dark font-medium text-jeir-teal" : "text-white/85 hover:bg-ckb-dark")}>
+                    <Icon className="h-4 w-4" />{label}
+                  </Link>
+                ))}
+              </div>
+            );
+          })}
         </nav>
         <AccountBox />
         <AccountSwitch />
@@ -78,7 +102,7 @@ export function Nav({ job }: { job: Job }) {
       <D.Root open={moreOpen} onOpenChange={setMoreOpen}>
         <nav className={cn("fixed inset-x-0 bottom-0 flex border-t border-ckb-dark bg-ckb bg-jeir-bar text-white lg:hidden", moreOpen ? "pointer-events-auto z-[60]" : "z-30")} style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
           {mobile.map(({ href, label, icon: Icon }) => (
-            <Link key={href} href={href} className={cn("flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] min-[360px]:text-[11px]", path.startsWith(href) ? "text-jeir-teal" : "text-white/70")}>
+            <Link key={href} href={href} className={cn("flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] min-[360px]:text-[11px]", href === current ? "text-jeir-teal" : "text-white/70")}>
               <Icon className="h-5 w-5" />{label}
             </Link>
           ))}
@@ -110,7 +134,7 @@ export function Nav({ job }: { job: Job }) {
                 <div key={sec.title ?? "top"} className="mt-1 space-y-0.5 first:mt-0">
                   {sec.title && <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-white/50">{sec.title}</div>}
                   {sec.links.map(({ href, label, icon: Icon }) => {
-                    const active = path.startsWith(href);
+                    const active = href === current;
                     return (
                       <Link key={href} href={href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined}
                         className={cn("flex min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-sm", ROW_RING,

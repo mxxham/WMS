@@ -130,6 +130,15 @@ export function checkDraft(draft: DraftLine[], known: StockLine[]): { lines: Sto
   return { lines: out };
 }
 
+/**
+ * Whether the typed rows can be saved: some cartons were counted, or a quantity was typed on purpose
+ * (an explicit 0 says "the system lists this batch here, the floor has none"). Untouched rows cannot be saved.
+ */
+export function draftSavable(draft: DraftLine[], countedTotal: number | null): boolean {
+  if (countedTotal === null) return false;
+  return countedTotal > 0 || draft.some((d) => d.quantity.trim() !== "");
+}
+
 /** The confirmation sentence for applying a plan. */
 export function planSentence(p: FixPlan, sku: string): string {
   const parts: string[] = [];

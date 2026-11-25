@@ -12,6 +12,8 @@ export type Layout = {
   aisle_width_m: number; positions_per_bay: number;
   /** Bays per face of a back-to-back block (rack 21 behind rack 01). 0 = single-row aisles. */
   bays_per_side?: number; floor_zone_origin: { x: number; z: number };
+  /** Block C (0148): where FA-01 stands and how the two lanes of floor slots are laid out. */
+  block_c?: { origin: { x: number; z: number }; slot_pitch_m: number; lane_gap_m: number; pallet_height_m: number; slot_depth_m?: number; lanes: string[] };
 };
 
 export type ColorMode = "abc" | "fill" | "expiry";

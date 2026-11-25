@@ -16,8 +16,8 @@ export default async function LoginPage({
 }: { searchParams: Promise<{ next?: string; nonaktif?: string }> }) {
   const sp = await searchParams;
 
-  // Real figures of this warehouse (bins and SKUs in the system), shown as rack plates.
-  const facts = ["2.970 bin", "106 SKU", "FEFO per tanggal expired"];
+  // The two applications behind this one sign-in, shown as rack plates (the page does not know yet which one the account opens).
+  const facts = ["Shell WMS", "CKB 3PL", "Satu akun"];
 
   return (
     <main className="flex min-h-screen flex-col overflow-x-clip bg-jeir-navy lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(26rem,32rem)]">
@@ -38,8 +38,9 @@ export default async function LoginPage({
 
         <div className="relative mt-auto px-5 pb-6 pt-8 sm:px-8 lg:px-14 lg:pb-14">
           <h1 id="login-place" className="max-w-[16ch] text-balance font-cond text-3xl font-bold leading-[0.98] tracking-[-0.02em] lg:text-[clamp(2.75rem,1.6rem+3vw,4.75rem)] lg:tracking-[-0.03em]">
-            Gudang pelumas Shell<span className="hidden lg:inline">, Surabaya.</span>
+            Gudang CKB<span className="hidden lg:inline">, Surabaya.</span>
           </h1>
+          <p className="mt-3 hidden max-w-[34ch] text-lg text-white/75 lg:block">Stok, picking, stock take dan housekeeping, dari satu tempat masuk.</p>
           <ul className="mt-4 flex flex-wrap gap-2 lg:mt-8" aria-label="Isi sistem">
             {facts.map((f) => (
               <li key={f} className="rounded-plate bg-white px-2.5 py-1 font-cond text-sm font-bold tabular-nums text-jeir-navy">{f}</li>
@@ -59,7 +60,7 @@ export default async function LoginPage({
       <section aria-labelledby="login-title" className="relative flex flex-1 flex-col bg-paper">
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-10 sm:px-10 lg:mx-0 lg:max-w-none lg:justify-end lg:px-14 lg:pb-[84px]">
           <h2 id="login-title" className="font-cond text-4xl font-bold tracking-[-0.02em] text-steel">Masuk</h2>
-          <p className="mt-2 text-steel-500">Pakai nama pengguna dan kata sandi dari admin gudang.</p>
+          <p className="mt-2 text-steel-500">Pakai nama pengguna dan kata sandi dari admin Anda.</p>
           {!loginRequired() && (
             <p className="mt-1 text-sm text-steel-500">
               Login belum diwajibkan.{" "}
