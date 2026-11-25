@@ -32,6 +32,14 @@ export interface AllocatorConfig {
   // ---- Location eligibility ---------------------------------------------
   /** Only locations matching this are pickable (rack bins). */
   rackLocationPattern: RegExp;
+  /**
+   * Block C floor slots (0147, FA-01..FB-20): pickable like a rack bin, but a slot is a STACK of pallets of one
+   * SKU, not one pallet, and it has no pickface, no replenishment and no Bin To Bin (the SKU can never go to Oso 5).
+   * They are picked on their own picklist per shipment and walked in `blockCLanes` order.
+   */
+  blockCLocationPattern: RegExp;
+  /** Walking order of the Block C lanes: down the first lane, back up the second (serpentine). */
+  blockCLanes: string[];
   /** Locations excluded even if they match the pattern. */
   excludedLocations: string[];
   /**
@@ -117,6 +125,8 @@ export const DEFAULT_CONFIG: AllocatorConfig = {
   // 0132: any aisle C? may hold Shell racks (new aisles are added on Rak & Lokasi); which bins Shell may
   // use comes from the database (state + owner), passed in as blockedBins / bin_status.
   rackLocationPattern: /^C[A-Z]\d{2}[A-E]\d{2}$/,
+  blockCLocationPattern: /^F[A-Z]-\d{2}$/,
+  blockCLanes: ['FA', 'FB'],
   excludedLocations: ['STAGING', 'STAGING_INB', 'STAGING_OUT', 'Quarantine', 'QUARANTINE'],
   stagingLocations: ['STAGING', 'STAGING_OUT'],
   stagingLanePattern: /^STG_\d{2}$/,
@@ -165,6 +175,11 @@ export function daysBetween(from: Date, to: Date): number {
 export function isStagingLocation(location: string, config: AllocatorConfig): boolean {
   const loc = location.trim().toUpperCase();
   return config.stagingLocations.some((x) => loc === x.toUpperCase()) || config.stagingLanePattern.test(loc);
+}
+
+/** A Block C floor slot (FA-01), the location of a stack of pallets of one SKU. */
+export function isBlockCLocation(location: string, config: Pick<AllocatorConfig, 'blockCLocationPattern'>): boolean {
+  return config.blockCLocationPattern.test(location.trim().toUpperCase());
 }
 
 /**
