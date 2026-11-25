@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { checkCkb } from "@/lib/ckb/auth";
 import { createClient } from "@/lib/supabase/server";
-import { readSapFile, sapUploadError } from "@/lib/ckb/sap-file";
-import type { SapMapping } from "@/lib/ckb/sap-import";
+import { loadCountContext, readSapFile, sapUploadError } from "@/lib/ckb/sap-file";
 
 /**
  * Import an SAP file as an immutable snapshot. The file is parsed again here (the browser's preview
@@ -22,9 +21,8 @@ export async function POST(req: Request) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) return NextResponse.json({ error: "Isi tanggal snapshot." }, { status: 400 });
 
   const db = await createClient();
-  const { data: setting } = await db.from("ckb_settings").select("value").eq("key", "sap_import").single();
-  const mapping = ((setting?.value as { columns?: SapMapping } | null)?.columns ?? {}) as SapMapping;
-  const read = await readSapFile(file!, mapping, String(fd.get("sheet") ?? "") || null);
+  const ctx = await loadCountContext(db, customer);   // the customer's own mapping, else the global one: the RPC stores the same one
+  const read = await readSapFile(file!, ctx.mapping, String(fd.get("sheet") ?? "") || null);
   if (read.fileErrors.length) return NextResponse.json({ error: read.fileErrors.join(" ") }, { status: 400 });
   if (read.rows.length === 0) return NextResponse.json({ error: "Tidak ada baris stok yang valid di file ini." }, { status: 400 });
 

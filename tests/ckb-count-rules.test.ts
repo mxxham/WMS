@@ -1,6 +1,6 @@
 // CKB blind count page rules (lib/ckb/count-rules.ts, 0133): photo reason, location groups, list order, progress.
 import { strict as assert } from 'node:assert';
-import { groupLocations, listOrder, locationPrefix, photoReason, progress } from '../lib/ckb/count-rules';
+import { binPhotoNeeded, groupLocations, listOrder, locationPrefix, photoReason, progress } from '../lib/ckb/count-rules';
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -47,6 +47,22 @@ test('listOrder: recounts first, then open, then counted; by location, then seq'
 
 test('progress counts what no longer waits for a count', () => {
   assert.deepEqual(progress([{ status: 'OPEN' }, { status: 'RECOUNT_REQUESTED' }, { status: 'COUNTED' }, { status: 'ACCEPTED' }]), { done: 2, total: 4 });
+});
+
+test('photo per bin (0161/0163): the "always" setting is ignored, 0 / found / recount still need a line photo', () => {
+  const bin = { photoRules: true, customerAlways: true, photoScope: 'BIN' as const };
+  assert.equal(photoReason({ origin: 'BASELINE', round: 1 }, 5, bin), null);
+  assert.equal(photoReason({ origin: 'BASELINE', round: 1 }, 0, bin), 'hitungan 0');
+  assert.equal(photoReason({ origin: 'FOUND', round: 1 }, 5, bin), 'barang temuan');
+  assert.equal(photoReason({ origin: 'BASELINE', round: 2 }, 5, bin), 'hitungan ulang');
+  assert.equal(photoReason({ origin: 'BASELINE', round: 1 }, 5, { ...bin, photoScope: 'TASK' }), 'wajib untuk pelanggan ini', 'a photo-per-line customer is unchanged');
+});
+
+test('the bin photo is needed only for a bin-photo customer, with photo rules on, while the bin has none', () => {
+  assert.equal(binPhotoNeeded({ photoRules: true, photoScope: 'BIN' }, 0), true);
+  assert.equal(binPhotoNeeded({ photoRules: true, photoScope: 'BIN' }, 1), false);
+  assert.equal(binPhotoNeeded({ photoRules: false, photoScope: 'BIN' }, 0), false);
+  assert.equal(binPhotoNeeded({ photoRules: true, photoScope: 'TASK' }, 0), false);
 });
 
 console.log(`\nckb-count-rules: ${passed} passed, ${failed} failed`);

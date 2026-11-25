@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { checkCkb } from "@/lib/ckb/auth";
 import { createClient } from "@/lib/supabase/server";
-import { readSapFile, sapUploadError } from "@/lib/ckb/sap-file";
-import { totalQty, type SapMapping } from "@/lib/ckb/sap-import";
+import { loadCountContext, readSapFile, sapUploadError } from "@/lib/ckb/sap-file";
+import { mergePlan, totalQty } from "@/lib/ckb/sap-import";
 
 /**
  * Preview an SAP file: nothing is written. Returns what would be imported, every rejected line,
@@ -18,9 +18,8 @@ export async function POST(req: Request) {
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
 
   const db = await createClient();
-  const { data: setting } = await db.from("ckb_settings").select("value").eq("key", "sap_import").single();
-  const mapping = ((setting?.value as { columns?: SapMapping } | null)?.columns ?? {}) as SapMapping;
-  const read = await readSapFile(file!, mapping, String(fd.get("sheet") ?? "") || null);
+  const ctx = await loadCountContext(db, /^[0-9a-f-]{36}$/.test(customer) ? customer : null);
+  const read = await readSapFile(file!, ctx.mapping, String(fd.get("sheet") ?? "") || null);
   const { data: dup } = customer
     ? await db.from("ckb_sap_imports").select("ref_no, imported_at").eq("customer_id", customer).eq("file_sha256", read.sha256).maybeSingle()
     : { data: null };
@@ -31,6 +30,6 @@ export async function POST(req: Request) {
     rowCount: read.rows.length, totalQty: totalQty(read.rows), duplicateIdentities: read.duplicateIdentities,
     errorCount: read.errors.length, errors: read.errors.slice(0, 300), sample: read.rows.slice(0, 25),
     duplicateOf: dup ? { ref_no: dup.ref_no, imported_at: dup.imported_at } : null,
-    mappingVerified: (setting?.value as { verified?: boolean } | null)?.verified === true,
+    mappingVerified: ctx.verified, mappingSource: ctx.source, countIdentity: ctx.identity, plan: mergePlan(read.rows, ctx.identity),
   });
 }

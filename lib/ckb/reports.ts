@@ -7,7 +7,7 @@ import type { CkbRole } from "./permissions";
 
 export type ReportKind =
   | "stocktakes" | "discrepancies" | "recounts" | "adjustments" | "rebagging"
-  | "inspections" | "activity" | "sap_imports" | "sap_exports";
+  | "inspections" | "activity" | "sap_imports" | "sap_exports" | "housekeeping";
 
 export type ColType = "text" | "num" | "date" | "datetime";
 export type ReportColumn = { key: string; header: string; type?: ColType };
@@ -122,6 +122,16 @@ export const REPORTS: Record<ReportKind, { title: string; blurb: string; roles: 
       { key: "reason", header: "Alasan" },
     ],
   },
+  housekeeping: {
+    title: "Kepatuhan housekeeping", blurb: "Per rak dan hari kerja: selesai, terlambat atau terlewat, dengan jumlah foto. Tanpa nama petugas.",
+    roles: LEAD_AND_CUSTOMER, filters: ["customer", "from", "to"],
+    columns: [
+      { key: "area_code", header: "Rak / lokasi" }, { key: "area_name", header: "Nama" }, { key: "customer_name", header: "Customer" },
+      { key: "day", header: "Tanggal", type: "date" }, { key: "status", header: "Status" }, { key: "late", header: "Terlambat" },
+      { key: "on_behalf", header: "Dicatat supervisor" }, { key: "before_count", header: "Foto sebelum", type: "num" }, { key: "after_count", header: "Foto sesudah", type: "num" },
+    ],
+
+  },
 };
 
 export const REPORT_KINDS = Object.keys(REPORTS) as ReportKind[];
@@ -141,6 +151,11 @@ export function reportSummary(kind: ReportKind, rows: ReportRow[]): { label: str
     case "inspections": return [{ label: "Inspeksi", value: rows.length }, { label: "Lulus", value: count((r) => r.result === "PASS") }, { label: "Temuan", value: count((r) => r.result === "FAIL") }];
     case "activity": return [{ label: "Kejadian", value: rows.length }];
     case "sap_imports": return [{ label: "Import", value: rows.length }, { label: "Baris", value: n("row_count") }, { label: "Ditolak", value: n("rejected_count") }];
+    case "housekeeping": {
+      const done = count((r) => r.state === "DONE"), expected = done + count((r) => r.state === "MISSED");
+      return [{ label: "Hari diharapkan", value: expected }, { label: "Selesai", value: done }, { label: "Terlewat", value: count((r) => r.state === "MISSED") },
+        { label: "Terlambat", value: count((r) => r.state === "DONE" && r.late === true) }, { label: "Kepatuhan (%)", value: expected ? Math.round((100 * done) / expected) : 0 }];
+    }
     case "sap_exports": return [{ label: "Ekspor", value: rows.length }, { label: "Dikonfirmasi SAP", value: count((r) => r.status === "SAP_CONFIRMED") }, { label: "Belum dikonfirmasi", value: count((r) => r.status === "GENERATED") }];
   }
 }

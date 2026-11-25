@@ -3,18 +3,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as D from "@radix-ui/react-dialog";
-import {
-  Archive, Boxes, Building2, ChartColumn, ClipboardCheck, FileDown, FileUp, History, Images, LayoutDashboard,
-  ListChecks, LogIn, LogOut, Menu, PackageOpen, Settings, Users, X, type LucideIcon,
-} from "lucide-react";
+import { LogIn, LogOut, Menu, X } from "lucide-react";
+import { CKB_FALLBACK_ICON, CKB_ICONS } from "./icons";
+import { BRAND } from "@/config/brand";
 import { cn } from "@/lib/utils";
 import { navFor, CKB_ROLE_LABEL, type CkbRole } from "@/lib/ckb/permissions";
 
-const ICONS: Record<string, LucideIcon> = {
-  dashboard: LayoutDashboard, rebag: PackageOpen, inspect: ClipboardCheck, count: ListChecks, inventory: Boxes,
-  import: FileUp, export: FileDown, reports: ChartColumn, photos: Images, activity: History, customers: Building2,
-  users: Users, settings: Settings,
-};
 /** The phone bar's thumb stops, per role, in this order; everything else is under Lainnya. */
 const PHONE: Record<CkbRole, string[]> = {
   admin: ["/ckb", "/ckb/stock-take", "/ckb/inspections", "/ckb/rebagging"],
@@ -25,12 +19,11 @@ const PHONE: Record<CkbRole, string[]> = {
 const RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plate focus-visible:ring-offset-2 focus-visible:ring-offset-jeir-navy";
 const active = (path: string, href: string) => (href === "/ckb" ? path === "/ckb" : path === href || path.startsWith(`${href}/`));
 
-/** The CKB 3PL mark: its own tile, never the Shell WMS logo. */
+/** The JE-IR logo, the same mark as the Shell sidebar (it is its own navy tile); "CKB 3PL" is written beside it. */
 export function CkbMark({ className }: { className?: string }) {
   return (
-    <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-md bg-jeir-teal font-cond font-bold leading-none text-jeir-navy", className)}>
-      3PL
-    </span>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={BRAND.logo} alt="" width={80} height={80} className={cn("shrink-0 rounded-md", className)} />
   );
 }
 
@@ -43,7 +36,7 @@ function SignOut({ className }: { className?: string }) {
 }
 
 /** CKB 3PL navigation: desktop sidebar, phone bottom bar with a Lainnya sheet (same shape as Shell's). */
-export function CkbNav({ role, name, username, loginRequired }: { role: CkbRole | null; name: string; username: string; loginRequired: boolean }) {
+export function CkbNav({ role, name, username, loginRequired, badges = {} }: { role: CkbRole | null; name: string; username: string; loginRequired: boolean; badges?: Record<string, number> }) {
   const path = usePathname();
   const groups = navFor(role);
   const all = groups.flatMap((g) => g.items);
@@ -55,12 +48,12 @@ export function CkbNav({ role, name, username, loginRequired }: { role: CkbRole 
     <div key={g.title} className="space-y-0.5">
       <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-white/50">{g.title}</div>
       {g.items.map((i) => {
-        const Icon = ICONS[i.icon] ?? Archive;
+        const Icon = CKB_ICONS[i.icon] ?? CKB_FALLBACK_ICON;
         const on = active(path, i.href);
         return (
           <Link key={i.href} href={i.href} onClick={onClick} aria-current={on ? "page" : undefined}
             className={cn("flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm", on ? "bg-ckb-dark font-medium text-jeir-teal" : "text-white/85 hover:bg-ckb-dark")}>
-            <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{i.label}</span>
+            <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{i.label}</span>{!!badges[i.href] && <span className="ml-auto rounded-full bg-warn px-1.5 text-xs font-semibold text-white" aria-label={`${badges[i.href]} perlu perhatian`}>{badges[i.href]}</span>}
           </Link>
         );
       })}
@@ -87,8 +80,8 @@ export function CkbNav({ role, name, username, loginRequired }: { role: CkbRole 
   return (
     <>
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 flex-col bg-jeir-navy bg-jeir-side text-white lg:flex">
-        <Link href="/ckb" aria-label="Dashboard CKB 3PL" className={cn("flex items-center gap-3 px-4 py-5", RING)}>
-          <CkbMark className="h-14 w-14 text-xl" />
+        <Link href="/ckb" aria-label="Beranda CKB 3PL" className={cn("flex items-center gap-3 px-4 py-5", RING)}>
+          <CkbMark className="h-16 w-16" />
           <span className="leading-tight">
             <span className="block font-cond text-2xl font-bold">CKB 3PL</span>
             <span className="inline-block rounded-plate bg-plate px-1.5 font-cond text-xs font-bold text-steel">Warehouse 5</span>
@@ -103,7 +96,7 @@ export function CkbNav({ role, name, username, loginRequired }: { role: CkbRole 
           <nav aria-label="Menu CKB ponsel" className={cn("fixed inset-x-0 bottom-0 flex border-t border-ckb-dark bg-jeir-navy bg-jeir-bar text-white lg:hidden", open ? "pointer-events-auto z-[60]" : "z-30")}
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
             {phone.map((i) => {
-              const Icon = ICONS[i.icon] ?? Archive;
+              const Icon = CKB_ICONS[i.icon] ?? CKB_FALLBACK_ICON;
               return (
                 <Link key={i.href} href={i.href} className={cn("flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] min-[360px]:text-[11px]", active(path, i.href) ? "text-jeir-teal" : "text-white/70")}>
                   <Icon className="h-5 w-5" /><span className="max-w-full truncate px-1">{i.label.split(" ")[0]}</span>

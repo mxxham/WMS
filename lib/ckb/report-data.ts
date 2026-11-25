@@ -2,6 +2,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { stocktakeCompletion, type ReportFilters, type ReportKind, type ReportRow } from "./reports";
+import { HK_STATE, addDays, jakartaToday, type HkState } from "./housekeeping";
 
 /** Upper bound per report: a report larger than this says so instead of silently truncating. */
 export const REPORT_LIMIT = 20000;
@@ -55,6 +56,27 @@ export async function loadReport(kind: ReportKind, f: ReportFilters): Promise<Lo
       rows = tasks.filter((t) => Number(t.count_rounds) > 1);
     }
     return { rows: rows.slice(0, REPORT_LIMIT), truncated: rows.length > REPORT_LIMIT };
+  }
+
+  if (kind === "housekeeping") {
+    // One name-free function (ckb_hk_report); a period over 93 days is cut to its last 93 days and says so.
+    const to = f.to ?? jakartaToday();
+    let from = f.from ?? `${to.slice(0, 8)}01`;
+    let cut = false;
+    if (from > to) from = to;
+    if (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime() > 92 * 86_400_000) { from = addDays(to, -92); cut = true; }
+    const run = (customer: string | null) => fetchAll<ReportRow>((a, b) => db.rpc("ckb_hk_report", { p_customer: customer, p_from: from, p_to: to }).range(a, b));
+    let data: ReportRow[];
+    try { data = await run(f.customer ?? null); }
+    catch (e) {
+      // A representative must name a customer: without a filter take each of theirs.
+      if (f.customer || !/Customer tidak ditemukan/.test((e as Error).message ?? "")) throw e;
+      data = (await Promise.all([...cname.keys()].map((id) => run(id).then((r) => r.map((x) => ({ ...x, customer_id: id })))))).flat();
+    }
+    const label = (s: unknown) => HK_STATE[s as HkState]?.label ?? String(s ?? "");
+    rows = data.map((r) => ({ ...r, status: label(r.state) }));
+    rows = rows.map((r) => ({ ...r, customer_name: r.customer_id ? cname.get(String(r.customer_id)) ?? null : f.customer ? cname.get(f.customer) ?? null : null }));
+    return { rows: rows.slice(0, REPORT_LIMIT), truncated: cut || rows.length > REPORT_LIMIT };
   }
 
   const dated = <Q extends { gte: (c: string, v: string) => Q; lt: (c: string, v: string) => Q }>(q: Q, col: string) => {

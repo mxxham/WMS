@@ -22,6 +22,7 @@ disagree, one of them is a bug.
 | Evidence (photos/PDF), private storage, access logging, legal hold | Working; archival to cheaper storage is a **recorded manual step** (§8) |
 | Rebagging | Pre-existing module (0084–0087), now on CKB roles and customers; **still posts to the Shell ledger on aisles CG/CH** (§9) |
 | Reports (9 kinds, Excel + PDF), dashboard, activity log | Working |
+| Housekeeping: areas and PICs, the daily before/after photo check-in, review, customer view (§12) | Working (phase 1); weekly quality, actions and the 3D heat map are later phases |
 
 ## 2. Access
 
@@ -89,7 +90,11 @@ admins and supervisors (`/ckb/activity`).
 - Refusals instead of guesses: empty quantity (never zero), text quantities with `.`/`,`, negative
   quantities, missing material/unit, ambiguous `dd/mm` dates, batches Excel turned into dates, a
   required column that matches two columns.
-- **Open:** no CKB SAP sample file exists in the repository. The header aliases in
+- **Count profile per customer (0161-0163, 25 Nov 2026; spec `docs/superpowers/specs/2026-11-25-ckb-emcl-stocktake-design.md`):** a customer may have its own SAP
+  column mapping (`ckb_customers.sap_mapping`, else the global one), count by `MATERIAL_BIN` instead of the full identity (lines that differ only by batch become one task, the codes are
+  information, `BATCH_MISMATCH` cannot occur; "never summed silently" still holds for the same full identity twice) and one photo per bin (`photo_scope = 'BIN'`). First customer: Exxon (EMCL),
+  seeded with an unverified mapping for its file. The defaults are unchanged for the six original customers. SQL tests 121-122.
+- **Open:** the first real CKB SAP file (Exxon, `Stock in Bin as of 13 Nov 26`) has been read, but its mapping stays `verified: false` until an admin checks a real import. Other customers still have no sample file. The header aliases in
   `ckb_settings.sap_import` are the SAP titles this repo already reads for Shell plus a storage-bin
   column. `verified` stays `false` until a real CKB file has been read and reconciled; each snapshot
   records the flag, and the UI warns on every page that shows SAP data.
@@ -234,3 +239,80 @@ a Shell rack; a Shell movement may not touch a CKB rack. The WMS import never bo
   `/ckb`, taps "Jadikan saya admin CKB pertama". From then on `/ckb/users`.
 - Before the first stock take: admin checks `Pengaturan → Pemetaan kolom import SAP` against a
   real file, imports the snapshot, activates it.
+
+### 11.1 Home and sign-in (25 Nov 2026)
+
+`/ckb` is the **home** (route group `app/ckb/(home)`, `components/ckb/ckb-home.tsx`), the CKB twin of the Shell Home: the floor photo in navy, the greeting,
+one yellow floor line to the role's first stop (`Buka dashboard`; an operator's is `Mulai hitung`), a board of four counts for the role
+(from `ckb_dashboard`, `ckb_hk_dashboard` and, for a customer, their RLS-filtered records; an unreadable count shows 0 so the home always opens), the
+directory of every page the role may open (`components/ckb/home-copy.ts` holds the one-line blurbs) and the builders band. The **dashboard** moved to
+`/ckb/dashboard` (its own `loading.tsx`; `app/ckb/loading.tsx` is now a neutral fallback). The sidebar has `Beranda` (`/ckb`) above `Dashboard`.
+Signing in with a CKB-only account lands on `/ckb` and the login line continues into it exactly as it does into the Shell `/home`: the login page adds
+`floor-exit` (the line drives off, `Masuk` folds into it), then the home's own line runs in from the left (`login-form.tsx` treats `/home` and `/ckb`
+alike). `requireCkb` still sends a refused page to `/ckb?ditolak=1`, which the home explains. The login page no longer names Shell or any one
+customer (it serves both applications): headline `Gudang CKB, Surabaya.`, plates `Shell WMS` · `CKB 3PL` · `Satu akun`; each field is judged on its own, and a
+Caps Lock hint shows on the password.
+
+**Logo and footer (25 Nov 2026).** The CKB sidebar, the phone header and the home use the JE-IR logo (`BRAND.logo`, as the Shell sidebar does) with "CKB 3PL"
+written beside it; the plain "3PL" tile is gone. Every CKB page ends with `CkbFooter` (`components/ckb/ckb-footer.tsx`, rendered by `app/ckb/layout.tsx`), the
+Shell footer's words: owner, name, credit, the internal-use notice and `Kredit` / `Lisensi` / `Privasi`. A CKB-only account cannot open the Shell's `/lisensi`
+and `/privasi` (the `(app)` layout is Shell-gated), so CKB has its own `/ckb/lisensi` and `/ckb/privasi` (gated by `requireCkb`, open to every CKB role, not in the
+menu); both render the same shared content as the Shell pages (`components/legal/`). `Kredit` goes to the builders band on the CKB home (the Shell's opens its welcome
+screen, which CKB does not have).
+
+## 12. Housekeeping
+
+Spec: `docs/superpowers/specs/2026-11-24-ckb-housekeeping-design.md`. Migrations `0157` (areas, PICs, holidays, leave),
+`0158` (check-ins, photos, day states, customer functions) and `0159` (withdraw a photo, abandon, excuse, report, dashboard,
+badge); SQL tests 117-119, `tests/ckb-housekeeping*.test.ts`. **One page**, `/ckb/housekeeping`, with tabs chosen by role
+(`?tab=`, validated on the server): PIC `Hari ini` and `Riwayat`; supervisor and admin `Rekap` and `Area & PIC` (and `Hari ini`
+when they own racks); a customer has no tabs. One sidebar entry (badge: check-ins awaiting review for a lead, racks not yet
+done today for a PIC, from `ckb_hk_badge()`). Photos: `/api/ckb/housekeeping/photo` (POST) and `.../photo/[id]` (GET, `?raw=1`
+streams the bytes for the photo pack).
+
+- **Area** = a rack (zone + rack number, `CG05`; first fill and `Sinkron rak` read the CKB racks of the Shell `bins` table, the only
+  place housekeeping touches Shell data; `Sinkron rak` only adds) or a manual location. One open **PIC** per area, history kept.
+- **Check-in** = one housekeeping of one area on one working day (Monday-Friday, minus `ckb_hk_holidays`; a PIC's leave in
+  `ckb_hk_absences` is not expected). `STARTED` (before photo) -> `SUBMITTED` (after photo; **counts as done at once**) ->
+  `ACCEPTED` or `REJECTED` by a supervisor who is never the doer; a rejection takes it back and the PIC starts attempt 2.
+- **Late entries**: the PIC may fill a past working day of their own area within `late_window_working_days` (3), flagged
+  `late`; beyond it, or for another person, only a supervisor or admin, on behalf with a reason. Never a future day, a holiday or a leave day.
+- **Photos** live in `ckb_hk_photos` (not `ckb_evidence`: that table stores `uploaded_by_name` and its customer policy would
+  show it), in the same private bucket under `{customer}/HOUSEKEEPING/{check-in}/{uuid}.{ext}`. SHA-256 is unique across all
+  live photos (a file cannot be reused; a withdrawn photo frees its file), server time only, no minimum gap, 1-3 of each kind,
+  kept `photo_retention_days` (180). **A wrong photo** is withdrawn (`ckb_hk_withdraw_photo`, only while the check-in is `STARTED`,
+  by its owner or a lead): the row and the file stay, but it no longer counts, a customer never reaches it, and its file may be used again.
+- **Stuck and excused days (0159)**: a `STARTED` check-in nobody finishes is abandoned (`ckb_hk_abandon` -> `CANCELLED`, owner or lead;
+  the day reads missed again and the next attempt can be a PIC's or a lead's on-behalf). A lead never resumes someone else's started
+  check-in. A day that cannot be done is excused by a lead (`ckb_hk_excuse` -> `EXCUSED`, reason required, `ckb_hk_revoke_excuse` undoes it):
+  it is not expected, like leave, and a customer sees it as not scheduled, never the reason. `ckb_hk_start` takes an advisory lock per
+  area and day; `ckb_hk_grid_core` refuses a range over 93 days. Only a customer's view of a photo is written to the audit log.
+- **Weekly quality (0160, phase 2)**: one shared checklist (`ckb_hk_checklist_items`, admin edits it; a retired item stays on old
+  scores) is rated by a supervisor or admin per rack and Monday-week from that week's photos: `Baik` 2 / `Perlu perbaikan` 1 / `Buruk` 0
+  points over the best possible, whole percent (`ckb_hk_score_week`; the person who holds the rack that week never scores it; a rack with no
+  done check-in that week cannot be scored). A re-score is a new version, scores and lines are append-only, line wording is a snapshot.
+  A **finding** points at one live photo of a done check-in of the rack (`ckb_hk_raise_finding`), the rack's PIC marks it fixed with a note
+  and optionally a later photo (`ckb_hk_fix_finding`), and a lead who neither raised nor fixed it verifies it or sends it back
+  (`ckb_hk_verify_finding`); a lead may cancel with a reason. No write policy on any of the four tables. A customer reads only
+  `ckb_hk_customer_quality` and `ckb_hk_customer_findings` (percentage, item, description, status, dates, photo ids; `VERIFIED` reads as
+  `DONE`, `CANCELLED` is never sent, no person, no fix, verification or send-back note); the description is typed by a lead and is shown with
+  a warning not to write names. Tab `Kualitas` for leads, `Temuan` for PICs, a section on the customer page. SQL test 120, `tests/ckb-housekeeping-quality.test.ts`.
+- **Offline photo queue (phase 3, no migration)**: a photo is shrunk, stored on the phone first (IndexedDB, per signed-in account) and
+  then sent, so poor Wi-Fi, a closed tab or a crash never loses it; it leaves the phone only after the server confirmed it
+  (`lib/ckb/hk-upload-queue.ts` pure rules, `hk-upload-runner.ts` storage and sender, `app/ckb/housekeeping/upload-queue.tsx` banner and
+  hook). It is sent when the page opens, when the signal returns, when the tab comes to the front and every 15 s while something waits;
+  backoff 5 s to 5 min; photos of one check-in go in the order taken. An answer that means "try later" (no signal, 5xx, expired session,
+  a redirect to the login page) keeps the photo; a rule refusal (maximum, wrong state, the same file again) is final and shows its reason with
+  a `Hapus` button. A photo whose answer was lost and is then refused as "same file" counts as sent. Waiting photos count toward the
+  per-kind maximum and block `Kirim` until they are on the server. Only one tab sends at a time (Web Locks). Limit: it sends only while
+  the housekeeping page is open (no service worker). Without IndexedDB (private window) the old direct upload is used.
+  `tests/ckb-hk-upload-queue.test.ts`.
+- **Customer report (0159)**: `housekeeping` in `REPORTS` (Excel and PDF from `/api/ckb/reports`) is one name-free row per rack and day
+  (`ckb_hk_report`); a **photo pack** per rack for a week or a month is built in the browser (`lib/ckb/hk-photo-pack.ts`, jsPDF, one page
+  per done day, at most 31) because a server response is limited to about 4.5 MB. Reminders are in-app only (`Pengingat` list, tiles, badge).
+- **No names for customers (§5.3 of the spec)**: a customer has no policy on any `ckb_hk_*` table; they read only through
+  `ckb_hk_customer_week`, `ckb_hk_compliance`, `ckb_hk_customer_day` and `ckb_hk_photo_open`, which return no PIC, reviewer or
+  on-behalf name. Leave reads as "not scheduled". `ckb_hk_grid_core` carries names and is not callable by the app.
+  SQL test 118 asserts it, `tests/ckb-housekeeping-isolation.test.ts` guards the migrations.
+- **Compliance** = days done / days expected; a day not over counts only once done; nothing expected is `-`, never 100%.
+

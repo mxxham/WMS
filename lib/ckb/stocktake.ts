@@ -89,6 +89,26 @@ export function countOpen(session: StocktakeStatus, task: TaskStatus): boolean {
  * Parse a quantity typed on the phone. Empty is "not counted", never zero. The decimal separator
  * is a comma only: "1.234" means one thousand in Indonesian and 1.234 in English, so a dot is refused.
  */
+/**
+ * The tag a stock type earns on a count line: HOLD and CAP stand out, a normal stock type (INV) or none shows nothing.
+ * SAP's own codes are shown as they are; their meaning is the customer's (EMCL: INV, HOLD, CAP).
+ */
+export function stockTypeTag(code: string | null | undefined): string | null {
+  const c = (code ?? "").trim().toUpperCase();
+  return c === "" || c === "INV" ? null : c;
+}
+
+/**
+ * The batch part of a line's description on the review and discrepancy screens. A task merged from several SAP batch codes (0162) shows
+ * the codes, with what SAP holds per code where the viewer may see the baseline; any other task shows its one batch and expiry as before.
+ */
+export function batchText(t: { batch: string; expiry_date: string | null; batch_codes?: string[] | null; batch_detail?: { batch: string; qty: number }[] | null },
+  fmt: (iso: string) => string): string {
+  if (t.batch_detail?.length) return `kode batch: ${t.batch_detail.map((x) => `${x.batch || "tanpa kode"} (${x.qty})`).join(", ")}`;
+  if (t.batch_codes?.length) return `kode batch: ${t.batch_codes.join(", ")}`;
+  return `${t.batch || "tanpa batch"}${t.expiry_date ? ` · exp ${fmt(t.expiry_date)}` : ""}`;
+}
+
 export function parseCountInput(raw: string): { qty: number } | { error: string } | null {
   const s = raw.trim();
   if (s === "") return null;

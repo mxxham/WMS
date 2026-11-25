@@ -39,6 +39,7 @@ export const CKB_ROUTES: { prefix: string; roles: CkbRole[] }[] = [
   { prefix: "/ckb/stock-take/*/review", roles: LEAD },
   { prefix: "/ckb/stock-take/*/export", roles: LEAD },
   { prefix: "/ckb/stock-take", roles: ALL },
+  { prefix: "/ckb/housekeeping", roles: ALL },
   { prefix: "/ckb/rebagging", roles: STAFF },
   { prefix: "/ckb/inspections/new", roles: STAFF },
   { prefix: "/ckb/inspections", roles: ALL },
@@ -52,6 +53,9 @@ export const CKB_ROUTES: { prefix: string; roles: CkbRole[] }[] = [
   { prefix: "/ckb/customers", roles: LEAD },
   { prefix: "/ckb/users", roles: ["admin"] },
   { prefix: "/ckb/settings", roles: ["admin"] },
+  { prefix: "/ckb/dashboard", roles: ALL },
+  { prefix: "/ckb/lisensi", roles: ALL },
+  { prefix: "/ckb/privasi", roles: ALL },
   { prefix: "/ckb", roles: ALL },
 ];
 
@@ -74,10 +78,12 @@ export function canAccess(role: CkbRole | null | undefined, path: string): boole
 export type CkbNavItem = { href: string; label: string; icon: string };
 export const CKB_NAV: { title: string; items: CkbNavItem[] }[] = [
   { title: "Ringkasan", items: [
-    { href: "/ckb", label: "Dashboard", icon: "dashboard" },
+    { href: "/ckb", label: "Beranda", icon: "home" },
+    { href: "/ckb/dashboard", label: "Dashboard", icon: "dashboard" },
   ] },
   { title: "Operasional gudang", items: [
     { href: "/ckb/count", label: "Hitung saya", icon: "count" },
+    { href: "/ckb/housekeeping", label: "Housekeeping", icon: "housekeeping" },
     { href: "/ckb/rebagging", label: "Rebagging", icon: "rebag" },
     { href: "/ckb/inspections", label: "Inspeksi kargo", icon: "inspect" },
     { href: "/ckb/stock-take", label: "Stock take & hitung ulang", icon: "count" },

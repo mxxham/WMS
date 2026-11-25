@@ -19,7 +19,7 @@ export function CkbHeader({ title, subtitle, back, live, children }: {
       )}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/ckb" aria-label="Dashboard CKB 3PL" className="rounded-md lg:hidden"><CkbMark className="h-9 w-9 text-xs" /></Link>
+          <Link href="/ckb" aria-label="Beranda CKB 3PL" className="rounded-md lg:hidden"><CkbMark className="h-10 w-10" /></Link>
           <div className="min-w-0">
             <div className="flex items-baseline gap-3">
               <h1 className="truncate font-cond text-2xl font-semibold">{title}</h1>

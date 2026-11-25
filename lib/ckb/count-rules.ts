@@ -4,13 +4,19 @@
  */
 
 export function photoReason(t: { origin: string; round: number }, qty: number | null,
-  opts: { photoRules: boolean; customerAlways: boolean }): string | null {
+  opts: { photoRules: boolean; customerAlways: boolean; photoScope?: "TASK" | "BIN" }): string | null {
   if (!opts.photoRules || qty === null) return null;
   if (qty === 0) return "hitungan 0";
   if (t.origin === "FOUND") return "barang temuan";
   if (t.round > 1) return "hitungan ulang";
-  if (opts.customerAlways) return "wajib untuk pelanggan ini";
+  // a bin-photo customer (0161) has its own rule: the bin photo, not a photo on every count
+  if (opts.customerAlways && opts.photoScope !== "BIN") return "wajib untuk pelanggan ini";
   return null;
+}
+
+/** Mirrors SQL ckb_bin_photo_missing (0163): this bin still needs its photo before any of its lines can be counted. */
+export function binPhotoNeeded(opts: { photoRules: boolean; photoScope: "TASK" | "BIN" }, binPhotos: number): boolean {
+  return opts.photoRules && opts.photoScope === "BIN" && binPhotos === 0;
 }
 
 /** The aisle / area a location belongs to: the code before its last run of digits (SIP-15 → SIP-). */

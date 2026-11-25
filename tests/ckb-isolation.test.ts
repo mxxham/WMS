@@ -73,10 +73,10 @@ test('0106 copies the rebagging functions verbatim: only the role check differs 
   assert.equal(compared, 7);
 });
 
-test('every CKB page gates itself (requireCkb), except the layout-handled dashboard', () => {
+test('every CKB page gates itself (requireCkb), except the layout-handled home and dashboard', () => {
   for (const f of walk('app/ckb').filter((p) => p.endsWith('page.tsx'))) {
     const s = src(f);
-    if (f === join('app', 'ckb', 'page.tsx')) { assert.ok(s.includes('getCkbUser') && s.includes('isStaff'), 'dashboard must check the CKB role'); continue; }
+    if (f === join('app', 'ckb', 'dashboard', 'page.tsx') || f === join('app', 'ckb', '(home)', 'page.tsx')) { assert.ok(s.includes('getCkbUser') && s.includes('isStaff'), `${f} must check the CKB role`); continue; }
     assert.ok(s.includes('requireCkb('), `${f} has no requireCkb gate`);
   }
 });
@@ -99,7 +99,8 @@ test('the service-role client is never imported by client code', () => {
 
 test('every navigation item has a page', () => {
   for (const g of CKB_NAV) for (const i of g.items) {
-    const page = join('app', ...i.href.split('/').filter(Boolean), 'page.tsx');
+    // /ckb is the home, in the (home) route group (it carries its own loading skeleton without touching the other pages).
+    const page = i.href === '/ckb' ? join('app', 'ckb', '(home)', 'page.tsx') : join('app', ...i.href.split('/').filter(Boolean), 'page.tsx');
     assert.ok(existsSync(page), `${i.href} has no ${page}`);
   }
 });

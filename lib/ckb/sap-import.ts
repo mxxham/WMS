@@ -69,10 +69,50 @@ export type SnapshotParse = {
 const HEADER_SCAN_ROWS = 30;
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
-/** The same identity spelling as public.ckb_identity_key (migration 0100). */
-export function identityKey(r: Pick<SnapshotRow, "material_code" | "plant" | "storage_location" | "storage_bin" | "batch" | "expiry_date" | "uom" | "stock_type">): string {
+/**
+ * How a customer's lines become count tasks (customers.count_identity, 0161):
+ * FULL = material, plant, sloc, bin, batch, expiry, unit, stock type (the default);
+ * MATERIAL_BIN = the same without batch and expiry, so SAP lines that differ only by batch are one task.
+ */
+export type CountIdentity = "FULL" | "MATERIAL_BIN";
+
+type KeyRow = Pick<SnapshotRow, "material_code" | "plant" | "storage_location" | "storage_bin" | "batch" | "expiry_date" | "uom" | "stock_type">;
+
+/** The same identity spelling as public.ckb_identity_key (migration 0100). With MATERIAL_BIN batch and expiry are left out, as 0162 does when it builds the tasks. */
+export function identityKey(r: KeyRow, mode: CountIdentity = "FULL"): string {
   const u = (s: string) => s.trim().toUpperCase();
-  return [u(r.material_code), u(r.plant), u(r.storage_location), u(r.storage_bin), u(r.batch), r.expiry_date ?? "", u(r.uom), u(r.stock_type)].join("|");
+  const full = mode === "FULL";
+  return [u(r.material_code), u(r.plant), u(r.storage_location), u(r.storage_bin), full ? u(r.batch) : "", full ? (r.expiry_date ?? "") : "", u(r.uom), u(r.stock_type)].join("|");
+}
+
+export type MergePlan = {
+  /** lines read from the file */
+  lines: number;
+  /** count tasks the session would have */
+  tasks: number;
+  /** lines folded into another line's task (lines - tasks) */
+  merged: number;
+  /** tasks that hold more than one line */
+  mergedTasks: number;
+  /** tasks where the SAME full identity appears twice (kept and flagged AMBIGUOUS, never summed silently) */
+  duplicateTasks: number;
+};
+
+/** What creating a session would make of these lines under a count identity; mirrors the grouping in ckb_create_stocktake (0162). */
+export function mergePlan(rows: readonly KeyRow[], mode: CountIdentity): MergePlan {
+  const groups = new Map<string, { lines: number; full: Set<string> }>();
+  for (const r of rows) {
+    const k = identityKey(r, mode);
+    const g = groups.get(k) ?? { lines: 0, full: new Set<string>() };
+    g.lines++; g.full.add(identityKey(r, "FULL"));
+    groups.set(k, g);
+  }
+  const all = [...groups.values()];
+  return {
+    lines: rows.length, tasks: groups.size, merged: rows.length - groups.size,
+    mergedTasks: all.filter((g) => g.lines > 1).length,
+    duplicateTasks: all.filter((g) => g.lines > g.full.size).length,
+  };
 }
 
 /** Find the header row: the first of the top rows where every required field matches a column. */

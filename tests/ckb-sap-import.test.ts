@@ -5,7 +5,7 @@
  */
 import { strict as assert } from 'node:assert';
 import * as XLSX from 'xlsx';
-import { parseSapSnapshot, parseQuantity, parseExpiry, identityKey, totalQty, type SapMapping } from '../lib/ckb/sap-import';
+import { parseSapSnapshot, parseQuantity, parseExpiry, identityKey, mergePlan, totalQty, type SapMapping } from '../lib/ckb/sap-import';
 import { readSheet } from '../lib/read-sheet';
 
 let passed = 0, failed = 0;
@@ -127,6 +127,45 @@ test('a real workbook round trip through SheetJS (cellDates false) and readSheet
   assert.equal(p.rows.length, 1);
   assert.equal(p.rows[0].expiry_date, '2027-03-31');
   assert.equal(p.rows[0].quantity, 2.5);
+});
+
+// ---- count identity (0161): Exxon (EMCL) counts by material and bin, batch codes are information
+const EMCL_MAP: SapMapping = {
+  material_code: ['material'], description: ['material description'], plant: ['plant', 'id1'], storage_bin: ['storage bin', 'storage bi'],
+  batch: ['batch'], uom: ['bun'], quantity: ['total stoc'], stock_type: ['mtyp'],
+};
+const EMCL_HEAD = ['ID1', 'MTyp', 'Storage Bi', 'Material', 'Material Description', 'Batch', 'Total Stoc', 'BUn'];
+const EMCL_ROWS: unknown[][] = [
+  ['ID1', 'HOLD', 'CML-L-FLR', 4015743, 'MOBIL DTE 10 EXCEL 32', 'FC1PMCL01', 2, 'PL'],
+  ['ID1', 'HOLD', 'CML-L-FLR', 4015743, 'MOBIL DTE 10 EXCEL 32', 'FC2PMCL01', 5, 'PL'],
+  ['ID1', 'HOLD', 'CML-L-FLR', 4015743, 'MOBIL DTE 10 EXCEL 32', 'FC3PMCL01', 2, 'PL'],
+  ['ID1', 'INV', 'CML-YARD', 686277, 'OIL;TELLUS S2 M 68', 'FC-PMCL01', 8, 'DRM'],
+  ['ID1', 'INV', 'CML-H-FLR', 686277, 'OIL;TELLUS S2 M 68', 'FC1PMCL01', 3, 'DRM'],
+  ['ID1', 'CAP', 'CML-FHYARD', 1573008, 'VALVE;CTRL;BAL', 'FC-PMCL01', 1, 'EA'],
+  ['ID1', 'HOLD', 'CML-P-FLR', 4041727, 'COOLANT', 'FC1PMCL01', 30, 'EA'],
+  ['ID1', 'HOLD', 'CML-P-FLR', 4041727, 'COOLANT', 'FC1PMCL01', 4, 'EA'],   // the same batch twice: a true duplicate
+];
+const emcl = parseSapSnapshot([EMCL_HEAD, ...EMCL_ROWS], lines(EMCL_ROWS.length + 1), EMCL_MAP);
+
+test('the global mapping refuses the EMCL file (short SAP titles), the EMCL mapping reads every row', () => {
+  assert.ok(parse([EMCL_HEAD, ...EMCL_ROWS]).fileErrors.length > 0);
+  assert.deepEqual(emcl.fileErrors, []);
+  assert.equal(emcl.rows.length, 8);
+  assert.equal(emcl.rows[0].plant, 'ID1'); assert.equal(emcl.rows[0].stock_type, 'HOLD'); assert.equal(emcl.rows[0].storage_bin, 'CML-L-FLR');
+});
+
+test('identity: FULL keeps batch and expiry, MATERIAL_BIN leaves them out and keeps the stock type', () => {
+  const [a, b] = emcl.rows;
+  assert.notEqual(identityKey(a), identityKey(b));
+  assert.equal(identityKey(a, 'MATERIAL_BIN'), identityKey(b, 'MATERIAL_BIN'));
+  assert.notEqual(identityKey(a, 'MATERIAL_BIN'), identityKey({ ...a, stock_type: 'INV' }, 'MATERIAL_BIN'), 'HOLD and INV stay apart');
+  assert.equal(identityKey(a), identityKey(a, 'FULL'));
+});
+
+test('merge plan: batch codes fold into one task per material and bin; a true duplicate is still flagged, never summed silently', () => {
+  assert.deepEqual(mergePlan(emcl.rows, 'MATERIAL_BIN'), { lines: 8, tasks: 5, merged: 3, mergedTasks: 2, duplicateTasks: 1 });
+  assert.deepEqual(mergePlan(emcl.rows, 'FULL'), { lines: 8, tasks: 7, merged: 1, mergedTasks: 1, duplicateTasks: 1 });
+  assert.deepEqual(mergePlan([], 'MATERIAL_BIN'), { lines: 0, tasks: 0, merged: 0, mergedTasks: 0, duplicateTasks: 0 });
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

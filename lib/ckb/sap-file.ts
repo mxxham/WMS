@@ -2,13 +2,33 @@ import "server-only";
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 import { readSheet } from "@/lib/read-sheet";
-import { parseSapSnapshot, type SapMapping, type SnapshotParse } from "./sap-import";
+import { parseSapSnapshot, type CountIdentity, type SapMapping, type SnapshotParse } from "./sap-import";
 
 /** Vercel caps a request body at 4.5 MB; the same limit locally keeps behaviour identical. */
 export const MAX_SAP_FILE_BYTES = 4_400_000;
 const ALLOWED_EXT = /\.(xlsx|xls|csv)$/i;
 
 export type SapFileRead = SnapshotParse & { sheet: string | null; sheets: string[]; sha256: string; size: number; name: string };
+
+type Db = { from: (t: string) => any; rpc: (fn: string, args?: Record<string, unknown>) => any };
+
+export type CountContext = { mapping: SapMapping; verified: boolean; source: "CUSTOMER" | "GLOBAL"; identity: CountIdentity };
+
+/**
+ * The mapping and count identity that apply to a customer's file (0161): its own mapping when it has one, else the global one.
+ * The mapping comes from ckb_sap_mapping_for, the same function the import RPC uses, so the preview and the stored snapshot agree.
+ */
+export async function loadCountContext(db: Db, customerId: string | null): Promise<CountContext> {
+  const own = customerId ? (await db.from("ckb_customers").select("count_identity, sap_mapping").eq("id", customerId).maybeSingle()).data as { count_identity?: string; sap_mapping?: unknown } | null : null;
+  const raw = customerId
+    ? (await db.rpc("ckb_sap_mapping_for", { p_customer: customerId })).data
+    : (await db.from("ckb_settings").select("value").eq("key", "sap_import").single()).data?.value;
+  const m = (raw ?? {}) as { columns?: SapMapping; verified?: boolean };
+  return {
+    mapping: (m.columns ?? {}) as SapMapping, verified: m.verified === true,
+    source: own?.sap_mapping ? "CUSTOMER" : "GLOBAL", identity: own?.count_identity === "MATERIAL_BIN" ? "MATERIAL_BIN" : "FULL",
+  };
+}
 
 /** Validate the upload itself before reading it. null when acceptable. */
 export function sapUploadError(file: File | null): string | null {

@@ -5,7 +5,7 @@
  * against public.ckb_classify, so the screen and the database cannot drift apart unnoticed.
  */
 import { strict as assert } from 'node:assert';
-import { classify, variance, reviewActions, countOpen, parseCountInput } from '../lib/ckb/stocktake';
+import { classify, variance, reviewActions, countOpen, parseCountInput, stockTypeTag, batchText } from '../lib/ckb/stocktake';
 import { checklistError, keyFromLabel, submitProblems, inspectionResult, type ChecklistItem } from '../lib/ckb/inspection';
 import { sniffMime, evidenceFileError, evidencePath } from '../lib/ckb/evidence';
 import { reportSummary, stocktakeCompletion, cellText, reportsFor } from '../lib/ckb/reports';
@@ -144,7 +144,7 @@ test('stock take completion is derived from task rows', () => {
 });
 
 test('representatives get only customer-facing reports', () => {
-  assert.deepEqual(reportsFor('customer').sort(), ['adjustments', 'discrepancies', 'inspections', 'rebagging', 'recounts', 'stocktakes']);
+  assert.deepEqual(reportsFor('customer').sort(), ['adjustments', 'discrepancies', 'housekeeping', 'inspections', 'rebagging', 'recounts', 'stocktakes']);
   assert.ok(reportsFor('supervisor').includes('activity') && reportsFor('supervisor').includes('sap_exports'));
   assert.deepEqual(reportsFor('operator'), []);
   assert.equal(cellText(true), 'Ya');
@@ -166,6 +166,19 @@ test('export sheet: rows in line order, totals from the lines, unverified format
   assert.match(notice, /EKSPOR ULANG dari EXP0: hilang/);
   assert.match(notice, /BELUM format unggah SAP/);
   assert.match(notice, /bukan bukti posting SAP/);
+});
+
+test('batch text: a merged task lists its codes (with SAP quantities only where the viewer may see them); any other task keeps batch and expiry', () => {
+  const fmt = (iso: string) => iso.slice(0, 4);
+  assert.equal(batchText({ batch: '', expiry_date: null, batch_codes: ['FC1', 'FC2'], batch_detail: [{ batch: 'FC1', qty: 2 }, { batch: 'FC2', qty: 5 }] }, fmt), 'kode batch: FC1 (2), FC2 (5)');
+  assert.equal(batchText({ batch: '', expiry_date: null, batch_codes: ['FC1', 'FC2'], batch_detail: null }, fmt), 'kode batch: FC1, FC2');
+  assert.equal(batchText({ batch: 'B1', expiry_date: '2027-03-31', batch_codes: null, batch_detail: null }, fmt), 'B1 · exp 2027');
+  assert.equal(batchText({ batch: '', expiry_date: null }, fmt), 'tanpa batch');
+});
+
+test('stock type tag: HOLD and CAP stand out, INV and an empty type show nothing', () => {
+  assert.equal(stockTypeTag('HOLD'), 'HOLD'); assert.equal(stockTypeTag(' cap '), 'CAP');
+  assert.equal(stockTypeTag('INV'), null); assert.equal(stockTypeTag('inv'), null); assert.equal(stockTypeTag(''), null); assert.equal(stockTypeTag(null), null);
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

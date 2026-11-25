@@ -44,6 +44,8 @@ export type TaskRow = {
   latest_counted_at: string | null; latest_batch_ok: boolean | null; latest_expiry_ok: boolean | null; accepted_qty: number | null;
   variance: number | null; classification: string; wrong_bin_hint: boolean | null; decision_reason: string | null;
   decided_by_name: string | null; decided_at: string | null;
+  /** 0162, a task merged from several SAP batch codes: the codes (everybody) and what SAP holds per code (only where the baseline is shown) */
+  batch_codes: string[] | null; batch_detail: { batch: string; expiry: string | null; qty: number }[] | null;
 };
 
 /** The session header (RLS: staff, or a representative once CLOSED) — null when not visible. */

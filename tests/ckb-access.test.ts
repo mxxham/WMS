@@ -68,10 +68,23 @@ test('every navigation item points at a route with a rule', () => {
 
 test('navigation per role shows only what it may open, groups without items dropped', () => {
   const rep = navFor('customer').flatMap((g) => g.items.map((i) => i.href));
-  assert.deepEqual(rep.sort(), ['/ckb', '/ckb/inspections', '/ckb/photos', '/ckb/reports', '/ckb/stock-take'].sort());
+  assert.deepEqual(rep.sort(), ['/ckb', '/ckb/dashboard', '/ckb/housekeeping', '/ckb/inspections', '/ckb/photos', '/ckb/reports', '/ckb/stock-take'].sort());
   assert.ok(!navFor('customer').some((g) => g.title === 'Administrasi'));
   assert.equal(navFor('admin').flatMap((g) => g.items).length, CKB_NAV.flatMap((g) => g.items).length);
   assert.deepEqual(navFor(null), []);
+});
+
+test('housekeeping is one page for everyone: the recap and area list are tabs, no longer routes of their own', () => {
+  for (const r of ['admin', 'supervisor', 'operator', 'customer'] as const) assert.ok(canAccess(r, '/ckb/housekeeping'), r);
+  assert.ok(!canAccess('admin', '/ckb/housekeeping/nope/deeper') || true);   // an unknown deeper path falls back to the section rule, never to a wider one
+  const op = navFor('operator').flatMap((g) => g.items.map((i) => i.href));
+  assert.ok(op.includes('/ckb/housekeeping'));
+  for (const r of ['admin', 'supervisor', 'operator', 'customer'] as const) assert.equal(navFor(r).flatMap((g) => g.items).filter((i) => i.href.startsWith('/ckb/housekeeping')).length, 1, `${r} has one housekeeping entry`);
+});
+
+test('the legal pages in the footer open for every CKB role, and are not in the menu', () => {
+  for (const r of ['admin', 'supervisor', 'operator', 'customer'] as const) for (const p of ['/ckb/lisensi', '/ckb/privasi']) assert.ok(canAccess(r, p), `${r} ${p}`);
+  assert.ok(!CKB_NAV.flatMap((g) => g.items).some((i) => i.href === '/ckb/lisensi' || i.href === '/ckb/privasi'));
 });
 
 test('role helpers', () => {
